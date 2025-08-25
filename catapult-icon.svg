@@ -1,0 +1,39 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#2c3e50" stroke="#34495e" stroke-width="2"/>
+  
+  <!-- Catapult base -->
+  <rect x="20" y="90" width="88" height="8" rx="2" fill="#8b4513"/>
+  <rect x="25" y="85" width="78" height="4" rx="1" fill="#a0522d"/>
+  
+  <!-- Catapult arm -->
+  <line x1="64" y1="88" x2="48" y2="35" stroke="#654321" stroke-width="4" stroke-linecap="round"/>
+  
+  <!-- Catapult bucket -->
+  <path d="M 45 30 Q 48 25 51 30 L 49 35 Q 48 38 47 35 Z" fill="#8b4513"/>
+  
+  <!-- Security shield -->
+  <path d="M 75 25 L 85 30 L 95 25 L 95 45 Q 95 55 85 60 Q 75 55 75 45 Z" fill="#3498db" stroke="#2980b9" stroke-width="1"/>
+  <path d="M 80 35 L 83 40 L 90 32" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  
+  <!-- C++ text -->
+  <text x="64" y="108" text-anchor="middle" font-family="monospace" font-size="14" font-weight="bold" fill="#ecf0f1">C++</text>
+  
+  <!-- Projectile/token -->
+  <circle cx="42" cy="28" r="3" fill="#e74c3c"/>
+  <circle cx="40" cy="25" r="2" fill="#c0392b"/>
+  
+  <!-- Decorative gear (security/engineering theme) -->
+  <g transform="translate(25,45)">
+    <circle cx="0" cy="0" r="8" fill="#95a5a6"/>
+    <circle cx="0" cy="0" r="5" fill="#7f8c8d"/>
+    <path d="M -2,-8 L 2,-8 L 2,-10 L -2,-10 Z" fill="#95a5a6"/>
+    <path d="M 8,-2 L 8,2 L 10,2 L 10,-2 Z" fill="#95a5a6"/>
+    <path d="M 2,8 L -2,8 L -2,10 L 2,10 Z" fill="#95a5a6"/>
+    <path d="M -8,2 L -8,-2 L -10,-2 L -10,2 Z" fill="#95a5a6"/>
+  </g>
+  
+  <!-- Small security lock -->
+  <rect x="100" y="70" width="8" height="10" rx="1" fill="#34495e"/>
+  <path d="M 102 70 L 102 67 Q 102 64 104 64 Q 106 64 106 67 L 106 70" stroke="#34495e" stroke-width="1.5" fill="none"/>
+</svg>
