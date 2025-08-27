@@ -7,25 +7,25 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(ENABLE_LOGGING "Enable logging with spdlog" ON)
 
 # Dependency management
-find_package(PkgConfig REQUIRED)
 find_package(OpenSSL REQUIRED)
-find_package(nlohmann_json REQUIRED)
-# Check for libcbor
-pkg_check_modules(CBOR REQUIRED libcbor)
-link_directories(${CBOR_LIBRARY_DIRS})
+
+# Add submodules
+add_subdirectory(external/libcbor)
+add_subdirectory(external/nlohmann_json)
 
 # Include directories
 include_directories(include)
-include_directories(${CBOR_INCLUDE_DIRS})
 
 # Create library
 add_library(catapult STATIC
     src/cat_base64.cpp
+    src/cat_error.cpp
+    src/cat_trie.cpp
 )
 
 # Link libraries
 target_link_libraries(catapult 
-    ${CBOR_LIBRARIES}
+    cbor
     OpenSSL::SSL 
     OpenSSL::Crypto
     nlohmann_json::nlohmann_json
@@ -35,11 +35,8 @@ target_link_libraries(catapult
 if(ENABLE_LOGGING)
     target_link_libraries(catapult spdlog::spdlog)
 endif()
-target_link_directories(catapult PRIVATE ${CBOR_LIBRARY_DIRS})
-
 # Set compiler flags with enhanced security and warnings
-target_compile_options(catapult PRIVATE 
-    ${CBOR_CFLAGS_OTHER}
+target_compile_options(catapult PRIVATE
     # Enhanced warning flags for better code quality
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wconversion -Wsign-conversion>
@@ -79,6 +76,8 @@ endif()
 # Create test executable
 add_executable(catapult_tests
     tests/test_base64.cpp
+    tests/test_trie.cpp
+    tests/test_memory_pool.cpp
 )
 
 target_link_libraries(catapult_tests 
@@ -100,6 +99,8 @@ add_test(NAME catapult_unit_tests COMMAND catapult_tests)
 if(benchmark_FOUND)
     add_executable(catapult_benchmarks
         benchmarks/base64_bench.cpp
+        benchmarks/trie_bench.cpp
+        benchmarks/memory_pool_bench.cpp
     )
     
     target_link_libraries(catapult_benchmarks

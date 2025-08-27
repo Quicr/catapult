@@ -98,7 +98,7 @@ TEST_CASE("Base64UrlEncode - Use std::aray") {
     std::string encoded = base64UrlEncode(arr);
     CHECK(encoded == "TWFu");
     
-    // Test with vector (should also work with concept)
+    // Test with vector
     std::vector<uint8_t> vec = {0x4d, 0x61, 0x6e};
     std::string encoded2 = base64UrlEncode(vec);
     CHECK(encoded2 == "TWFu");
