@@ -1,5 +1,5 @@
 #include <benchmark/benchmark.h>
-#include "catapult/cat_base64.hpp"
+#include "catapult/base64.hpp"
 #include <vector>
 #include <string>
 #include <random>

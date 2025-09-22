@@ -37,8 +37,7 @@ std::string base64UrlEncodeImpl(std::span<const uint8_t> data) {
 }
 
 std::vector<uint8_t> base64UrlDecode(std::string_view encoded) {
-  // Create decode lookup table for performance (static to avoid repeated
-  // initialization)
+  // Create decode lookup table for performance
   static const std::array<int8_t, 256> decode_table = []() {
     std::array<int8_t, 256> table{};
     // Initialize all to -1 (invalid)

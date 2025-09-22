@@ -1,5 +1,5 @@
 #include <doctest/doctest.h>
-#include "catapult/cat_trie.hpp"
+#include "catapult/trie.hpp"
 
 using namespace catapult;
 
@@ -12,23 +12,23 @@ TEST_CASE("TrieNode Basic Operations") {
     }
     
     SUBCASE("Set and Get Child") {
-        TrieNode node;
-        auto child = std::make_unique<TrieNode>();
+        auto node = createTrieNode();
+        auto child = createTrieNode();
         child->isTerminal = true;
         child->value = "test";
         
-        node.setChild('a', std::move(child));
+        node->setChild('a', std::move(child));
         
-        TrieNode* retrieved = node.getChild('a');
+        TrieNode* retrieved = node->getChild('a');
         REQUIRE(retrieved != nullptr);
         CHECK(retrieved->isTerminal);
         CHECK(retrieved->value == "test");
-        CHECK(node.hasChildren());
+        CHECK(node->hasChildren());
     }
     
     SUBCASE("Remove Child") {
         TrieNode node;
-        node.setChild('b', std::make_unique<TrieNode>());
+        node.setChild('b', createTrieNode());
         CHECK(node.hasChildren());
         
         auto removed = node.removeChild('b');
@@ -39,9 +39,9 @@ TEST_CASE("TrieNode Basic Operations") {
     
     SUBCASE("Get Child Characters") {
         TrieNode node;
-        node.setChild('a', std::make_unique<TrieNode>());
-        node.setChild('z', std::make_unique<TrieNode>());
-        node.setChild('m', std::make_unique<TrieNode>());
+        node.setChild('a', createTrieNode());
+        node.setChild('z', createTrieNode());
+        node.setChild('m', createTrieNode());
         
         auto chars = node.getChildChars();
         CHECK(chars.size() == 3);
@@ -57,7 +57,7 @@ TEST_CASE("TrieNode Basic Operations") {
         std::vector<unsigned char> testBytes = {0, 127, 128, 255, 65, 97};
         
         for (unsigned char byte : testBytes) {
-            node.setChild(static_cast<char>(byte), std::make_unique<TrieNode>());
+            node.setChild(static_cast<char>(byte), createTrieNode());
             CHECK(node.getChild(static_cast<char>(byte)) != nullptr);
         }
         

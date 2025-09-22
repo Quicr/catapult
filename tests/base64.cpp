@@ -1,6 +1,5 @@
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
-#include "catapult/cat_base64.hpp"
+#include "catapult/base64.hpp"
 #include <array>
 #include <numeric>
 
