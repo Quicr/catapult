@@ -1,6 +1,6 @@
 # Common Access Token (CAT) Implementation Makefile
 
-.PHONY: all build test clean install help lint check docs configure format lint bench 
+.PHONY: all build test clean install help lint check docs configure format lint bench examples 
 
 # Default target
 all: build
@@ -26,8 +26,8 @@ install: build
 	cd $(BUILD_DIR) && make install
 
 bench: build
-	@if [ -f $(BUILD_DIR)/cat_benchmarks ]; then \
-		$(BUILD_DIR)/cat_benchmarks; \
+	@if [ -f $(BUILD_DIR)/catapult_benchmarks ]; then \
+		$(BUILD_DIR)/catapult_benchmarks; \
 	else \
 		echo "C++ benchmarks not available. Install Google Benchmark to enable."; \
 	fi
@@ -72,7 +72,6 @@ help:
 	@echo "  bench       - Run benchmarks (if available)"
 	@echo "  format      - Format C++ code with clang-format"
 	@echo "  lint        - Lint C++ code with clang-tidy"
-	@echo "  memory-test - Run memory leak tests with Valgrind"
 	@echo "  package     - Create distribution packages"
 	@echo "  docs        - Generate API documentation with Doxygen"
 	@echo "  help        - Show this help message"

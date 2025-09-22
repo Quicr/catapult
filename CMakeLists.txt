@@ -18,9 +18,19 @@ include_directories(include)
 
 # Create library
 add_library(catapult STATIC
-    src/cat_base64.cpp
-    src/cat_error.cpp
-    src/cat_trie.cpp
+    src/base64.cpp
+    src/claims.cpp
+    src/composite.cpp
+    src/crypto.cpp
+    src/cwt.cpp
+    src/dpop.cpp
+    src/error.cpp
+    src/json_serialization.cpp
+    src/moqt_claims.cpp
+    src/token.cpp
+    src/trie.cpp
+    src/uri.cpp
+    src/validator.cpp
 )
 
 # Link libraries
@@ -75,9 +85,21 @@ endif()
 
 # Create test executable
 add_executable(catapult_tests
-    tests/test_base64.cpp
-    tests/test_trie.cpp
-    tests/test_memory_pool.cpp
+    tests/main.cpp
+    tests/base64.cpp
+    tests/claims.cpp
+    tests/composite_claims.cpp
+    tests/crypto.cpp
+    tests/cwt.cpp
+    tests/cwt_encode_decode.cpp
+    tests/integration.cpp
+    tests/memory_pool.cpp
+    tests/moqt_claims.cpp
+    tests/secure_vector.cpp
+    tests/token.cpp
+    tests/token_factory.cpp
+    tests/trie.cpp
+    tests/validator.cpp
 )
 
 target_link_libraries(catapult_tests 
@@ -101,6 +123,8 @@ if(benchmark_FOUND)
         benchmarks/base64_bench.cpp
         benchmarks/trie_bench.cpp
         benchmarks/memory_pool_bench.cpp
+        benchmarks/secure_vector_bench.cpp
+        benchmarks/cbor_bench.cpp
     )
     
     target_link_libraries(catapult_benchmarks
@@ -113,3 +137,24 @@ if(benchmark_FOUND)
     # add_test(NAME catapult_benchmarks COMMAND catapult_benchmarks)
 endif()
 
+# Create example executables
+add_executable(moqt_dpop_example examples/moqt_dpop_example.cpp)
+target_link_libraries(moqt_dpop_example catapult)
+
+add_executable(moqt_dpop_simple_example examples/moqt_dpop_simple_example.cpp)
+target_link_libraries(moqt_dpop_simple_example catapult)
+
+add_executable(compile_time_action_set_example examples/compile_time_action_set_example.cpp)
+target_link_libraries(compile_time_action_set_example catapult)
+
+add_executable(moqt_composite_claims_example examples/moqt_composite_claims_example.cpp)
+target_link_libraries(moqt_composite_claims_example catapult)
+
+add_executable(test_removebatch examples/test_removebatch.cpp)
+target_link_libraries(test_removebatch catapult)
+
+add_executable(advanced_composite_claims_example examples/advanced_composite_claims_example.cpp)
+target_link_libraries(advanced_composite_claims_example catapult)
+
+add_executable(cat_token_json_example examples/cat_token_json_example.cpp)
+target_link_libraries(cat_token_json_example catapult)
