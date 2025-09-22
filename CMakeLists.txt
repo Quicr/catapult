@@ -137,24 +137,3 @@ if(benchmark_FOUND)
     # add_test(NAME catapult_benchmarks COMMAND catapult_benchmarks)
 endif()
 
-# Create example executables
-add_executable(moqt_dpop_example examples/moqt_dpop_example.cpp)
-target_link_libraries(moqt_dpop_example catapult)
-
-add_executable(moqt_dpop_simple_example examples/moqt_dpop_simple_example.cpp)
-target_link_libraries(moqt_dpop_simple_example catapult)
-
-add_executable(compile_time_action_set_example examples/compile_time_action_set_example.cpp)
-target_link_libraries(compile_time_action_set_example catapult)
-
-add_executable(moqt_composite_claims_example examples/moqt_composite_claims_example.cpp)
-target_link_libraries(moqt_composite_claims_example catapult)
-
-add_executable(test_removebatch examples/test_removebatch.cpp)
-target_link_libraries(test_removebatch catapult)
-
-add_executable(advanced_composite_claims_example examples/advanced_composite_claims_example.cpp)
-target_link_libraries(advanced_composite_claims_example catapult)
-
-add_executable(cat_token_json_example examples/cat_token_json_example.cpp)
-target_link_libraries(cat_token_json_example catapult)
