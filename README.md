@@ -66,4 +66,4 @@ make -j$(nproc)
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for full license terms.
+This project is licensed under the MIT License. See the [LICENSE](BSD-2-Clause.txt) file for full license terms.
