@@ -137,3 +137,10 @@ if(benchmark_FOUND)
     # add_test(NAME catapult_benchmarks COMMAND catapult_benchmarks)
 endif()
 
+
+# Example executables
+add_executable(cat_token_json_example
+        examples/cat_token_json_example.cpp
+)
+
+target_link_libraries(cat_token_json_example catapult)
