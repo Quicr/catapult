@@ -213,21 +213,18 @@ class TypedCompositeClaim {
 public:
   static constexpr CompositeOperator operation = Op;
   std::vector<ClaimSet> claims;
-  bool usePool;                   ///< Whether to use memory pool for ClaimSet allocations
   
   /**
-   * @brief Constructor with optional pool allocation
-   * @param enablePool Whether to use memory pool for ClaimSet allocations (default: false)
+   * @brief Default constructor
    */
-  constexpr TypedCompositeClaim(bool enablePool = false) : usePool(enablePool) {}
+  constexpr TypedCompositeClaim() = default;
   
   /**
-   * @brief Constructor with designated initializers and optional pool allocation
+   * @brief Constructor with designated initializers
    * @param init_claims Initial list of claim sets
-   * @param enablePool Whether to use memory pool for ClaimSet allocations (default: false)
    */
-  constexpr TypedCompositeClaim(std::initializer_list<ClaimSet> init_claims, bool enablePool = false) 
-    : claims(init_claims), usePool(enablePool) {}
+  constexpr TypedCompositeClaim(std::initializer_list<ClaimSet> init_claims) 
+    : claims(init_claims) {}
   
   /**
    * @brief Compile-time evaluation
@@ -302,15 +299,13 @@ public:
    * @brief Add a claim set to this composite claim
    * @param claimSet The claim set to add
    * 
-   * If usePool is true, allocates the ClaimSet using the thread-local memory pool
-   * for improved performance. Otherwise uses standard heap allocation.
+   * Pool optimization is applied to the composite claim allocation itself,
+   * not to individual ClaimSet objects which are stored directly in the vector.
    */
   void addClaimSet(const ClaimSet& claimSet) {
     if (claims.size() >= composite_constants::MAX_CLAIM_SETS_PER_COMPOSITE) {
       throw InvalidClaimValueError("Too many claim sets in composite");
     }
-    // Pool allocation for ClaimSet is not needed since ClaimSet itself
-    // manages its own memory. Pool optimization is for the composite claims themselves.
     claims.push_back(claimSet);
     invalidateDepthCache();
   }
@@ -319,15 +314,13 @@ public:
    * @brief Add a token as a claim set
    * @param token The token to wrap in a ClaimSet and add
    * 
-   * If usePool is true, allocates the ClaimSet using the thread-local memory pool
-   * for improved performance. Otherwise uses standard heap allocation.
+   * Pool optimization is applied to the composite claim allocation itself,
+   * not to individual ClaimSet objects which are stored directly in the vector.
    */
   void addToken(const CatToken& token) {
     if (claims.size() >= composite_constants::MAX_CLAIM_SETS_PER_COMPOSITE) {
       throw InvalidClaimValueError("Too many claim sets in composite");
     }
-    // Pool allocation for ClaimSet is not needed since ClaimSet itself
-    // manages its own memory. Pool optimization is for the composite claims themselves.
     claims.emplace_back(token);
     invalidateDepthCache();
   }

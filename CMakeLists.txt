@@ -23,6 +23,7 @@ add_library(catapult STATIC
     src/composite.cpp
     src/crypto.cpp
     src/cwt.cpp
+    src/jwk.cpp
     src/dpop.cpp
     src/error.cpp
     src/json_serialization.cpp
@@ -36,10 +37,12 @@ add_library(catapult STATIC
 # Link libraries
 target_link_libraries(catapult 
     cbor
-    OpenSSL::SSL 
-    OpenSSL::Crypto
+    ${OPENSSL_LIBRARIES}
     nlohmann_json::nlohmann_json
 )
+
+# Include OpenSSL headers
+target_include_directories(catapult PRIVATE ${OPENSSL_INCLUDE_DIR})
 
 # Add spdlog if logging is enabled
 if(ENABLE_LOGGING)
@@ -47,7 +50,6 @@ if(ENABLE_LOGGING)
 endif()
 # Set compiler flags with enhanced security and warnings
 target_compile_options(catapult PRIVATE
-    # Enhanced warning flags for better code quality
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wconversion -Wsign-conversion>
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wformat=2 -Wformat-security>
@@ -91,7 +93,10 @@ add_executable(catapult_tests
     tests/composite_claims.cpp
     tests/crypto.cpp
     tests/cwt.cpp
+    tests/cwt_crypto.cpp
     tests/cwt_encode_decode.cpp
+    tests/cwt_signing.cpp
+    tests/rfc8152_compliance.cpp
     tests/integration.cpp
     tests/memory_pool.cpp
     tests/moqt_claims.cpp
@@ -104,6 +109,8 @@ add_executable(catapult_tests
 
 target_link_libraries(catapult_tests 
     catapult
+    ${OPENSSL_LIBRARIES}
+    cbor
     doctest::doctest
 )
 
@@ -144,3 +151,20 @@ add_executable(cat_token_json_example
 )
 
 target_link_libraries(cat_token_json_example catapult)
+
+
+add_executable(cat_cwt_per_signature_example
+        examples/cat_cwt_per_signature_example.cpp
+)
+
+target_link_libraries(cat_cwt_per_signature_example catapult)
+
+if(ENABLE_LOGGING)
+    target_compile_definitions(cat_cwt_per_signature_example PRIVATE ENABLE_LOGGING)
+endif()
+
+add_executable(cat_cwt_crypto
+        examples/cat_cwt_crypto.cpp
+)
+
+target_link_libraries(cat_cwt_crypto catapult)

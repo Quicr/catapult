@@ -171,7 +171,7 @@ namespace secure_utils {
     const volatile unsigned char* vb = static_cast<const volatile unsigned char*>(b);
     unsigned char result = 0;
     
-    // Use volatile to prevent compiler optimization
+    // Use volatile to  compiler optimization
     for (size_t i = 0; i < size; ++i) {
       result |= va[i] ^ vb[i];
     }
@@ -187,6 +187,21 @@ namespace secure_utils {
    */
   template<typename T>
   inline bool constantTimeEqual(const std::vector<T>& a, const std::vector<T>& b) noexcept {
+    if (a.size() != b.size()) {
+      return false;
+    }
+    
+    return constantTimeCompare(a.data(), b.data(), a.size() * sizeof(T)) == 0;
+  }
+
+  /**
+   * @brief Constant-time comparison for spans
+   * @param a First span
+   * @param b Second span
+   * @return true if equal, false otherwise (timing independent)
+   */
+  template<typename T>
+  inline bool constantTimeEqual(std::span<const T> a, std::span<const T> b) noexcept {
     if (a.size() != b.size()) {
       return false;
     }
