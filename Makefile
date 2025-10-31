@@ -1,6 +1,6 @@
 # Common Access Token (CAT) Implementation Makefile
 
-.PHONY: all build test clean install help lint check docs configure format lint bench examples 
+.PHONY: all build test clean install help lint check docs configure format lint bench 
 
 # Default target
 all: build
@@ -64,15 +64,12 @@ help:
 	@echo ""
 	@echo "Available targets:"
 	@echo "  all         - Build the project (default)"
-	@echo "  configure   - Configure the build with CMake"
-	@echo "  build       - Build the C++ implementation"
 	@echo "  test        - Run all tests"
 	@echo "  clean       - Remove build directory"
 	@echo "  install     - Install the built binaries and libraries"
 	@echo "  bench       - Run benchmarks (if available)"
 	@echo "  format      - Format C++ code with clang-format"
 	@echo "  lint        - Lint C++ code with clang-tidy"
-	@echo "  package     - Create distribution packages"
 	@echo "  docs        - Generate API documentation with Doxygen"
 	@echo "  help        - Show this help message"
 	@echo ""
