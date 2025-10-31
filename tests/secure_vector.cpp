@@ -4,6 +4,7 @@
 #include <chrono>
 #include <atomic>
 #include <memory>
+#include <algorithm>
 #include "catapult/secure_vector.hpp"
 
 using namespace catapult;

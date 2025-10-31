@@ -270,17 +270,29 @@ std::string DpopProof::serialize() const {
 
   // Protected header (empty for now)
   auto protected_header = cbor_build_bytestring(nullptr, 0);
-  cbor_array_push(cose_array, protected_header);
+  if (!cbor_array_push(cose_array, protected_header)) {
+    cbor_decref(&protected_header);
+    cbor_decref(&cose_array);
+    throw std::runtime_error("Failed to add protected header to COSE array");
+  }
 
   // Payload
   auto payload_item =
       cbor_build_bytestring(cbor_payload.data(), cbor_payload.size());
-  cbor_array_push(cose_array, payload_item);
+  if (!cbor_array_push(cose_array, payload_item)) {
+    cbor_decref(&payload_item);
+    cbor_decref(&cose_array);
+    throw std::runtime_error("Failed to add payload to COSE array");
+  }
 
   // Signature
   auto signature_item =
       cbor_build_bytestring(signature_.data(), signature_.size());
-  cbor_array_push(cose_array, signature_item);
+  if (!cbor_array_push(cose_array, signature_item)) {
+    cbor_decref(&signature_item);
+    cbor_decref(&cose_array);
+    throw std::runtime_error("Failed to add signature to COSE array");
+  }
 
   // Serialize to bytes and encode as base64url
   unsigned char* buffer;
