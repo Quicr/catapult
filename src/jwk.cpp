@@ -4,15 +4,17 @@
  */
 
 #include "catapult/jwk.hpp"
+
+#include <openssl/core_names.h>
+#include <openssl/evp.h>
+#include <openssl/param_build.h>
+#include <openssl/x509.h>
+
+#include <nlohmann/json.hpp>
+
 #include "catapult/base64.hpp"
 #include "catapult/crypto.hpp"
 #include "catapult/error.hpp"
-
-#include <nlohmann/json.hpp>
-#include <openssl/evp.h>
-#include <openssl/x509.h>
-#include <openssl/param_build.h>
-#include <openssl/core_names.h>
 
 using json = nlohmann::json;
 
@@ -30,9 +32,9 @@ std::string createES256JWK(const std::vector<uint8_t>& public_key_der) {
   // Extract EC parameters using OpenSSL 3.0 API
   BIGNUM* x = BN_new();
   BIGNUM* y = BN_new();
-  
+
   size_t x_len = 0, y_len = 0;
-  
+
   // Get the raw EC point coordinates
   if (!EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_EC_PUB_X, &x) ||
       !EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_EC_PUB_Y, &y)) {
@@ -45,7 +47,7 @@ std::string createES256JWK(const std::vector<uint8_t>& public_key_der) {
   // Convert to 32-byte arrays (for P-256)
   std::vector<uint8_t> x_bytes(32);
   std::vector<uint8_t> y_bytes(32);
-  
+
   if (BN_bn2binpad(x, x_bytes.data(), 32) != 32 ||
       BN_bn2binpad(y, y_bytes.data(), 32) != 32) {
     BN_free(x);
@@ -59,12 +61,10 @@ std::string createES256JWK(const std::vector<uint8_t>& public_key_der) {
   EVP_PKEY_free(pkey);
 
   // Create JWK JSON
-  json jwk = {
-    {"kty", "EC"},
-    {"crv", "P-256"},
-    {"x", base64UrlEncode(x_bytes)},
-    {"y", base64UrlEncode(y_bytes)}
-  };
+  json jwk = {{"kty", "EC"},
+              {"crv", "P-256"},
+              {"x", base64UrlEncode(x_bytes)},
+              {"y", base64UrlEncode(y_bytes)}};
 
   return jwk.dump();
 }
@@ -104,11 +104,9 @@ std::string createPS256JWK(const std::vector<uint8_t>& public_key_der) {
   EVP_PKEY_free(pkey);
 
   // Create JWK JSON
-  json jwk = {
-    {"kty", "RSA"},
-    {"n", base64UrlEncode(n_bytes)},
-    {"e", base64UrlEncode(e_bytes)}
-  };
+  json jwk = {{"kty", "RSA"},
+              {"n", base64UrlEncode(n_bytes)},
+              {"e", base64UrlEncode(e_bytes)}};
 
   return jwk.dump();
 }
@@ -120,25 +118,22 @@ std::string calculateJWKThumbprint(const std::string& jwk_json) {
   json canonical;
 
   if (jwk["kty"] == "EC") {
-    canonical = {
-      {"crv", jwk["crv"]},
-      {"kty", jwk["kty"]},
-      {"x", jwk["x"]},
-      {"y", jwk["y"]}
-    };
+    canonical = {{"crv", jwk["crv"]},
+                 {"kty", jwk["kty"]},
+                 {"x", jwk["x"]},
+                 {"y", jwk["y"]}};
   } else if (jwk["kty"] == "RSA") {
-    canonical = {
-      {"e", jwk["e"]},
-      {"kty", jwk["kty"]},
-      {"n", jwk["n"]}
-    };
+    canonical = {{"e", jwk["e"]}, {"kty", jwk["kty"]}, {"n", jwk["n"]}};
   } else {
-    throw CryptoError("Unsupported key type for thumbprint: " + jwk["kty"].get<std::string>());
+    throw CryptoError("Unsupported key type for thumbprint: " +
+                      jwk["kty"].get<std::string>());
   }
 
-  // Serialize canonical JWK (lexicographic ordering is maintained by nlohmann::json)
+  // Serialize canonical JWK (lexicographic ordering is maintained by
+  // nlohmann::json)
   std::string canonical_str = canonical.dump();
-  std::vector<uint8_t> canonical_bytes(canonical_str.begin(), canonical_str.end());
+  std::vector<uint8_t> canonical_bytes(canonical_str.begin(),
+                                       canonical_str.end());
 
   // Calculate SHA-256 hash
   auto hash = hashSha256(canonical_bytes);
@@ -147,16 +142,18 @@ std::string calculateJWKThumbprint(const std::string& jwk_json) {
   return base64UrlEncode(hash);
 }
 
-std::string createJWKFromAlgorithm(int64_t algorithm_id, const std::vector<uint8_t>& public_key_der) {
+std::string createJWKFromAlgorithm(int64_t algorithm_id,
+                                   const std::vector<uint8_t>& public_key_der) {
   switch (algorithm_id) {
     case ALG_ES256:
       return createES256JWK(public_key_der);
     case ALG_PS256:
       return createPS256JWK(public_key_der);
     default:
-      throw CryptoError("Unsupported algorithm for JWK creation: " + std::to_string(algorithm_id));
+      throw CryptoError("Unsupported algorithm for JWK creation: " +
+                        std::to_string(algorithm_id));
   }
 }
 
-} // namespace jwk
-} // namespace catapult
+}  // namespace jwk
+}  // namespace catapult

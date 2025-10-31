@@ -1,16 +1,17 @@
 /**
  * @file jwk.hpp
  * @brief JSON Web Key (JWK) utilities for cryptographic operations
- * 
- * This file provides utilities for creating JWK representations of cryptographic
- * keys and calculating JWK thumbprints according to RFC 7517 and RFC 7638.
+ *
+ * This file provides utilities for creating JWK representations of
+ * cryptographic keys and calculating JWK thumbprints according to RFC 7517 and
+ * RFC 7638.
  */
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
-#include <cstdint>
 
 namespace catapult {
 
@@ -28,7 +29,7 @@ namespace jwk {
 std::string createES256JWK(const std::vector<uint8_t>& public_key_der);
 
 /**
- * @brief Create PS256 JWK from DER-encoded public key  
+ * @brief Create PS256 JWK from DER-encoded public key
  * @param public_key_der DER-encoded public key bytes
  * @return JWK JSON string
  * @throws CryptoError if key parsing or extraction fails
@@ -50,7 +51,8 @@ std::string calculateJWKThumbprint(const std::string& jwk_json);
  * @return JWK JSON string
  * @throws CryptoError if algorithm is unsupported or key parsing fails
  */
-std::string createJWKFromAlgorithm(int64_t algorithm_id, const std::vector<uint8_t>& public_key_der);
+std::string createJWKFromAlgorithm(int64_t algorithm_id,
+                                   const std::vector<uint8_t>& public_key_der);
 
-} // namespace jwk
-} // namespace catapult
+}  // namespace jwk
+}  // namespace catapult

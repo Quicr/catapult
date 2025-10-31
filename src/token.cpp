@@ -1,16 +1,15 @@
 #include "catapult/token.hpp"
-#include "catapult/composite_impl.hpp"
-#include "catapult/claims.hpp"
-#include "catapult/validator.hpp"
-#include "catapult/logging.hpp"
 
 #include <chrono>
 #include <sstream>
 
+#include "catapult/claims.hpp"
+#include "catapult/composite_impl.hpp"
 #include "catapult/cwt.hpp"
+#include "catapult/logging.hpp"
+#include "catapult/validator.hpp"
 
 namespace catapult {
-
 
 CatTokenValidator::CatTokenValidator() : clockSkewTolerance_(60) {}
 
@@ -37,15 +36,15 @@ CatTokenValidator& CatTokenValidator::withClockSkewTolerance(
 /**
  * @brief Template-based claim validation helper
  */
-template<typename ClaimType>
+template <typename ClaimType>
 consteval void validate_single_claim() {
-  static_assert(ClaimType::value > 0 && ClaimType::value <= 65535, 
+  static_assert(ClaimType::value > 0 && ClaimType::value <= 65535,
                 "Invalid claim identifier");
   static_assert(composite_constants::is_valid_claim_id(ClaimType::value),
                 "Claim not validated by composite constants");
 }
 
-template<typename... ClaimTypes>
+template <typename... ClaimTypes>
 consteval void validate_claims() {
   static_assert(sizeof...(ClaimTypes) > 0, "At least one claim type required");
   (validate_single_claim<ClaimTypes>(), ...);
@@ -53,18 +52,18 @@ consteval void validate_claims() {
 
 void CatTokenValidator::validate(const CatToken& token) const {
   CAT_LOG_DEBUG("Starting token validation");
-  
+
   // Compile-time validation of all claim types used in validation
   using namespace claim_validation;
   validate_claims<IssuerClaim, AudienceClaim, ExpirationClaim, NotBeforeClaim,
                   CwtIdClaim, CatUsageClaim, CatVersionClaim>();
-  
+
   // Additional registry validation
   static_assert(StandardClaimRegistry::is_valid_id(ExpirationClaim::value),
                 "ExpirationClaim not in standard registry");
   static_assert(StandardClaimRegistry::is_valid_id(NotBeforeClaim::value),
                 "NotBeforeClaim not in standard registry");
-  
+
   auto now = std::chrono::duration_cast<std::chrono::seconds>(
                  std::chrono::system_clock::now().time_since_epoch())
                  .count();
@@ -121,10 +120,10 @@ void CatTokenValidator::validateGeographicRestrictions(
     const CatToken& token) const {
   if (token.cat.catgeocoord) {
     const auto& coords = *token.cat.catgeocoord;
-    
+
     // Use runtime validation that matches the compile-time checks
-    if (coords.lat < -90.0 || coords.lat > 90.0 || 
-        coords.lon < -180.0 || coords.lon > 180.0) {
+    if (coords.lat < -90.0 || coords.lat > 90.0 || coords.lon < -180.0 ||
+        coords.lon > 180.0) {
       throw GeographicValidationError("Invalid coordinates");
     }
   }
@@ -146,15 +145,17 @@ void CatTokenValidator::validateCompositeClaims(const CatToken& token) const {
   if (token.composite.hasComposites()) {
     // Check nesting depth limit using the provided utility
     auto checkDepth = [](const auto& claim) {
-      if (claim.has_value() && (*claim) && (*claim)->getDepth() > composite_constants::MAX_NESTING_DEPTH) {
-        throw InvalidClaimValueError("Composite claim nesting depth exceeds maximum");
+      if (claim.has_value() && (*claim) &&
+          (*claim)->getDepth() > composite_constants::MAX_NESTING_DEPTH) {
+        throw InvalidClaimValueError(
+            "Composite claim nesting depth exceeds maximum");
       }
     };
-    
+
     checkDepth(token.composite.orClaim);
     checkDepth(token.composite.norClaim);
     checkDepth(token.composite.andClaim);
-    
+
     // Validate all composite claims using the TokenValidator concept
     if (!token.composite.validateAll(*this)) {
       throw InvalidClaimValueError("Composite claim validation failed");
@@ -174,7 +175,8 @@ bool CatTokenValidator::validateTypedNorClaim(const NorClaim& norClaim) const {
   return validateTypedCompositeClaim(norClaim, *this);
 }
 
-CatToken createMinimalToken(const std::string& issuer, const std::string& audience) {
+CatToken createMinimalToken(const std::string& issuer,
+                            const std::string& audience) {
   CatToken token;
   token.core.iss = issuer;
   token.core.aud = std::vector<std::string>{audience};
@@ -183,7 +185,8 @@ CatToken createMinimalToken(const std::string& issuer, const std::string& audien
 
 std::string encodeToken(const CatToken& token,
                         CryptographicAlgorithm& algorithm) {
-  CAT_LOG_DEBUG("Encoding CAT token with algorithm ID: {}", algorithm.algorithmId());
+  CAT_LOG_DEBUG("Encoding CAT token with algorithm ID: {}",
+                algorithm.algorithmId());
   Cwt cwt(algorithm.algorithmId(), token);
 
   // Create header CBOR
@@ -213,7 +216,8 @@ std::string encodeToken(const CatToken& token,
 
 CatToken decodeToken(const std::string& tokenStr,
                      CryptographicAlgorithm& algorithm) {
-  CAT_LOG_DEBUG("Decoding CAT token with algorithm ID: {}", algorithm.algorithmId());
+  CAT_LOG_DEBUG("Decoding CAT token with algorithm ID: {}",
+                algorithm.algorithmId());
   // Split token
   std::vector<std::string> parts;
   std::stringstream ss(tokenStr);
@@ -224,7 +228,8 @@ CatToken decodeToken(const std::string& tokenStr,
   }
 
   if (parts.size() != 3) {
-    CAT_LOG_ERROR("Invalid token format: expected 3 parts, got {}", parts.size());
+    CAT_LOG_ERROR("Invalid token format: expected 3 parts, got {}",
+                  parts.size());
     throw InvalidTokenFormatError();
   }
 
@@ -244,9 +249,13 @@ CatToken decodeToken(const std::string& tokenStr,
 }
 
 // Explicit template instantiations for composite claims with CatTokenValidator
-template bool CompositeClaims::validateAll<CatTokenValidator>(const CatTokenValidator& validator) const;
-template bool OrClaim::evaluateClaimSet<CatTokenValidator>(const ClaimSet& claimSet, const CatTokenValidator& validator) const;
-template bool AndClaim::evaluateClaimSet<CatTokenValidator>(const ClaimSet& claimSet, const CatTokenValidator& validator) const;
-template bool NorClaim::evaluateClaimSet<CatTokenValidator>(const ClaimSet& claimSet, const CatTokenValidator& validator) const;
+template bool CompositeClaims::validateAll<CatTokenValidator>(
+    const CatTokenValidator& validator) const;
+template bool OrClaim::evaluateClaimSet<CatTokenValidator>(
+    const ClaimSet& claimSet, const CatTokenValidator& validator) const;
+template bool AndClaim::evaluateClaimSet<CatTokenValidator>(
+    const ClaimSet& claimSet, const CatTokenValidator& validator) const;
+template bool NorClaim::evaluateClaimSet<CatTokenValidator>(
+    const ClaimSet& claimSet, const CatTokenValidator& validator) const;
 
 }  // namespace catapult

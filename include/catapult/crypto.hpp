@@ -6,13 +6,14 @@
 #pragma once
 
 #include <concepts>
+#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
-#include <cstring>
-#include <cstdlib>
+
 #include "memory_pool.hpp"
 
 #ifdef _WIN32
@@ -22,8 +23,8 @@
 #include <unistd.h>
 #endif
 
-#include "error.hpp"
 #include "base64.hpp"
+#include "error.hpp"
 #include "secure_vector.hpp"
 
 // Forward declarations for OpenSSL types
@@ -33,48 +34,56 @@ typedef struct bio_st BIO;
 namespace catapult {
 
 /// COSE Algorithm Identifiers
-constexpr int64_t ALG_HMAC256_256 = 5;      ///< HMAC 256/256
-constexpr int64_t ALG_ES256 = -7;           ///< ECDSA w/ SHA-256
-constexpr int64_t ALG_PS256 = -37;          ///< RSASSA-PSS w/ SHA-256
-constexpr int64_t ALG_A128GCM = 1;          ///< AES-GCM mode w/ 128-bit key, 128-bit tag
-constexpr int64_t ALG_A192GCM = 2;          ///< AES-GCM mode w/ 192-bit key, 128-bit tag
-constexpr int64_t ALG_A256GCM = 3;          ///< AES-GCM mode w/ 256-bit key, 128-bit tag
-constexpr int64_t ALG_ChaCha20_Poly1305 = 24; ///< ChaCha20-Poly1305 w/ 256-bit key, 128-bit tag
+constexpr int64_t ALG_HMAC256_256 = 5;  ///< HMAC 256/256
+constexpr int64_t ALG_ES256 = -7;       ///< ECDSA w/ SHA-256
+constexpr int64_t ALG_PS256 = -37;      ///< RSASSA-PSS w/ SHA-256
+constexpr int64_t ALG_A128GCM =
+    1;  ///< AES-GCM mode w/ 128-bit key, 128-bit tag
+constexpr int64_t ALG_A192GCM =
+    2;  ///< AES-GCM mode w/ 192-bit key, 128-bit tag
+constexpr int64_t ALG_A256GCM =
+    3;  ///< AES-GCM mode w/ 256-bit key, 128-bit tag
+constexpr int64_t ALG_ChaCha20_Poly1305 =
+    24;  ///< ChaCha20-Poly1305 w/ 256-bit key, 128-bit tag
 
 namespace crypto_constants {
-  constexpr size_t HMAC_KEY_SIZE = 32;      ///< HMAC-SHA256 recommended key size
-  constexpr size_t ES256_KEY_SIZE = 32;     ///< P-256 private key size
-  constexpr size_t PS256_MIN_KEY_SIZE = 256; ///< RSA minimum key size in bytes
-  constexpr size_t AES128_KEY_SIZE = 16;    ///< AES-128 key size in bytes
-  constexpr size_t AES192_KEY_SIZE = 24;    ///< AES-192 key size in bytes
-  constexpr size_t AES256_KEY_SIZE = 32;    ///< AES-256 key size in bytes
-  constexpr size_t ChaCha20_KEY_SIZE = 32;  ///< ChaCha20 key size in bytes
-  constexpr size_t GCM_IV_SIZE = 12;        ///< GCM IV size in bytes (96 bits)
-  constexpr size_t GCM_TAG_SIZE = 16;       ///< GCM authentication tag size in bytes
-  constexpr size_t ChaCha20_NONCE_SIZE = 12; ///< ChaCha20-Poly1305 nonce size in bytes
-  constexpr size_t ChaCha20_TAG_SIZE = 16;   ///< ChaCha20-Poly1305 tag size in bytes
-  
-  constexpr bool is_valid_hmac_key_size(size_t size) noexcept {
-    return size >= 16 && size <= 64; // NIST recommendations
-  }
-  
-  consteval bool is_valid_rsa_key_size(size_t size) noexcept {
-    return size >= 256 && size <= 512; // 2048-4096 bits
-  }
-  
-  constexpr bool is_valid_aes_key_size(size_t size) noexcept {
-    return size == AES128_KEY_SIZE || size == AES192_KEY_SIZE || size == AES256_KEY_SIZE;
-  }
-  
+constexpr size_t HMAC_KEY_SIZE = 32;   ///< HMAC-SHA256 recommended key size
+constexpr size_t ES256_KEY_SIZE = 32;  ///< P-256 private key size
+constexpr size_t PS256_MIN_KEY_SIZE = 256;  ///< RSA minimum key size in bytes
+constexpr size_t AES128_KEY_SIZE = 16;      ///< AES-128 key size in bytes
+constexpr size_t AES192_KEY_SIZE = 24;      ///< AES-192 key size in bytes
+constexpr size_t AES256_KEY_SIZE = 32;      ///< AES-256 key size in bytes
+constexpr size_t ChaCha20_KEY_SIZE = 32;    ///< ChaCha20 key size in bytes
+constexpr size_t GCM_IV_SIZE = 12;          ///< GCM IV size in bytes (96 bits)
+constexpr size_t GCM_TAG_SIZE = 16;  ///< GCM authentication tag size in bytes
+constexpr size_t ChaCha20_NONCE_SIZE =
+    12;  ///< ChaCha20-Poly1305 nonce size in bytes
+constexpr size_t ChaCha20_TAG_SIZE =
+    16;  ///< ChaCha20-Poly1305 tag size in bytes
+
+constexpr bool is_valid_hmac_key_size(size_t size) noexcept {
+  return size >= 16 && size <= 64;  // NIST recommendations
 }
 
-static_assert(crypto_constants::is_valid_hmac_key_size(crypto_constants::HMAC_KEY_SIZE),
-              "HMAC key size is invalid");
-static_assert(crypto_constants::is_valid_rsa_key_size(crypto_constants::PS256_MIN_KEY_SIZE),
+consteval bool is_valid_rsa_key_size(size_t size) noexcept {
+  return size >= 256 && size <= 512;  // 2048-4096 bits
+}
+
+constexpr bool is_valid_aes_key_size(size_t size) noexcept {
+  return size == AES128_KEY_SIZE || size == AES192_KEY_SIZE ||
+         size == AES256_KEY_SIZE;
+}
+
+}  // namespace crypto_constants
+
+static_assert(
+    crypto_constants::is_valid_hmac_key_size(crypto_constants::HMAC_KEY_SIZE),
+    "HMAC key size is invalid");
+static_assert(crypto_constants::is_valid_rsa_key_size(
+                  crypto_constants::PS256_MIN_KEY_SIZE),
               "RSA minimum key size is invalid");
 static_assert(crypto_constants::ES256_KEY_SIZE == 32,
               "ES256 key size must be exactly 32 bytes for P-256");
-
 
 /**
  * @brief RAII wrapper for OpenSSL EVP_PKEY with shared ownership
@@ -92,11 +101,10 @@ struct BioDeleter {
 };
 using BioPtr = std::unique_ptr<BIO, BioDeleter>;
 
-
 /**
  * @brief Concept for cryptographic algorithm data types
  */
-template<typename T>
+template <typename T>
 concept CryptoData = requires(T t) {
   std::data(t);
   std::size(t);
@@ -110,27 +118,27 @@ concept CryptoData = requires(T t) {
 class CryptographicAlgorithm {
  public:
   virtual ~CryptographicAlgorithm() = default;
-  
+
   /**
    * @brief Sign data with the algorithm
    * @param data Data to sign
    * @return Signature bytes
    */
-  template<CryptoData T>
+  template <CryptoData T>
   std::vector<uint8_t> sign(const T& data) const {
     return signImpl({std::data(data), std::size(data)});
   }
-  
+
   /**
    * @brief Verify a signature
    * @param data Original data
    * @param signature Signature to verify
    * @return True if signature is valid
    */
-  template<CryptoData T1, CryptoData T2>
+  template <CryptoData T1, CryptoData T2>
   bool verify(const T1& data, const T2& signature) const {
-    return verifyImpl({std::data(data), std::size(data)}, 
-                     {std::data(signature), std::size(signature)});
+    return verifyImpl({std::data(data), std::size(data)},
+                      {std::data(signature), std::size(signature)});
   }
 
   /**
@@ -140,25 +148,26 @@ class CryptographicAlgorithm {
    * @return Encrypted data with authentication tag
    * @throws CryptoError if algorithm doesn't support encryption
    */
-  template<CryptoData T1, CryptoData T2>
+  template <CryptoData T1, CryptoData T2>
   std::vector<uint8_t> encrypt(const T1& data, const T2& iv) const {
-    return encryptImpl({std::data(data), std::size(data)}, 
-                      {std::data(iv), std::size(iv)});
+    return encryptImpl({std::data(data), std::size(data)},
+                       {std::data(iv), std::size(iv)});
   }
-  
+
   /**
    * @brief Decrypt data with the algorithm
    * @param encryptedData Encrypted data with authentication tag
    * @param iv Initialization vector (for AEAD algorithms)
    * @return Decrypted data
-   * @throws CryptoError if decryption fails or algorithm doesn't support decryption
+   * @throws CryptoError if decryption fails or algorithm doesn't support
+   * decryption
    */
-  template<CryptoData T1, CryptoData T2>
+  template <CryptoData T1, CryptoData T2>
   std::vector<uint8_t> decrypt(const T1& encryptedData, const T2& iv) const {
-    return decryptImpl({std::data(encryptedData), std::size(encryptedData)}, 
-                      {std::data(iv), std::size(iv)});
+    return decryptImpl({std::data(encryptedData), std::size(encryptedData)},
+                       {std::data(iv), std::size(iv)});
   }
-  
+
   /**
    * @brief Get the COSE algorithm identifier
    * @return Algorithm ID
@@ -171,15 +180,17 @@ class CryptographicAlgorithm {
    */
   virtual bool supportsEncryption() const { return false; }
 
-protected:
+ protected:
   // Pure virtual implementation methods that derived classes must implement
-  virtual std::vector<uint8_t> signImpl(std::span<const uint8_t> data) const = 0;
-  virtual bool verifyImpl(std::span<const uint8_t> data, 
-                         std::span<const uint8_t> signature) const = 0;
-  virtual std::vector<uint8_t> encryptImpl(std::span<const uint8_t> data, 
-                                          std::span<const uint8_t> iv) const;
-  virtual std::vector<uint8_t> decryptImpl(std::span<const uint8_t> encryptedData, 
-                                          std::span<const uint8_t> iv) const;
+  virtual std::vector<uint8_t> signImpl(
+      std::span<const uint8_t> data) const = 0;
+  virtual bool verifyImpl(std::span<const uint8_t> data,
+                          std::span<const uint8_t> signature) const = 0;
+  virtual std::vector<uint8_t> encryptImpl(std::span<const uint8_t> data,
+                                           std::span<const uint8_t> iv) const;
+  virtual std::vector<uint8_t> decryptImpl(
+      std::span<const uint8_t> encryptedData,
+      std::span<const uint8_t> iv) const;
 };
 
 /**
@@ -194,27 +205,29 @@ class HmacSha256Algorithm : public CryptographicAlgorithm {
    * @brief Construct with existing key
    * @param key HMAC key bytes
    */
-  explicit HmacSha256Algorithm(const std::vector<uint8_t>& key) : key_(key.begin(), key.end()) {
+  explicit HmacSha256Algorithm(const std::vector<uint8_t>& key)
+      : key_(key.begin(), key.end()) {
     if (!crypto_constants::is_valid_hmac_key_size(key.size())) {
       throw CryptoError("Invalid HMAC key size");
     }
   }
-  
+
   /**
    * @brief Construct with secure key vector
    */
-  explicit HmacSha256Algorithm(SecureVector<uint8_t> key) : key_(std::move(key)) {
+  explicit HmacSha256Algorithm(SecureVector<uint8_t> key)
+      : key_(std::move(key)) {
     if (!crypto_constants::is_valid_hmac_key_size(key_.size())) {
       throw CryptoError("Invalid HMAC key size");
     }
   }
-  
+
   /**
    * @brief Generate a random HMAC key with secure storage
    * @return Generated key bytes in secure vector
    */
   static SecureVector<uint8_t> generateSecureKey();
-  
+
   /**
    * @brief Generate a random HMAC key (backward compatibility)
    * @deprecated Use generateSecureKey() for better security
@@ -227,7 +240,7 @@ class HmacSha256Algorithm : public CryptographicAlgorithm {
   bool verifyImpl(std::span<const uint8_t> data,
                   std::span<const uint8_t> signature) const override;
   int64_t algorithmId() const override;
-  
+
   /**
    * @brief Secure destructor - keys are automatically zeroed by SecureAllocator
    */
@@ -240,7 +253,7 @@ class Es256Algorithm : public CryptographicAlgorithm {
 
  private:
   std::unique_ptr<Impl> pImpl_;
-  
+
   void loadPrivateKey(const uint8_t* keyData, size_t keySize);
   void loadPublicKey(const uint8_t* keyData, size_t keySize);
   void initializeImpl();
@@ -267,14 +280,17 @@ class Es256Algorithm : public CryptographicAlgorithm {
   Es256Algorithm(const Es256Algorithm&) = delete;
   Es256Algorithm& operator=(const Es256Algorithm&) = delete;
 
-  static std::pair<std::vector<uint8_t>, std::vector<uint8_t>> generateKeyPair();
-  
+  static std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
+  generateKeyPair();
+
   /**
    * @brief Generate ES256 key pair with secure memory for private key
-   * @return Pair of (private key, public key) where private key uses secure storage
+   * @return Pair of (private key, public key) where private key uses secure
+   * storage
    */
-  static std::pair<SecureVector<uint8_t>, std::vector<uint8_t>> generateSecureKeyPair();
-  
+  static std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>
+  generateSecureKeyPair();
+
   std::vector<uint8_t> getPublicKey() const;
 
   std::vector<uint8_t> signImpl(std::span<const uint8_t> data) const override;
@@ -289,7 +305,7 @@ class Ps256Algorithm : public CryptographicAlgorithm {
 
  private:
   std::unique_ptr<Impl> pImpl_;
-  
+
   void initializeImpl();
   void loadPrivateKey(const uint8_t* keyData, size_t keySize);
   void loadPublicKey(const uint8_t* keyData, size_t keySize);
@@ -317,14 +333,15 @@ class Ps256Algorithm : public CryptographicAlgorithm {
 
   static std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
   generateKeyPair();
-  
+
   /**
    * @brief Generate PS256 key pair with secure memory for private key
-   * @return Pair of (private key, public key) where private key uses secure storage
+   * @return Pair of (private key, public key) where private key uses secure
+   * storage
    */
   static std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>
   generateSecureKeyPair();
-  
+
   std::vector<uint8_t> getPublicKey() const;
 
   std::vector<uint8_t> signImpl(std::span<const uint8_t> data) const override;
@@ -333,19 +350,20 @@ class Ps256Algorithm : public CryptographicAlgorithm {
   int64_t algorithmId() const override;
 };
 
-
 /**
- * @brief Create COSE Sig_structure for COSE_Sign (multi-signature) (RFC8152 Section 4.4)
+ * @brief Create COSE Sig_structure for COSE_Sign (multi-signature) (RFC8152
+ * Section 4.4)
  * @param bodyProtectedHeader Protected header from the COSE_Sign body
  * @param signatureProtectedHeader Signature-specific protected header
  * @param externalAAD External authenticated data as bytes (empty if not used)
  * @param payload Payload bytes
  * @return COSE Sig_structure as CBOR-encoded bytes for COSE_Sign
  */
-std::vector<uint8_t> createCoseSignInput(const std::vector<uint8_t>& bodyProtectedHeader,
-                                         const std::vector<uint8_t>& signatureProtectedHeader,
-                                         const std::vector<uint8_t>& externalAAD,
-                                         const std::vector<uint8_t>& payload);
+std::vector<uint8_t> createCoseSignInput(
+    const std::vector<uint8_t>& bodyProtectedHeader,
+    const std::vector<uint8_t>& signatureProtectedHeader,
+    const std::vector<uint8_t>& externalAAD,
+    const std::vector<uint8_t>& payload);
 
 /**
  * @brief Create COSE Sig_structure for COSE_Sign1 (single signature)
@@ -354,9 +372,10 @@ std::vector<uint8_t> createCoseSignInput(const std::vector<uint8_t>& bodyProtect
  * @param externalAAD External authenticated data (defaults to empty)
  * @return COSE Sig_structure as CBOR-encoded bytes
  */
-std::vector<uint8_t> createCoseSign1Input(const std::vector<uint8_t>& protectedHeader,
-                                          const std::vector<uint8_t>& payload,
-                                          const std::vector<uint8_t>& externalAAD = {});
+std::vector<uint8_t> createCoseSign1Input(
+    const std::vector<uint8_t>& protectedHeader,
+    const std::vector<uint8_t>& payload,
+    const std::vector<uint8_t>& externalAAD = {});
 
 /**
  * @brief Create JWT-style signing input (legacy, for backward compatibility)
@@ -366,7 +385,7 @@ std::vector<uint8_t> createCoseSign1Input(const std::vector<uint8_t>& protectedH
  * @deprecated Use COSE-compliant createCoseSign1Input for new code
  */
 std::vector<uint8_t> createJwtSigningInput(const std::vector<uint8_t>& header,
-                                          const std::vector<uint8_t>& payload);
+                                           const std::vector<uint8_t>& payload);
 
 /**
  * @brief Compute SHA-256 hash
@@ -379,30 +398,32 @@ std::vector<uint8_t> hashSha256(const std::vector<uint8_t>& data);
  * @brief AES-GCM algorithm implementation for AEAD encryption
  */
 class AesGcmAlgorithm : public CryptographicAlgorithm {
-private:
+ private:
   SecureVector<uint8_t> key_;  ///< AES key with secure allocator
   int64_t algorithmId_;        ///< COSE algorithm identifier
 
-public:
+ public:
   /**
    * @brief Construct with existing key
    * @param key AES key bytes (16, 24, or 32 bytes)
-   * @param algorithmId COSE algorithm identifier (ALG_A128GCM, ALG_A192GCM, ALG_A256GCM)
+   * @param algorithmId COSE algorithm identifier (ALG_A128GCM, ALG_A192GCM,
+   * ALG_A256GCM)
    */
-  explicit AesGcmAlgorithm(const std::vector<uint8_t>& key, int64_t algorithmId);
-  
+  explicit AesGcmAlgorithm(const std::vector<uint8_t>& key,
+                           int64_t algorithmId);
+
   /**
    * @brief Construct with secure key vector
    */
   explicit AesGcmAlgorithm(SecureVector<uint8_t> key, int64_t algorithmId);
-  
+
   /**
    * @brief Generate a random AES key with secure storage
    * @param keySize Key size in bytes (16, 24, or 32)
    * @return Generated key bytes in secure vector
    */
   static SecureVector<uint8_t> generateSecureKey(size_t keySize);
-  
+
   /**
    * @brief Generate a random IV for AES-GCM
    * @return 12-byte IV
@@ -428,27 +449,27 @@ public:
  * @brief ChaCha20-Poly1305 algorithm implementation for AEAD encryption
  */
 class ChaCha20Poly1305Algorithm : public CryptographicAlgorithm {
-private:
+ private:
   SecureVector<uint8_t> key_;  ///< ChaCha20 key with secure allocator
 
-public:
+ public:
   /**
    * @brief Construct with existing key
    * @param key ChaCha20 key bytes (32 bytes)
    */
   explicit ChaCha20Poly1305Algorithm(const std::vector<uint8_t>& key);
-  
+
   /**
    * @brief Construct with secure key vector
    */
   explicit ChaCha20Poly1305Algorithm(SecureVector<uint8_t> key);
-  
+
   /**
    * @brief Generate a random ChaCha20 key with secure storage
    * @return Generated key bytes in secure vector
    */
   static SecureVector<uint8_t> generateSecureKey();
-  
+
   /**
    * @brief Generate a random nonce for ChaCha20-Poly1305
    * @return 12-byte nonce
