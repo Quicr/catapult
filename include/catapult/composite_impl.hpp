@@ -1,5 +1,5 @@
 /**
- * @file cat_composite_impl.hpp  
+ * @file cat_composite_impl.hpp
  * @brief Template method implementations for composite claims
  */
 
@@ -7,12 +7,12 @@
 
 namespace catapult {
 
-
 // Template method definition for TypedCompositeClaim
-template<CompositeOperator Op>
-requires (is_valid_operator<Op>())
-template<typename Validator>
-bool TypedCompositeClaim<Op>::evaluateClaimSet(const ClaimSet& claimSet, const Validator& validator) const {
+template <CompositeOperator Op>
+  requires(is_valid_operator<Op>())
+template <typename Validator>
+bool TypedCompositeClaim<Op>::evaluateClaimSet(
+    const ClaimSet& claimSet, const Validator& validator) const {
   if (claimSet.hasToken()) {
     try {
       validator.validate(*claimSet.token);
@@ -33,7 +33,7 @@ bool TypedCompositeClaim<Op>::evaluateClaimSet(const ClaimSet& claimSet, const V
 }
 
 // Template method definition for CompositeClaims
-template<TokenValidator Validator>
+template <TokenValidator Validator>
 bool CompositeClaims::validateAll(const Validator& validator) const {
   if (orClaim && !(*orClaim)->evaluate(validator)) {
     return false;
@@ -47,4 +47,4 @@ bool CompositeClaims::validateAll(const Validator& validator) const {
   return true;
 }
 
-} // namespace catapult
+}  // namespace catapult

@@ -1,14 +1,13 @@
-#include "catapult/token.hpp"
-#include "catapult/composite.hpp"
-#include "catapult/moqt_claims.hpp"
-
+#include <algorithm>
 #include <memory>
 #include <ranges>
-#include <algorithm>
 #include <utility>
 
-namespace catapult {
+#include "catapult/composite.hpp"
+#include "catapult/moqt_claims.hpp"
+#include "catapult/token.hpp"
 
+namespace catapult {
 
 // CatToken builder methods
 CatToken& CatToken::withIssuer(const std::string& issuer) {
@@ -151,8 +150,6 @@ CatToken& CatToken::withUriPatterns(const std::vector<std::string>& patterns) {
   return *this;
 }
 
-
-
 // CatToken composite claim builder methods
 CatToken& CatToken::withOrComposite(std::unique_ptr<OrClaim> orClaim) {
   composite.orClaim = std::move(orClaim);
@@ -169,7 +166,6 @@ CatToken& CatToken::withAndComposite(std::unique_ptr<AndClaim> andClaim) {
   return *this;
 }
 
-
 // MOQT claim builder method implementations
 
 // CatToken MOQT methods
@@ -178,11 +174,11 @@ CatToken& CatToken::withMoqtClaims(MoqtClaims claims) {
   return *this;
 }
 
-CatToken& CatToken::withMoqtRevalidationInterval(std::chrono::seconds interval) {
+CatToken& CatToken::withMoqtRevalidationInterval(
+    std::chrono::seconds interval) {
   auto& moqt_claims = extended.getMoqtClaims();
   moqt_claims.setRevalidationInterval(interval);
   return *this;
 }
-
 
 }  // namespace catapult

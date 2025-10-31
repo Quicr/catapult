@@ -10,8 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "trie.hpp"
 #include "memory_pool.hpp"
+#include "trie.hpp"
 
 namespace catapult {
 
@@ -22,7 +22,7 @@ class UriMatcher;
 /**
  * @brief Types of URI pattern matching
  */
-enum class UriPatternType { 
+enum class UriPatternType {
   Exact,   ///< Exact string match
   Prefix,  ///< Prefix match
   Suffix,  ///< Suffix match
@@ -76,25 +76,28 @@ struct UriPattern {
  */
 class UriMatcher {
  public:
-  PrefixTrie prefixTrie;                                            ///< Trie for prefix patterns
-  SuffixTrie suffixTrie;                                            ///< Trie for suffix patterns
-  std::unordered_map<std::string, std::string> exactPatterns;      ///< Exact match patterns
-  std::vector<std::pair<std::regex, std::string>> regexPatterns;   ///< Regex patterns
-  std::unordered_map<std::string, std::string> hashPatterns;       ///< Hash-based patterns
+  PrefixTrie prefixTrie;  ///< Trie for prefix patterns
+  SuffixTrie suffixTrie;  ///< Trie for suffix patterns
+  std::unordered_map<std::string, std::string>
+      exactPatterns;  ///< Exact match patterns
+  std::vector<std::pair<std::regex, std::string>>
+      regexPatterns;  ///< Regex patterns
+  std::unordered_map<std::string, std::string>
+      hashPatterns;  ///< Hash-based patterns
 
   /**
    * @brief Add a pattern to the matcher
    * @param pattern URI pattern to add
    */
   void addPattern(const UriPattern& pattern);
-  
+
   /**
    * @brief Check if a URI matches any stored patterns
    * @param uri URI to test
    * @return True if the URI matches any pattern
    */
   bool matches(const std::string& uri) const;
-  
+
   /**
    * @brief Get all patterns that match the given URI
    * @param uri URI to test
@@ -111,7 +114,8 @@ inline ThreadLocalMemoryPool<UriPattern, 256>& getUriPatternPool() {
   return pool;
 }
 
-inline ThreadLocalMemoryPool<std::vector<std::string>, 128>& getUriResultPool() {
+inline ThreadLocalMemoryPool<std::vector<std::string>, 128>&
+getUriResultPool() {
   static thread_local ThreadLocalMemoryPool<std::vector<std::string>, 128> pool;
   return pool;
 }

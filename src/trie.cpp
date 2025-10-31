@@ -12,9 +12,9 @@ namespace catapult {
  */
 void TrieNodePoolDeleter::operator()(TrieNode* ptr) const {
   if (!ptr) return;
-  
+
   auto& pool = getTrieNodePool();
-  
+
   if (pool.is_pool_memory(ptr)) {
     // Pool allocated - destroy object first, then return memory to pool
     std::destroy_at(ptr);
@@ -48,7 +48,7 @@ TrieNodePtr TrieNode::removeChild(char c) {
 TrieNodePtr createTrieNode() {
   // Try pool allocation first
   auto poolPtr = getTrieNodePool().make();
-  
+
   if (poolPtr) {
     // Successfully allocated from pool - transfer ownership
     return TrieNodePtr(poolPtr.release(), TrieNodePoolDeleter{});
@@ -59,12 +59,10 @@ TrieNodePtr createTrieNode() {
 }
 
 // PrefixTrie implementation - updated for optimized node structure
-TrieNodePtr PrefixTrie::createNode() const {
-  return createTrieNode();
-}
+TrieNodePtr PrefixTrie::createNode() const { return createTrieNode(); }
 
-PrefixTrie::PrefixTrie(size_t expected_size) 
-  : expected_capacity_(expected_size) {
+PrefixTrie::PrefixTrie(size_t expected_size)
+    : expected_capacity_(expected_size) {
   root = createNode();
 }
 
@@ -88,17 +86,19 @@ void PrefixTrie::insert(std::string_view pattern, std::string_view value) {
   current->value = std::string(value);
 }
 
-void PrefixTrie::insertBatch(const std::vector<std::pair<std::string_view, std::string_view>>& patterns) {
+void PrefixTrie::insertBatch(
+    const std::vector<std::pair<std::string_view, std::string_view>>&
+        patterns) {
   for (const auto& [pattern, value] : patterns) {
     insert(pattern, value);
   }
 }
 
-std::vector<std::string> PrefixTrie::searchPrefix(
-    std::string_view text) const {
+std::vector<std::string> PrefixTrie::searchPrefix(std::string_view text) const {
   std::vector<std::string> matches;
-  matches.reserve(expected_capacity_ > 0 ? std::min(expected_capacity_, text.size()) : 10);
-  
+  matches.reserve(
+      expected_capacity_ > 0 ? std::min(expected_capacity_, text.size()) : 10);
+
   const TrieNode* current = root.get();
 
   for (size_t i = 0; i < text.length(); ++i) {
@@ -116,7 +116,8 @@ std::vector<std::string> PrefixTrie::searchPrefix(
   return matches;
 }
 
-std::vector<std::vector<std::string>> PrefixTrie::searchPrefixBatch(const std::vector<std::string_view>& texts) const {
+std::vector<std::vector<std::string>> PrefixTrie::searchPrefixBatch(
+    const std::vector<std::string_view>& texts) const {
   std::vector<std::vector<std::string>> results;
   results.reserve(texts.size());
   for (const auto& text : texts) {
@@ -131,20 +132,20 @@ size_t PrefixTrie::getMemoryUsage() const noexcept {
 
 size_t PrefixTrie::calculateNodeMemory(const TrieNode* node) const noexcept {
   if (!node) return 0;
-  
+
   size_t memory = sizeof(TrieNode);
   memory += node->value.capacity();
-  
+
   // Byte children array is always allocated (full 256 bytes)
   memory += sizeof(node->children);
-  
+
   // Recursively calculate children memory
   for (const auto& child : node->children) {
     if (child) {
       memory += calculateNodeMemory(child.get());
     }
   }
-  
+
   return memory;
 }
 
@@ -235,12 +236,10 @@ bool PrefixTrie::removeRecursive(TrieNode* node, const std::string& pattern,
 }
 
 // SuffixTrie implementation
-TrieNodePtr SuffixTrie::createNode() const {
-  return createTrieNode();
-}
+TrieNodePtr SuffixTrie::createNode() const { return createTrieNode(); }
 
-SuffixTrie::SuffixTrie(size_t expected_size) 
-  : expected_capacity_(expected_size) {
+SuffixTrie::SuffixTrie(size_t expected_size)
+    : expected_capacity_(expected_size) {
   root = createNode();
 }
 
@@ -271,16 +270,18 @@ void SuffixTrie::insert(std::string_view pattern, std::string_view value) {
   current->value = std::string(value);
 }
 
-void SuffixTrie::insertBatch(const std::vector<std::pair<std::string_view, std::string_view>>& patterns) {
+void SuffixTrie::insertBatch(
+    const std::vector<std::pair<std::string_view, std::string_view>>&
+        patterns) {
   for (const auto& [pattern, value] : patterns) {
     insert(pattern, value);
   }
 }
 
-std::vector<std::string> SuffixTrie::searchSuffix(
-    std::string_view text) const {
+std::vector<std::string> SuffixTrie::searchSuffix(std::string_view text) const {
   std::vector<std::string> matches;
-  matches.reserve(expected_capacity_ > 0 ? std::min(expected_capacity_, text.size()) : 10);
+  matches.reserve(
+      expected_capacity_ > 0 ? std::min(expected_capacity_, text.size()) : 10);
   std::string reversed = reverse(text);
   const TrieNode* current = root.get();
 
@@ -299,7 +300,8 @@ std::vector<std::string> SuffixTrie::searchSuffix(
   return matches;
 }
 
-std::vector<std::vector<std::string>> SuffixTrie::searchSuffixBatch(const std::vector<std::string_view>& texts) const {
+std::vector<std::vector<std::string>> SuffixTrie::searchSuffixBatch(
+    const std::vector<std::string_view>& texts) const {
   std::vector<std::vector<std::string>> results;
   results.reserve(texts.size());
   for (const auto& text : texts) {

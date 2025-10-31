@@ -5,10 +5,10 @@
 
 #pragma once
 
-#include <chrono>
-#include <unordered_set>
-#include <ranges>
 #include <algorithm>
+#include <chrono>
+#include <ranges>
+#include <unordered_set>
 
 #include "crypto.hpp"
 #include "error.hpp"
@@ -24,9 +24,11 @@ class CatToken;
  */
 class CatTokenValidator {
  private:
-  std::optional<std::unordered_set<std::string>> expectedIssuers_;   ///< Expected token issuers
-  std::optional<std::unordered_set<std::string>> expectedAudiences_; ///< Expected token audiences
-  int64_t clockSkewTolerance_;                                       ///< Clock skew tolerance in seconds
+  std::optional<std::unordered_set<std::string>>
+      expectedIssuers_;  ///< Expected token issuers
+  std::optional<std::unordered_set<std::string>>
+      expectedAudiences_;       ///< Expected token audiences
+  int64_t clockSkewTolerance_;  ///< Clock skew tolerance in seconds
 
  public:
   /**
@@ -41,7 +43,7 @@ class CatTokenValidator {
    */
   CatTokenValidator& withExpectedIssuers(
       const std::vector<std::string>& issuers);
-  
+
   /**
    * @brief Set expected token audiences
    * @param audiences List of valid audiences
@@ -49,7 +51,7 @@ class CatTokenValidator {
    */
   CatTokenValidator& withExpectedAudiences(
       const std::vector<std::string>& audiences);
-  
+
   /**
    * @brief Set clock skew tolerance
    * @param toleranceSeconds Tolerance in seconds
@@ -65,12 +67,13 @@ class CatTokenValidator {
   void validate(const CatToken& token) const;
 
   /**
-   * @brief Validate multiple typed composite claims using CompositeClaimType concept
+   * @brief Validate multiple typed composite claims using CompositeClaimType
+   * concept
    * @tparam T The composite claim type that satisfies CompositeClaimType
    * @param claims Vector of typed composite claims to validate
    * @return true if all claims are valid
    */
-  template<CompositeClaimType T>
+  template <CompositeClaimType T>
   bool validateTypedComposites(const std::vector<T>& claims) const;
 
   /**
@@ -81,7 +84,7 @@ class CatTokenValidator {
   bool validateTypedOrClaim(const OrClaim& orClaim) const;
 
   /**
-   * @brief Validate a typed AND composite claim  
+   * @brief Validate a typed AND composite claim
    * @param andClaim The AND composite claim to validate
    * @return true if the claim is valid
    */
@@ -122,11 +125,11 @@ CatToken decodeToken(const std::string& tokenStr,
 /**
  * @brief Create a minimal valid token using token factory utilities
  * @param issuer The token issuer
- * @param audience The token audience  
+ * @param audience The token audience
  * @return A minimal valid CatToken
  */
-CatToken createMinimalToken(const std::string& issuer, const std::string& audience);
-
+CatToken createMinimalToken(const std::string& issuer,
+                            const std::string& audience);
 
 /**
  * @brief Create typed composite claims using factory utilities
@@ -134,9 +137,10 @@ CatToken createMinimalToken(const std::string& issuer, const std::string& audien
  * @param tokens Vector of tokens to include in the composite
  * @return A typed composite claim
  */
-template<CompositeOperator Op>
-requires (is_valid_operator<Op>())
-TypedCompositeClaim<Op> createTypedComposite(const std::vector<CatToken>& tokens);
+template <CompositeOperator Op>
+  requires(is_valid_operator<Op>())
+TypedCompositeClaim<Op> createTypedComposite(
+    const std::vector<CatToken>& tokens);
 
 /**
  * @brief Validate a typed composite claim using the CompositeClaimType concept
@@ -144,26 +148,31 @@ TypedCompositeClaim<Op> createTypedComposite(const std::vector<CatToken>& tokens
  * @tparam Validator The validator type that satisfies TokenValidator
  * @param compositeClaim The composite claim to validate
  * @param validator The validator to use for individual token validation
- * @return true if the composite claim is valid and all its tokens pass validation
+ * @return true if the composite claim is valid and all its tokens pass
+ * validation
  */
-template<CompositeClaimType T, TokenValidator Validator>
-bool validateTypedCompositeClaim(const T& compositeClaim, const Validator& validator);
+template <CompositeClaimType T, TokenValidator Validator>
+bool validateTypedCompositeClaim(const T& compositeClaim,
+                                 const Validator& validator);
 
 // Template implementation
-template<CompositeClaimType T, TokenValidator Validator>
-bool validateTypedCompositeClaim(const T& compositeClaim, const Validator& validator) {
+template <CompositeClaimType T, TokenValidator Validator>
+bool validateTypedCompositeClaim(const T& compositeClaim,
+                                 const Validator& validator) {
   // First validate the depth using the concept
   if (!composite_utils::validateDepth(compositeClaim)) {
-    throw InvalidClaimValueError("Typed composite claim exceeds maximum nesting depth");
+    throw InvalidClaimValueError(
+        "Typed composite claim exceeds maximum nesting depth");
   }
-  
+
   // Then validate the composite claim itself
   return compositeClaim.evaluate(validator);
 }
 
 // CatTokenValidator template method implementation
-template<CompositeClaimType T>
-bool CatTokenValidator::validateTypedComposites(const std::vector<T>& claims) const {
+template <CompositeClaimType T>
+bool CatTokenValidator::validateTypedComposites(
+    const std::vector<T>& claims) const {
   return std::ranges::all_of(claims, [this](const T& claim) {
     try {
       return validateTypedCompositeClaim(claim, *this);
@@ -175,21 +184,23 @@ bool CatTokenValidator::validateTypedComposites(const std::vector<T>& claims) co
 
 // Template implementations for factory functions
 
-template<CompositeOperator Op>
-requires (is_valid_operator<Op>())
-TypedCompositeClaim<Op> createTypedComposite(const std::vector<CatToken>& tokens) {
+template <CompositeOperator Op>
+  requires(is_valid_operator<Op>())
+TypedCompositeClaim<Op> createTypedComposite(
+    const std::vector<CatToken>& tokens) {
   TypedCompositeClaim<Op> composite;
   for (const auto& token : tokens) {
     composite.addToken(token);
   }
-  
+
   // Compile-time validation of depth
   if constexpr (composite_constants::ENABLE_DEPTH_VALIDATION) {
     if (!composite.isDepthValid()) {
-      throw InvalidClaimValueError("Composite claim exceeds maximum nesting depth");
+      throw InvalidClaimValueError(
+          "Composite claim exceeds maximum nesting depth");
     }
   }
-  
+
   return composite;
 }
 

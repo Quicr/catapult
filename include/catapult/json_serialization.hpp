@@ -6,11 +6,12 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
-#include "token.hpp"
-#include "claims.hpp"
-#include "moqt_claims.hpp"
-#include "composite.hpp"
+
 #include "base64.hpp"
+#include "claims.hpp"
+#include "composite.hpp"
+#include "moqt_claims.hpp"
+#include "token.hpp"
 
 namespace catapult {
 
@@ -106,7 +107,8 @@ std::string to_compact_json(const CatToken& token);
  * @param indent Number of spaces to indent if pretty printing (default: 2)
  * @return Base64-encoded JSON string
  */
-std::string to_base64_json(const CatToken& token, bool pretty = false, int indent = 2);
+std::string to_base64_json(const CatToken& token, bool pretty = false,
+                           int indent = 2);
 
 /**
  * @brief Parse CAT token from base64-encoded JSON
@@ -144,8 +146,8 @@ std::string base64_to_json(const std::string& base64_string);
  */
 bool is_valid_base64(const std::string& base64_string);
 
-} // namespace base64_utils
+}  // namespace base64_utils
 
-} // namespace json_serialization
+}  // namespace json_serialization
 
-} // namespace catapult
+}  // namespace catapult
