@@ -222,14 +222,14 @@ public:
   }
   
   /**
-   * @brief Serialize to JWT format
+   * @brief Serialize to CBOR format
    */
-  [[nodiscard]] std::string to_jwt() const;
+  [[nodiscard]] std::string serialize() const;
   
   /**
-   * @brief Parse from JWT string
+   * @brief Deserialize from CBOR string
    */
-  static DpopProof from_jwt(std::string_view jwt);
+  static DpopProof deserialize(std::string_view cbor_data);
   
   /**
    * @brief Validate proof structure and freshness
@@ -321,6 +321,31 @@ public:
     std::string_view expected_uri,
     const std::string& expected_public_key_thumbprint
   );
+  
+  /**
+   * @brief Validate DPoP proof with compile-time action set for optimized validation
+   */
+  template<typename ActionSet>
+  [[nodiscard]] bool validate_proof_with_role(
+    const DpopProof& proof,
+    const ActionSet& allowed_actions,
+    std::string_view expected_uri,
+    const std::string& expected_public_key_thumbprint
+  ) {
+    // Basic structure validation
+    if (!proof.is_valid(settings_)) {
+      return false;
+    }
+    
+    // Check if action is allowed by the role (compile-time optimized)
+    const int actual_action = proof.get_payload().actx.action;
+    if (!allowed_actions.contains(actual_action)) {
+      return false;
+    }
+    
+    // Continue with standard validation
+    return validate_proof(proof, actual_action, expected_uri, expected_public_key_thumbprint);
+  }
   
   /**
    * @brief Clean up expired JTIs

@@ -224,7 +224,6 @@ bool DpopProof::verify_signature(const CryptographicAlgorithm& algorithm) const 
   try {
     // Create the signing input using the same method as when the proof was created
     auto signing_input = create_signing_input();
-    
     // Verify the signature using the provided algorithm
     return algorithm.verify(signing_input, signature_);
   } catch (const std::exception&) {
@@ -251,7 +250,7 @@ bool DpopProof::verify_signature() const {
   }
 }
 
-std::string DpopProof::to_jwt() const {
+std::string DpopProof::serialize() const {
   // Return CBOR-encoded DPoP proof instead of JWT format
   auto cbor_payload = create_signing_input();
   
@@ -290,12 +289,12 @@ std::string DpopProof::to_jwt() const {
   return result;
 }
 
-DpopProof DpopProof::from_jwt(std::string_view jwt) {
-  // Split JWT into parts
+DpopProof DpopProof::deserialize(std::string_view cbor_data) {
+  // Split serialized data into parts
   std::vector<std::string> parts;
   std::string current;
   
-  for (char c : jwt) {
+  for (char c : cbor_data) {
     if (c == '.') {
       parts.push_back(current);
       current.clear();
