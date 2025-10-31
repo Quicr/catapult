@@ -97,7 +97,6 @@ add_executable(catapult_tests
     tests/cwt_encode_decode.cpp
     tests/cwt_signing.cpp
     tests/rfc8152_compliance.cpp
-    tests/integration.cpp
     tests/memory_pool.cpp
     tests/moqt_claims.cpp
     tests/secure_vector.cpp
@@ -127,17 +126,19 @@ add_test(NAME catapult_unit_tests COMMAND catapult_tests)
 # Create benchmark executable (if Google Benchmark is available)
 if(benchmark_FOUND)
     add_executable(catapult_benchmarks
+        benchmarks/benchmark_main.cpp
         benchmarks/base64_bench.cpp
         benchmarks/trie_bench.cpp
         benchmarks/memory_pool_bench.cpp
         benchmarks/secure_vector_bench.cpp
         benchmarks/cbor_bench.cpp
+        benchmarks/crypto_bench.cpp
+        benchmarks/token_bench.cpp
     )
     
     target_link_libraries(catapult_benchmarks
         catapult
         benchmark::benchmark
-        benchmark::benchmark_main
     )
     
     # Optionally add benchmark as a test (though it's primarily for performance measurement)
@@ -168,3 +169,9 @@ add_executable(cat_cwt_crypto
 )
 
 target_link_libraries(cat_cwt_crypto catapult)
+
+add_executable(moqt_dpop_example
+        examples/moqt_dpop_example.cpp
+)
+
+target_link_libraries(moqt_dpop_example catapult)

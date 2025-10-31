@@ -40,11 +40,11 @@ TEST_CASE("Sha256Hash") {
     CHECK(hash != differentHash);
 }
 
-TEST_CASE("CreateSigningInput") {
+TEST_CASE("CreateJwtSigningInput") {
     std::vector<uint8_t> header = {0x7b, 0x22, 0x61, 0x6c, 0x67, 0x22, 0x3a, 0x22, 0x48, 0x53, 0x32, 0x35, 0x36, 0x22, 0x7d}; // {"alg":"HS256"}
     std::vector<uint8_t> payload = {0x7b, 0x22, 0x73, 0x75, 0x62, 0x22, 0x3a, 0x22, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x22, 0x7d}; // {"sub":"1234567890"}
     
-    auto signingInput = createSigningInput(header, payload);
+    auto signingInput = createJwtSigningInput(header, payload);
     
     // Should be base64url(header) + "." + base64url(payload)
     std::string expected = base64UrlEncode(header) + "." + base64UrlEncode(payload);

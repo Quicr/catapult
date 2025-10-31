@@ -359,7 +359,7 @@ TEST_CASE("Real-World Scenarios") {
         // Test subscriber permissions  
         CHECK(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE, "sports.live", "/game123"));
         CHECK(moqt_claims->isAuthorized(moqt_actions::FETCH, "news.live", "/breaking"));
-        
+
         // Test denied permissions
         CHECK_FALSE(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE, 
                                              "publisher.media-platform.example", "/live/stream1"));
