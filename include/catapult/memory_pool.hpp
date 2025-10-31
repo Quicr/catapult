@@ -5,6 +5,11 @@
 
 #pragma once
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4324) // structure was padded due to alignment specifier
+#endif
+
 #include <array>
 #include <atomic>
 #include <bit>
@@ -394,3 +399,7 @@ thread_local LockFreeMemoryPool<T, PoolSize>
     ThreadLocalMemoryPool<T, PoolSize>::pool_;
 
 }  // namespace catapult
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
