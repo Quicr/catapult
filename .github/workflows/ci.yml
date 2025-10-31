@@ -11,12 +11,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest,  macos-latest]
-        arch: [x64]
         include:
+          # Ubuntu builds
+          - os: ubuntu-latest
+            arch: x64
           - os: ubuntu-latest
             arch: arm64
+          # macOS builds  
           - os: macos-latest
+            arch: x64
+          - os: macos-latest
+            arch: arm64
+          # Windows builds
+          - os: windows-latest
+            arch: x64
+          - os: windows-latest
             arch: arm64
     
     runs-on: ${{ matrix.os }}
@@ -38,12 +47,25 @@ jobs:
       run: |
         brew install cmake openssl clang-format
 
+    - name: Set up dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        choco install cmake
+        # vcpkg will be used for dependencies on Windows
+
     - name: Configure CMake (Ubuntu/macOS)
       if: matrix.os != 'windows-latest'
       run: |
         mkdir build
         cd build
         cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON ..
+
+    - name: Configure CMake (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON -A ${{ matrix.arch == 'arm64' && 'ARM64' || 'x64' }} ..
 
     - name: Build
       run: |
