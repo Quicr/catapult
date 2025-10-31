@@ -3,6 +3,7 @@
 #include <cbor.h>
 
 #include <algorithm>
+#include <limits>
 
 #include "catapult/base64.hpp"
 #include "catapult/crypto.hpp"
@@ -533,13 +534,19 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
 
       case CLAIM_EXP:
         if (cbor_isa_uint(value_item)) {
-          token.core.exp = cbor_get_uint64(value_item);
+          uint64_t exp_val = cbor_get_uint64(value_item);
+          if (exp_val <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+            token.core.exp = static_cast<int64_t>(exp_val);
+          }
         }
         break;
 
       case CLAIM_NBF:
         if (cbor_isa_uint(value_item)) {
-          token.core.nbf = cbor_get_uint64(value_item);
+          uint64_t nbf_val = cbor_get_uint64(value_item);
+          if (nbf_val <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+            token.core.nbf = static_cast<int64_t>(nbf_val);
+          }
         }
         break;
 
