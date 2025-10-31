@@ -50,8 +50,8 @@ jobs:
     - name: Set up dependencies (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        choco install cmake
-        # vcpkg will be used for dependencies on Windows
+        choco install cmake openssl
+        vcpkg install spdlog:${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}-windows
 
     - name: Configure CMake (Ubuntu/macOS)
       if: matrix.os != 'windows-latest'
@@ -65,7 +65,7 @@ jobs:
       run: |
         mkdir build
         cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON -A ${{ matrix.arch == 'arm64' && 'ARM64' || 'x64' }} ..
+        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON -A ${{ matrix.arch == 'arm64' && 'ARM64' || 'x64' }} -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ..
 
     - name: Build
       run: |
