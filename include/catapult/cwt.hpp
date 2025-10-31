@@ -21,6 +21,9 @@ typedef struct cbor_item_t cbor_item_t;
 
 namespace catapult {
 
+// Forward declarations
+struct AuthorizationContext;
+
 /**
  * @brief RAII wrapper for CBOR items
  */
@@ -165,6 +168,20 @@ class Cwt {
    * @return CBOR-encoded COSE header bytes
    */
   std::vector<uint8_t> createCoseHeader() const;
+
+  /**
+   * @brief Create DPoP signing input from authorization context
+   * @param actx Authorization context containing DPoP claims
+   * @param iat Issued at timestamp
+   * @param jti Optional JWT ID
+   * @param ath Optional access token hash
+   * @return CBOR-encoded DPoP signing input bytes
+   */
+  static std::vector<uint8_t> createDpopSigningInput(
+      const struct AuthorizationContext& actx,
+      int64_t iat,
+      const std::optional<std::string>& jti = std::nullopt,
+      const std::optional<std::string>& ath = std::nullopt);
 
 };
 
