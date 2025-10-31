@@ -11,7 +11,6 @@
 |----------|-------------|--------|
 |  Linux | x86_64, ARM64 | [![Ubuntu](https://github.com/Quicr/catapult/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Quicr/catapult/actions/workflows/ci.yml?query=branch%3Amain+os%3Aubuntu-latest) |
 |  macOS | x86_64, ARM64 | [![macOS](https://github.com/Quicr/catapult/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Quicr/catapult/actions/workflows/ci.yml?query=branch%3Amain+os%3Amacos-latest) |
-|  Windows | x86_64 | [![Windows](https://github.com/Quicr/catapult/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Quicr/catapult/actions/workflows/ci.yml?query=branch%3Amain+os%3Awindows-latest) |
 
 Catapult is a modern C++ library that provides secure, high-performance implementation
 for Common Access Token. One of the primary application goals for Catapult is 
