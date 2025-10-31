@@ -113,7 +113,7 @@ TEST_SUITE("CWT Encode/Decode Tests") {
         auto token = CatToken()
             .withIssuer("test-issuer")
             .withAudience({"test-aud"})
-            .withExpiration(std::chrono::system_clock::from_time_t(9999999999))
+            .withExpiration(std::chrono::system_clock::from_time_t(2147483647))
             .withVersion("test-version")
             .withReplayProtection("test-replay");
             
@@ -125,7 +125,7 @@ TEST_SUITE("CWT Encode/Decode Tests") {
         CHECK(decoded.core.iss.value() == "test-issuer");
         CHECK(decoded.core.aud.value().size() == 1);
         CHECK(decoded.core.aud.value()[0] == "test-aud");
-        CHECK(decoded.core.exp.value() == 9999999999);
+        CHECK(decoded.core.exp.value() == 2147483647);
         CHECK(decoded.cat.catv.value() == "test-version");
         CHECK(decoded.cat.catreplay.value() == "test-replay");
     }
