@@ -171,7 +171,7 @@ CatToken create_composite_token() {
     auto and_composite = composite_utils::createAndComposite(and_claim_sets);
     
     // Set the composite claims in the token
-    token.composite.andClaim = std::make_unique<AndClaim>(*and_composite);
+    token.composite.andClaim = std::move(and_composite);
     
     return token;
 }
@@ -224,9 +224,9 @@ CatToken create_nested_composite_token() {
     final_claim_sets.emplace_back(std::make_unique<NorClaim>(*nor_composite));
     auto final_composite = composite_utils::createAndComposite(final_claim_sets);
     
-    token.composite.orClaim = std::make_unique<OrClaim>(*or_composite);
-    token.composite.norClaim = std::make_unique<NorClaim>(*nor_composite);
-    token.composite.andClaim = std::make_unique<AndClaim>(*final_composite);
+    token.composite.orClaim = std::move(or_composite);
+    token.composite.norClaim = std::move(nor_composite);
+    token.composite.andClaim = std::move(final_composite);
     
     return token;
 }

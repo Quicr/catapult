@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <concepts>
@@ -420,7 +421,7 @@ class MoqtClaims {
   [[nodiscard]] bool isAuthorized(ActionT action,
                                   std::string_view namespace_name,
                                   std::string_view track_name) const noexcept {
-    return std::ranges::any_of(scopes, [=](const auto& scope) {
+    return std::any_of(scopes.begin(), scopes.end(), [=](const auto& scope) {
       return scope.authorizes(action, namespace_name, track_name);
     });
   }

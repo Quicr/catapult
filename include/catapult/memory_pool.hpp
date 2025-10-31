@@ -12,6 +12,7 @@
 #include <memory>
 #include <new>
 #include <span>
+#include <utility>
 
 namespace catapult {
 
