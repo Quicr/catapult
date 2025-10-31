@@ -3,7 +3,6 @@
  * @brief MOQT-specific claim definitions and structures for CAT tokens
  * 
  * This file implements the MOQT claims as defined in draft-law-moq-cat4moqt.
- * Provides C++20 modern features including concepts, ranges, and compile-time validation.
 */
 
 #pragma once
@@ -22,14 +21,16 @@
 #include <chrono>
 
 #include "error.hpp"
+#include "secure_vector.hpp"
 
 namespace catapult {
 
 /**
  * @brief MOQT claim identifiers according to the specification
+ * Using high numbers (65000+) to avoid conflicts with existing CBOR tags
  */
-constexpr int64_t CLAIM_MOQT = 327;        ///< MOQT claim (TBD_MOQT in spec)
-constexpr int64_t CLAIM_MOQT_REVAL = 328;  ///< MOQT revalidation claim (TBD_MOQT_REVAL in spec)
+constexpr int64_t CLAIM_MOQT = 65000;        ///< MOQT claim (was TBD_MOQT in spec)
+constexpr int64_t CLAIM_MOQT_REVAL = 65001;  ///< MOQT revalidation claim (was TBD_MOQT_REVAL in spec)
 
 /**
  * @brief MOQT action identifiers according to Section 4 of the specification
@@ -45,7 +46,6 @@ namespace moqt_actions {
   constexpr int FETCH = 7;                ///< FETCH action
   constexpr int TRACK_STATUS = 8;         ///< TRACK_STATUS action
   
-  // Compile-time validation
   constexpr bool is_valid_action(int action) noexcept {
     return action >= CLIENT_SETUP && action <= TRACK_STATUS;
   }
@@ -94,6 +94,30 @@ public:
   std::vector<uint8_t> pattern;
   
   /**
+   * @brief Factory methods for different match types
+   */
+  static MoqtBinaryMatch any() {
+    return MoqtBinaryMatch{};
+  }
+  
+  static MoqtBinaryMatch exact(std::string_view pattern) {
+    return MoqtBinaryMatch{BinaryMatchType::EXACT, pattern};
+  }
+  
+  static MoqtBinaryMatch prefix(std::string_view pattern) {
+    return MoqtBinaryMatch{BinaryMatchType::PREFIX, pattern};
+  }
+  
+  static MoqtBinaryMatch suffix(std::string_view pattern) {
+    return MoqtBinaryMatch{BinaryMatchType::SUFFIX, pattern};
+  }
+  
+  static MoqtBinaryMatch contains(std::string_view pattern) {
+    return MoqtBinaryMatch{BinaryMatchType::CONTAINS, pattern};
+  }
+
+private:
+  /**
    * @brief Default constructor for empty match (matches all)
    */
   MoqtBinaryMatch() : match_type(BinaryMatchType::EXACT), pattern{} {}
@@ -113,25 +137,8 @@ public:
     std::ranges::transform(str, std::back_inserter(pattern), 
                           [](char c) { return static_cast<uint8_t>(c); });
   }
-  
-  /**
-   * @brief Factory methods for different match types
-   */
-  static MoqtBinaryMatch exact(std::string_view pattern) {
-    return MoqtBinaryMatch{BinaryMatchType::EXACT, pattern};
-  }
-  
-  static MoqtBinaryMatch prefix(std::string_view pattern) {
-    return MoqtBinaryMatch{BinaryMatchType::PREFIX, pattern};
-  }
-  
-  static MoqtBinaryMatch suffix(std::string_view pattern) {
-    return MoqtBinaryMatch{BinaryMatchType::SUFFIX, pattern};
-  }
-  
-  static MoqtBinaryMatch contains(std::string_view pattern) {
-    return MoqtBinaryMatch{BinaryMatchType::CONTAINS, pattern};
-  }
+
+public:
   
   /**
    * @brief Test if this match applies to the given binary data
@@ -172,21 +179,19 @@ public:
  * @brief MOQT action scope representing one scope entry in the moqt claim
  */
 class MoqtActionScope {
-public:
-  std::vector<int> actions;           ///< Allowed MOQT actions
-  MoqtBinaryMatch namespace_match;    ///< Namespace match pattern
-  MoqtBinaryMatch track_match;        ///< Track match pattern
+  friend class MoqtClaims;
   
+private:
   /**
    * @brief Default constructor
    */
-  MoqtActionScope() = default;
+  MoqtActionScope() = delete;
   
   /**
    * @brief Constructor with actions and match patterns
    */
   template<std::ranges::range ActionRange>
-  requires std::ranges::range<ActionRange> && MoqtActionType<std::ranges::range_value_t<ActionRange>>
+  requires MoqtActionType<std::ranges::range_value_t<ActionRange>>
   MoqtActionScope(const ActionRange& action_list, 
                   MoqtBinaryMatch ns_match, 
                   MoqtBinaryMatch tr_match)
@@ -203,6 +208,11 @@ public:
       actions.push_back(action);
     }
   }
+
+public:
+  std::vector<int> actions;           ///< Allowed MOQT actions
+  MoqtBinaryMatch namespace_match;    ///< Namespace match pattern
+  MoqtBinaryMatch track_match;        ///< Track match pattern
   
   /**
    * @brief Factory method for creating validated scope
@@ -297,6 +307,57 @@ public:
 };
 
 /**
+ * @brief Predefined compile-time action sets for common roles
+ */
+namespace role_actions {
+  // Publisher role: can publish content and announce namespaces
+  constexpr auto publisher = CompileTimeActionSet<
+    moqt_actions::PUBLISH,
+    moqt_actions::ANNOUNCE
+  >{};
+  
+  // Subscriber role: can subscribe to content and fetch data
+  constexpr auto subscriber = CompileTimeActionSet<
+    moqt_actions::SUBSCRIBE,
+    moqt_actions::FETCH
+  >{};
+
+  // Full access role: all available actions
+  constexpr auto full_access = CompileTimeActionSet<
+    moqt_actions::CLIENT_SETUP,
+    moqt_actions::SERVER_SETUP,
+    moqt_actions::ANNOUNCE,
+    moqt_actions::SUBSCRIBE_NAMESPACE,
+    moqt_actions::SUBSCRIBE,
+    moqt_actions::SUBSCRIBE_UPDATE,
+    moqt_actions::PUBLISH,
+    moqt_actions::FETCH,
+    moqt_actions::TRACK_STATUS
+  >{};
+  
+  // Read-only role: can only subscribe and fetch
+  constexpr auto read_only = CompileTimeActionSet<
+    moqt_actions::SUBSCRIBE,
+    moqt_actions::FETCH,
+    moqt_actions::SUBSCRIBE_NAMESPACE
+  >{};
+}
+
+/**
+ * @brief Template utility functions for compile-time role validation
+ */
+template<typename ActionSet>
+constexpr bool validates_role(const ActionSet& role, int action) noexcept {
+  return role.contains(action);
+}
+
+template<int... AllowedActions>
+constexpr bool is_action_allowed(int action) noexcept {
+  constexpr auto action_set = CompileTimeActionSet<AllowedActions...>{};
+  return action_set.contains(action);
+}
+
+/**
  * @brief Main MOQT claims structure
  */
 class MoqtClaims {
@@ -328,18 +389,18 @@ public:
    * @brief Add a scope to the claims
    */
   template<std::ranges::range ActionRange>
-  requires std::ranges::range<ActionRange> && MoqtActionType<std::ranges::range_value_t<ActionRange>>
+  requires MoqtActionType<std::ranges::range_value_t<ActionRange>>
   void addScope(const ActionRange& actions, 
                 MoqtBinaryMatch namespace_match,
                 MoqtBinaryMatch track_match) {
-    scopes.emplace_back(actions, std::move(namespace_match), std::move(track_match));
+    scopes.emplace_back(MoqtActionScope::create(actions, std::move(namespace_match), std::move(track_match)));
   }
   
   /**
    * @brief Add a pre-constructed scope
    */
   void addScope(MoqtActionScope scope) {
-    scopes.push_back(std::move(scope));
+    scopes.emplace_back(std::move(scope));
   }
   
   /**
@@ -351,7 +412,7 @@ public:
                   "All actions must be valid MOQT actions");
     
     constexpr std::array action_array{Actions...};
-    scopes.emplace_back(action_array, std::move(namespace_match), std::move(track_match));
+    scopes.emplace_back(MoqtActionScope::create(action_array, std::move(namespace_match), std::move(track_match)));
   }
   
   /**
@@ -432,9 +493,7 @@ public:
   }
 };
 
-/**
- * @brief Compile-time string to binary conversion for optimization
- */
+
 template<size_t N>
 consteval std::array<uint8_t, N-1> string_to_binary(const char (&str)[N]) {
   std::array<uint8_t, N-1> result{};  // -1 to exclude null terminator
@@ -444,93 +503,6 @@ consteval std::array<uint8_t, N-1> string_to_binary(const char (&str)[N]) {
   return result;
 }
 
-/**
- * @brief Secure binary data container for sensitive information
- */
-class SecureBinaryData {
-private:
-  std::unique_ptr<uint8_t[]> data_;
-  size_t size_;
-  
-public:
-  /**
-   * @brief Constructor from string view
-   */
-  explicit SecureBinaryData(std::string_view str) 
-    : size_(str.size()) {
-    data_ = std::make_unique<uint8_t[]>(size_);
-    std::ranges::transform(str, data_.get(), 
-                          [](char c) { return static_cast<uint8_t>(c); });
-  }
-  
-  /**
-   * @brief Constructor from span
-   */
-  explicit SecureBinaryData(std::span<const uint8_t> data)
-    : size_(data.size()) {
-    data_ = std::make_unique<uint8_t[]>(size_);
-    std::ranges::copy(data, data_.get());
-  }
-  
-  /**
-   * @brief Move constructor
-   */
-  SecureBinaryData(SecureBinaryData&& other) noexcept
-    : data_(std::move(other.data_)), size_(other.size_) {
-    other.size_ = 0;
-  }
-  
-  /**
-   * @brief Move assignment
-   */
-  SecureBinaryData& operator=(SecureBinaryData&& other) noexcept {
-    if (this != &other) {
-      // Securely clear old data
-      if (data_) {
-        std::ranges::fill_n(data_.get(), size_, uint8_t{0});
-      }
-      data_ = std::move(other.data_);
-      size_ = other.size_;
-      other.size_ = 0;
-    }
-    return *this;
-  }
-  
-  /**
-   * @brief Destructor with secure cleanup
-   */
-  ~SecureBinaryData() {
-    if (data_) {
-      // Securely clear memory
-      std::ranges::fill_n(data_.get(), size_, uint8_t{0});
-    }
-  }
-  
-  // Disable copy operations for security
-  SecureBinaryData(const SecureBinaryData&) = delete;
-  SecureBinaryData& operator=(const SecureBinaryData&) = delete;
-  
-  /**
-   * @brief Get the size of the data
-   */
-  [[nodiscard]] size_t size() const noexcept { return size_; }
-  
-  /**
-   * @brief Constant-time secure comparison
-   */
-  [[nodiscard]] bool secure_compare(std::span<const uint8_t> other) const noexcept {
-    if (size_ != other.size()) {
-      return false;
-    }
-    
-    // Constant-time comparison to prevent timing attacks
-    uint8_t diff = 0;
-    for (size_t i = 0; i < size_; ++i) {
-      diff |= data_[i] ^ other[i];
-    }
-    return diff == 0;
-  }
-};
 
 // Forward declaration
 struct EnhancedDpopClaims;
@@ -540,30 +512,10 @@ struct EnhancedDpopClaims;
  */
 struct ExtendedCatClaims {
   std::optional<MoqtClaims> moqt;  ///< MOQT claims
-  
-  /**
-   * @brief Default constructor
-   */
   ExtendedCatClaims() = default;
-  
-  /**
-   * @brief Copy constructor
-   */
   ExtendedCatClaims(const ExtendedCatClaims& other) = default;
-  
-  /**
-   * @brief Move constructor
-   */
   ExtendedCatClaims(ExtendedCatClaims&&) noexcept = default;
-  
-  /**
-   * @brief Copy assignment
-   */
   ExtendedCatClaims& operator=(const ExtendedCatClaims& other) = default;
-  
-  /**
-   * @brief Move assignment
-   */
   ExtendedCatClaims& operator=(ExtendedCatClaims&&) noexcept = default;
   
   /**
