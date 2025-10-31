@@ -2,8 +2,9 @@
  * @file cat_dpop.hpp
  * @brief DPoP (Demonstrating Proof-of-Possession) support for CAT tokens
  * 
- * This file implements DPoP functionality as defined in RFC 9449 and integrated
- * with CAT tokens according to draft-law-moq-cat4moqt specification.
+ * This file implements DPoP functionality as defined in
+ * https://www.ietf.org/archive/id/draft-nandakumar-oauth-dpop-proof-00.txt and
+ * integrated with CAT tokens according to draft-law-moq-cat4moqt specification.
  */
 
 #pragma once
@@ -27,39 +28,69 @@ namespace catapult {
  * @brief DPoP header parameters
  */
 struct DpopHeader {
-  std::string typ = "dpop+jwt";     ///< Token type, must be "dpop+jwt"
-  std::string alg;                  ///< Signing algorithm (e.g., "ES256", "RS256")
-  std::string jwk;                  ///< JSON Web Key (public key)
+  std::string typ = "dpop-proof+jwt";     ///< Token type, must be "dpop-proof+jwt"
+  std::string alg;                        ///< Signing algorithm (e.g., "ES256", "RS256")
+  std::string jwk;                        ///< JSON Web Key (public key)
   
   /**
    * @brief Validate header parameters
    */
   [[nodiscard]] bool is_valid() const noexcept {
-    return typ == "dpop+jwt" && !alg.empty() && !jwk.empty();
+    return typ == "dpop-proof+jwt" && !alg.empty() && !jwk.empty();
   }
 };
 
 /**
- * @brief DPoP payload claims
+ * @brief Authorization Context for application-agnostic DPoP proof
  */
-struct DpopPayload {
-  std::optional<std::string> jti;   ///< JWT ID for replay protection
-  std::string htm;                  ///< HTTP method (or equivalent MOQT action)
-  std::string htu;                  ///< HTTP URI (or MOQT resource identifier)
-  int64_t iat;                      ///< Issued at timestamp
-  std::optional<std::string> ath;   ///< Access token hash (optional)
+struct AuthorizationContext {
+  std::string type;                 ///< Protocol type identifier (e.g., "moqt")
+  int action;                       ///< Protocol-specific action code
+  std::string resource_uri;         ///< Protocol-specific resource identifier (optional)
+  std::string tns;                  ///< Track namespace (required for MOQT)
+  std::string tn;                   ///< Track name (required for MOQT)
   
   /**
-   * @brief Constructor with required fields
+   * @brief Constructor for MOQT context
    */
-  DpopPayload(std::string_view method, std::string_view uri)
-    : htm(method), htu(uri), iat(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())) {}
+  AuthorizationContext(int moqt_action, std::string_view uri)
+    : type("moqt"), action(moqt_action), resource_uri(uri) {}
   
   /**
-   * @brief Validate payload claims
+   * @brief Constructor for MOQT context with track namespace and name
+   */
+  AuthorizationContext(int moqt_action, std::string_view track_namespace, std::string_view track_name, std::string_view uri = "")
+    : type("moqt"), action(moqt_action), resource_uri(uri), tns(track_namespace), tn(track_name) {}
+  
+  /**
+   * @brief Validate context
    */
   [[nodiscard]] bool is_valid() const noexcept {
-    return !htm.empty() && !htu.empty() && iat > 0;
+    return !type.empty() && action >= 0 && !tns.empty() && !tn.empty();
+  }
+};
+
+/**
+ * @brief DPoP payload claims (Application-Agnostic Framework)
+ */
+struct DpopPayload {
+  std::optional<std::string> jti;           ///< JWT ID for replay protection
+  AuthorizationContext actx;                ///< Authorization context
+  int64_t iat;                              ///< Issued at timestamp
+  std::optional<std::string> ath;           ///< Access token hash (optional)
+  
+  /**
+   * @brief Constructor with required fields for MOQT
+   */
+  DpopPayload(int action, std::string_view track_namespace, std::string_view track_name, std::string_view uri = "")
+    : actx(action, track_namespace, track_name, uri), iat(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())) {}
+
+
+   /**
+    * @brief Validate payload claims
+   */
+  [[nodiscard]] bool is_valid() const noexcept {
+    return actx.is_valid() && iat > 0;
   }
   
   /**
@@ -169,6 +200,11 @@ public:
   [[nodiscard]] bool verify_signature(const CryptographicAlgorithm& algorithm) const;
   
   /**
+   * @brief Verify the proof signature using public key from header JWK
+   */
+  [[nodiscard]] bool verify_signature() const;
+  
+  /**
    * @brief Get header
    */
   [[nodiscard]] const DpopHeader& get_header() const noexcept { return header_; }
@@ -212,26 +248,21 @@ public:
 namespace moqt_dpop {
   
   /**
-   * @brief Map MOQT action to HTTP method equivalent
+   * @brief Get MOQT action code as string
    */
   template<MoqtActionType ActionT>
-  [[nodiscard]] constexpr std::string_view action_to_http_method(ActionT moqt_action) noexcept {
+  [[nodiscard]] constexpr std::string_view action_to_string(ActionT moqt_action) noexcept {
     switch (moqt_action) {
-      case 0: // CLIENT_SETUP
-      case 1: // SERVER_SETUP
-      case 6: // PUBLISH
-        return "POST";
-      case 2: // ANNOUNCE
-        return "PUT";
-      case 3: // SUBSCRIBE_NAMESPACE
-      case 4: // SUBSCRIBE
-      case 5: // SUBSCRIBE_UPDATE
-      case 7: // FETCH
-        return "GET";
-      case 8: // TRACK_STATUS
-        return "GET";
-      default:
-        return "POST"; // Default fallback
+      case 0: return "CLIENT_SETUP";
+      case 1: return "SERVER_SETUP";
+      case 2: return "ANNOUNCE";
+      case 3: return "SUBSCRIBE_NAMESPACE";
+      case 4: return "SUBSCRIBE";
+      case 5: return "SUBSCRIBE_UPDATE";
+      case 6: return "PUBLISH";
+      case 7: return "FETCH";
+      case 8: return "TRACK_STATUS";
+      default: return "UNKNOWN";
     }
   }
   
@@ -286,7 +317,7 @@ public:
    */
   [[nodiscard]] bool validate_proof(
     const DpopProof& proof,
-    std::string_view expected_method,
+    int expected_action,
     std::string_view expected_uri,
     const std::string& expected_public_key_thumbprint
   );
@@ -406,8 +437,6 @@ struct EnhancedDpopClaims {
   }
 };
 
-// Template implementations (defined after moqt_dpop namespace)
-
 template<MoqtActionType ActionT>
 DpopProof DpopProof::create_for_moqt_action(
     ActionT moqt_action,
@@ -420,15 +449,14 @@ DpopProof DpopProof::create_for_moqt_action(
   
   // Create header
   DpopHeader header;
-  header.typ = "dpop+jwt";
+  header.typ = "dpop-proof+jwt";
   header.alg = algorithm;
   header.jwk = public_key_jwk;
   
-  // Create payload
-  auto http_method = moqt_dpop::action_to_http_method(moqt_action);
+  // Create payload with track namespace and name
   auto resource_uri = moqt_dpop::construct_moqt_uri(endpoint_uri, namespace_name, track_name);
   
-  DpopPayload payload(http_method, resource_uri);
+  DpopPayload payload(static_cast<int>(moqt_action), namespace_name, track_name, resource_uri);
   if (jti.has_value()) {
     payload.jti = std::move(jti.value());
   }
