@@ -1,0 +1,139 @@
+version: '3.8'
+
+services:
+  # Alpine x86_64 build environment
+  alpine-build:
+    build:
+      context: .
+      dockerfile: Dockerfile.alpine
+      args:
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        GIT_COMMIT: ${GIT_COMMIT:-$(git rev-parse HEAD)}
+    image: catapult:alpine-latest
+    container_name: catapult-alpine
+    volumes:
+      - .:/workspace
+      - alpine-build-cache:/workspace/build
+    environment:
+      - CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-Release}
+      - COMPILER=${COMPILER:-gcc}
+      - PARALLEL_JOBS=${PARALLEL_JOBS:-$(nproc)}
+      - ENABLE_LOGGING=ON
+      - ENABLE_TRIE_MEMORY_POOL=ON
+    working_dir: /workspace
+    command: /bin/bash
+    networks:
+      - catapult-build-network
+
+  # Raspberry Pi ARM64 build environment
+  raspberrypi-build:
+    build:
+      context: .
+      dockerfile: Dockerfile.raspberrypi
+      args:
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        GIT_COMMIT: ${GIT_COMMIT:-$(git rev-parse HEAD)}
+    image: catapult:raspberrypi-arm64
+    container_name: catapult-raspberrypi
+    volumes:
+      - .:/workspace
+      - rpi-build-cache:/workspace/build
+    environment:
+      - CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-Release}
+      - COMPILER=gcc
+      - PARALLEL_JOBS=${PARALLEL_JOBS:-$(nproc)}
+      - ENABLE_LOGGING=ON
+      - ENABLE_TRIE_MEMORY_POOL=ON
+    working_dir: /workspace
+    command: /bin/bash
+    networks:
+      - catapult-build-network
+
+  # Cross-platform test runner
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.alpine
+    image: catapult:alpine-latest
+    container_name: catapult-tests
+    volumes:
+      - .:/workspace
+      - test-reports:/workspace/test-reports
+    environment:
+      - VERBOSE=${VERBOSE:-false}
+      - TEST_TIMEOUT=${TEST_TIMEOUT:-300}
+      - ENABLE_MEMORY_TESTS=${ENABLE_MEMORY_TESTS:-false}
+      - ENABLE_PERFORMANCE_TESTS=${ENABLE_PERFORMANCE_TESTS:-false}
+      - GENERATE_REPORT=true
+    working_dir: /workspace
+    command: >
+      bash -c "
+        /usr/local/bin/build.sh && 
+        /usr/local/bin/test.sh --report
+      "
+    depends_on:
+      - alpine-build
+    networks:
+      - catapult-build-network
+
+  # Benchmark runner
+  benchmark-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.alpine
+    image: catapult:alpine-latest
+    container_name: catapult-benchmarks
+    volumes:
+      - .:/workspace
+      - benchmark-reports:/workspace/benchmark-reports
+    environment:
+      - BENCHMARK_TIMEOUT=${BENCHMARK_TIMEOUT:-600}
+      - BENCHMARK_RUNS=${BENCHMARK_RUNS:-3}
+    working_dir: /workspace
+    command: >
+      bash -c "
+        /usr/local/bin/build.sh && 
+        /usr/local/bin/benchmark.sh --report --memory
+      "
+    depends_on:
+      - alpine-build
+    networks:
+      - catapult-build-network
+
+  # Static analysis runner
+  analysis-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.alpine
+    image: catapult:alpine-latest
+    container_name: catapult-analysis
+    volumes:
+      - .:/workspace
+      - analysis-reports:/workspace/analysis-reports
+    working_dir: /workspace
+    command: >
+      bash -c "
+        /usr/local/bin/build.sh && 
+        /usr/local/bin/analyze.sh --report --security --includes
+      "
+    depends_on:
+      - alpine-build
+    networks:
+      - catapult-build-network
+
+volumes:
+  alpine-build-cache:
+    driver: local
+  rpi-build-cache:
+    driver: local
+  test-reports:
+    driver: local
+  benchmark-reports:
+    driver: local
+  analysis-reports:
+    driver: local
+
+networks:
+  catapult-build-network:
+    driver: bridge
+    name: catapult-network

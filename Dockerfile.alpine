@@ -1,0 +1,87 @@
+# Alpine build environment for Catapult implementation
+FROM alpine:3.20
+
+LABEL description="Alpine build environment for Catapult implementation"
+LABEL maintainer="Catapult Development Team"
+LABEL version="1.0"
+
+ENV CC=gcc
+ENV CXX=g++
+ENV CMAKE_BUILD_TYPE=Release
+ENV CXXFLAGS="-std=c++20 -O2"
+
+# Update package lists and install essential build tools
+RUN apk update && apk add --no-cache \
+    # Essential build tools
+    build-base \
+    cmake \
+    ninja \
+    git \
+    pkgconfig \
+    wget \
+    curl \
+    bash \
+    \
+    # GCC with C++20 support
+    gcc \
+    g++ \
+    \
+    # Clang as alternative compiler
+    clang \
+    llvm \
+    \
+    # Required libraries for Catapult implementation
+    openssl-dev \
+    libcbor-dev \
+    nlohmann-json \
+    \
+    # Testing and benchmarking
+    gtest-dev \
+    \
+    # Memory debugging
+    valgrind \
+    \
+    # Static analysis tools
+    cppcheck \
+    clang-extra-tools \
+    \
+    # Documentation
+    doxygen \
+    graphviz \
+    \
+    # Additional utilities
+    htop \
+    tree \
+    vim
+
+# Additional development libraries
+RUN apk add --no-cache \
+    spdlog-dev
+
+# Create workspace directory
+WORKDIR /workspace
+
+# Set up build configuration
+ENV CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_CXX_FLAGS='-std=c++20 -O2' \
+                -DENABLE_TRIE_MEMORY_POOL=ON \
+                -DENABLE_LOGGING=ON \
+                -DBUILD_TESTING=ON \
+                -DBUILD_BENCHMARKS=ON"
+
+# Configure for multiple compiler support
+ENV GCC_VERSION=latest
+ENV CLANG_VERSION=latest
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD gcc --version && clang --version && cmake --version
+
+# Default command
+CMD ["/bin/bash"]
+
+# Build information
+ARG BUILD_DATE
+ARG GIT_COMMIT
+LABEL build-date=$BUILD_DATE
+LABEL git-commit=$GIT_COMMIT
