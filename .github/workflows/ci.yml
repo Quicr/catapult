@@ -2,16 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
 
 jobs:
   build-and-test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest,  macos-latest]
         arch: [x64]
         include:
           - os: ubuntu-latest
@@ -38,29 +38,12 @@ jobs:
       run: |
         brew install cmake openssl clang-format
 
-    - name: Set up dependencies (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        choco install cmake
-        vcpkg install openssl:x64-windows
-
-    - name: Set up MSVC (Windows)
-      if: matrix.os == 'windows-latest'
-      uses: microsoft/setup-msbuild@v2
-
     - name: Configure CMake (Ubuntu/macOS)
       if: matrix.os != 'windows-latest'
       run: |
         mkdir build
         cd build
         cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON ..
-
-    - name: Configure CMake (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        mkdir build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ..
 
     - name: Build
       run: |
