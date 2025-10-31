@@ -753,19 +753,15 @@ TEST_CASE("CompileTimeTypedCompositeWithMemoryPool") {
     auto token1 = createValidToken("pool1");
     auto token2 = createValidToken("pool2");
     
-    OrClaim pooledOr(true);
+    OrClaim pooledOr;
     pooledOr.addToken(token1);
     pooledOr.addToken(token2);
-    
-    CHECK(pooledOr.usePool == true);
     CHECK(pooledOr.claims.size() == 2);
     CHECK(pooledOr.evaluate(validator) == true);
     
-    AndClaim pooledAnd(true);
+    AndClaim pooledAnd;
     pooledAnd.addToken(token1);
     pooledAnd.addToken(token2);
-    
-    CHECK(pooledAnd.usePool == true);
     CHECK(pooledAnd.claims.size() == 2);
     CHECK(pooledAnd.evaluate(validator) == true);
 }

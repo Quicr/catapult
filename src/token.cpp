@@ -197,8 +197,8 @@ std::string encodeToken(const CatToken& token,
   // Encode payload
   auto payloadCbor = cwt.encodePayload();
 
-  // Create signing input
-  auto signingInput = createSigningInput(headerCbor, payloadCbor);
+  // Create JWT-style signing input for legacy token format
+  auto signingInput = createJwtSigningInput(headerCbor, payloadCbor);
 
   // Sign
   auto signature = algorithm.sign(signingInput);
@@ -233,8 +233,8 @@ CatToken decodeToken(const std::string& tokenStr,
   auto payloadCbor = base64UrlDecode(parts[1]);
   auto signature = base64UrlDecode(parts[2]);
 
-  // Verify signature
-  auto signingInput = createSigningInput(headerCbor, payloadCbor);
+  // Verify JWT-style signature for legacy token format
+  auto signingInput = createJwtSigningInput(headerCbor, payloadCbor);
   if (!algorithm.verify(signingInput, signature)) {
     throw SignatureVerificationError();
   }
