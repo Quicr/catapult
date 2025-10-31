@@ -1,0 +1,61 @@
+name: Code Formatting
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  format-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install clang-format
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format
+
+    - name: Check code formatting
+      run: |
+        # Check if any files need formatting
+        find src include -name "*.cpp" -o -name "*.hpp" | xargs clang-format -i -style=Google
+        
+        # Check if there are any changes
+        if ! git diff --exit-code; then
+          echo "❌ Code formatting issues found!"
+          echo "Please run 'make format' locally and commit the changes."
+          exit 1
+        else
+          echo "✅ Code formatting is correct!"
+        fi
+
+  format-fix:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: format-check
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install clang-format
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format
+
+    - name: Auto-fix formatting
+      run: |
+        find src include -name "*.cpp" -o -name "*.hpp" | xargs clang-format -i -style=Google
+
+    - name: Commit changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add -A
+        git diff --staged --quiet || git commit -m "Auto-fix code formatting [skip ci]"
+        git push

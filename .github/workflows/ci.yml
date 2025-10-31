@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        arch: [x64]
+        include:
+          - os: ubuntu-latest
+            arch: arm64
+          - os: macos-latest
+            arch: arm64
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libssl-dev clang-format
+
+    - name: Set up dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install cmake openssl clang-format
+
+    - name: Set up dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        choco install cmake
+        vcpkg install openssl:x64-windows
+
+    - name: Set up MSVC (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Configure CMake (Ubuntu/macOS)
+      if: matrix.os != 'windows-latest'
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON ..
+
+    - name: Configure CMake (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ..
+
+    - name: Build
+      run: |
+        cd build
+        cmake --build . --config Release
+
+    - name: Run tests
+      run: |
+        cd build
+        ctest --output-on-failure --build-config Release
+
+    - name: Upload test results
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.os }}-${{ matrix.arch }}
+        path: build/Testing/Temporary/LastTest.log
