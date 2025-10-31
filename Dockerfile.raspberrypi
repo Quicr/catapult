@@ -1,0 +1,98 @@
+# Raspberry Pi Debian build environment for Catapult implementation
+FROM arm64v8/debian:bookworm-slim
+
+LABEL description="Raspberry Pi Debian build environment for Catapult implementation"
+LABEL maintainer="CAT MOQT Development Team"
+LABEL version="1.0"
+
+# Set environment variables for C++20 and cross-compilation
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CC=gcc-12
+ENV CXX=g++-12
+ENV CMAKE_BUILD_TYPE=Release
+ENV CXXFLAGS="-std=c++20 -O3 -march=armv8-a+crc -mtune=cortex-a72 -ftree-vectorize"
+
+# Update package lists and install essential build tools
+RUN apt-get update && apt-get install -y \
+    # Essential build tools
+    build-essential \
+    cmake \
+    ninja-build \
+    git \
+    pkg-config \
+    wget \
+    curl \
+    \
+    # Modern GCC with C++20 support
+    gcc-12 \
+    g++-12 \
+    \
+    # Required libraries for CAT implementation
+    libssl-dev \
+    libcbor-dev \
+    nlohmann-json3-dev \
+    \
+    # Testing and benchmarking
+    libgtest-dev \
+    libbenchmark-dev \
+    \
+    # Documentation (optional)
+    doxygen \
+    graphviz \
+    \
+    # Debugging tools
+    gdb \
+    valgrind \
+    \
+    # Performance analysis
+    linux-perf \
+    \
+    # Clean up
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set GCC-12 as default
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
+
+# Install spdlog from source for latest version
+RUN cd /tmp \
+    && wget https://github.com/gabime/spdlog/archive/v1.15.3.tar.gz \
+    && tar -xzf v1.15.3.tar.gz \
+    && cd spdlog-1.15.3 \
+    && cmake -B build -S . \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DSPDLOG_BUILD_SHARED=OFF \
+        -DSPDLOG_BUILD_TESTS=OFF \
+        -DSPDLOG_BUILD_EXAMPLE=OFF \
+    && cmake --build build --parallel $(nproc) \
+    && cmake --install build \
+    && cd / && rm -rf /tmp/spdlog-*
+
+# Create workspace directory
+WORKDIR /workspace
+
+# Copy build and test scripts
+COPY docker/build.sh /usr/local/bin/build.sh
+COPY docker/test.sh /usr/local/bin/test.sh
+COPY docker/benchmark.sh /usr/local/bin/benchmark.sh
+RUN chmod +x /usr/local/bin/*.sh
+
+# Set up ARM-specific optimizations
+ENV CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_CXX_FLAGS='-std=c++20 -O3 -march=armv8-a+crc -mtune=cortex-a72' \
+                -DENABLE_TRIE_MEMORY_POOL=ON \
+                -DENABLE_LOGGING=ON"
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD gcc-12 --version && cmake --version && pkg-config --version
+
+# Default command
+CMD ["/bin/bash"]
+
+# Build information
+ARG BUILD_DATE
+ARG GIT_COMMIT
+LABEL build-date=$BUILD_DATE
+LABEL git-commit=$GIT_COMMIT
