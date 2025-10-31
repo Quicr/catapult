@@ -397,25 +397,44 @@ inline VoidResult success() { return VoidResult::success(std::monostate{}); }
  * @brief Helper function to throw appropriate OS exception based on errno
  */
 inline void throwOsError(const std::string& operation, int error_code = errno) {
+#ifdef _WIN32
+  std::string error_msg;
+  char buffer[256];
+  if (strerror_s(buffer, sizeof(buffer), error_code) == 0) {
+    error_msg = buffer;
+  } else {
+    error_msg = "Unknown error";
+  }
+#else
+  std::string error_msg = std::strerror(error_code);
+#endif
+
   switch (error_code) {
     case EACCES:
+#ifndef _WIN32
     case EPERM:
-      throw PermissionError(operation + ": " + std::strerror(error_code));
+#endif
+      throw PermissionError(operation + ": " + error_msg);
     case ENOMEM:
-      throw MemoryError(operation + ": " + std::strerror(error_code));
+      throw MemoryError(operation + ": " + error_msg);
     case EMFILE:
+#ifndef _WIN32
     case ENFILE:
+#endif
     case ENOSPC:
+#ifdef EDQUOT
     case EDQUOT:
-      throw ResourceExhaustedError(operation + ": " +
-                                   std::strerror(error_code));
+#endif
+      throw ResourceExhaustedError(operation + ": " + error_msg);
     case EIO:
     case ENOENT:
+#ifndef _WIN32
     case EISDIR:
     case ENOTDIR:
-      throw IoError(operation + ": " + std::strerror(error_code));
+#endif
+      throw IoError(operation + ": " + error_msg);
     default:
-      throw SystemCallError(operation + ": " + std::strerror(error_code));
+      throw SystemCallError(operation + ": " + error_msg);
   }
 }
 
