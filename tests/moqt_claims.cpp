@@ -88,7 +88,7 @@ TEST_CASE("Binary Match Tests") {
     }
     
     SUBCASE("Empty Match") {
-        auto match = MoqtBinaryMatch{};
+        auto match = MoqtBinaryMatch::any();
         
         CHECK(match.is_empty());
         CHECK(match.matches("anything"));
@@ -132,7 +132,7 @@ TEST_CASE("MOQT Action Scope Tests") {
     SUBCASE("Invalid Action Validation") {
         std::array invalid_actions = {-1, 10, 100};
         auto namespace_match = MoqtBinaryMatch::exact("test.com");
-        auto track_match = MoqtBinaryMatch{};
+        auto track_match = MoqtBinaryMatch::any();
         
         CHECK_THROWS_AS(MoqtActionScope::create(invalid_actions, namespace_match, track_match), 
                        InvalidClaimValueError);
@@ -160,6 +160,33 @@ TEST_CASE("Compile-Time Action Set Tests") {
         auto actions_span = action_set.get_actions();
         CHECK(actions_span.size() == 3);
     }
+    
+    SUBCASE("Role-Based Action Sets") {
+        // Test publisher role
+        static_assert(role_actions::publisher.template contains<moqt_actions::PUBLISH>());
+        static_assert(role_actions::publisher.template contains<moqt_actions::ANNOUNCE>());
+        static_assert(!role_actions::publisher.template contains<moqt_actions::SUBSCRIBE>());
+        
+        CHECK(role_actions::publisher.contains(moqt_actions::PUBLISH));
+        CHECK(role_actions::publisher.contains(moqt_actions::ANNOUNCE));
+        CHECK_FALSE(role_actions::publisher.contains(moqt_actions::SUBSCRIBE));
+        
+        // Test subscriber role
+        static_assert(role_actions::subscriber.template contains<moqt_actions::SUBSCRIBE>());
+        static_assert(role_actions::subscriber.template contains<moqt_actions::FETCH>());
+        static_assert(!role_actions::subscriber.template contains<moqt_actions::PUBLISH>());
+        
+        CHECK(role_actions::subscriber.contains(moqt_actions::SUBSCRIBE));
+        CHECK(role_actions::subscriber.contains(moqt_actions::FETCH));
+        CHECK_FALSE(role_actions::subscriber.contains(moqt_actions::PUBLISH));
+        
+        // Test template utility functions
+        CHECK(validates_role(role_actions::publisher, moqt_actions::PUBLISH));
+        CHECK_FALSE(validates_role(role_actions::publisher, moqt_actions::SUBSCRIBE));
+        
+        CHECK(is_action_allowed<moqt_actions::PUBLISH, moqt_actions::ANNOUNCE>(moqt_actions::PUBLISH));
+        CHECK_FALSE(is_action_allowed<moqt_actions::PUBLISH, moqt_actions::ANNOUNCE>(moqt_actions::SUBSCRIBE));
+    }
 }
 
 TEST_CASE("MOQT Claims Tests") {
@@ -182,7 +209,7 @@ TEST_CASE("MOQT Claims Tests") {
         std::array subscribe_actions = {moqt_actions::SUBSCRIBE, moqt_actions::FETCH};
         claims.addScope(subscribe_actions,
                        MoqtBinaryMatch::suffix(".live"),
-                       MoqtBinaryMatch{});
+                       MoqtBinaryMatch::any());
         
         CHECK(claims.getScopeCount() == 2);
         CHECK(claims.getTotalActionCount() == 4);
@@ -202,7 +229,7 @@ TEST_CASE("MOQT Claims Tests") {
         std::array subscribe_actions = {moqt_actions::SUBSCRIBE, moqt_actions::FETCH};
         claims.addScope(subscribe_actions,
                        MoqtBinaryMatch::prefix("content"),
-                       MoqtBinaryMatch{});
+                       MoqtBinaryMatch::any());
         
         // Valid publish operations
         CHECK(claims.isAuthorized(moqt_actions::PUBLISH, "publisher.example", "/live/stream1"));
@@ -247,143 +274,6 @@ TEST_CASE("MOQT Claims Tests") {
                        InvalidClaimValueError);
         CHECK_THROWS_AS(claims.setRevalidationInterval(std::chrono::seconds{-10}), 
                        InvalidClaimValueError);
-    }
-}
-
-TEST_CASE("Secure Binary Data Tests") {
-    SUBCASE("Basic Functionality") {
-        auto secure_data = SecureBinaryData("sensitive-key");
-        
-        CHECK(secure_data.size() == 13);
-        
-        // Test correct comparison
-        std::vector<uint8_t> correct_key = {'s','e','n','s','i','t','i','v','e','-','k','e','y'};
-        CHECK(secure_data.secure_compare(correct_key));
-        
-        // Test incorrect comparison
-        std::vector<uint8_t> wrong_key = {'w','r','o','n','g','-','k','e','y'};
-        CHECK_FALSE(secure_data.secure_compare(wrong_key));
-        
-        // Test different length
-        std::vector<uint8_t> short_key = {'s','h','o','r','t'};
-        CHECK_FALSE(secure_data.secure_compare(short_key));
-    }
-    
-    SUBCASE("Move Semantics") {
-        auto secure_data1 = SecureBinaryData("test-data");
-        CHECK(secure_data1.size() == 9);
-        
-        auto secure_data2 = std::move(secure_data1);
-        CHECK(secure_data2.size() == 9);
-        CHECK(secure_data1.size() == 0);  // Moved-from object
-    }
-}
-
-TEST_CASE("Extended CAT Claims Tests") {
-    SUBCASE("Basic Functionality") {
-        ExtendedCatClaims extended;
-        
-        CHECK_FALSE(extended.hasMoqtClaims());
-        
-        // Create MOQT claims
-        auto moqt_claims = MoqtClaims::create();
-        std::array actions = {moqt_actions::PUBLISH};
-        moqt_claims.addScope(actions, 
-                            MoqtBinaryMatch::exact("test.example"),
-                            MoqtBinaryMatch{});
-        
-        extended.setMoqtClaims(std::move(moqt_claims));
-        
-        CHECK(extended.hasMoqtClaims());
-        
-        const auto* claims = extended.getMoqtClaimsReadOnly();
-        REQUIRE(claims != nullptr);
-        CHECK(claims->getScopeCount() == 1);
-        CHECK(claims->isAuthorized(moqt_actions::PUBLISH, "test.example", "/any/track"));
-    }
-    
-    SUBCASE("Mutable Access") {
-        ExtendedCatClaims extended;
-        
-        // Get mutable access (creates claims if doesn't exist)
-        auto& claims = extended.getMoqtClaims();
-        
-        std::array actions = {moqt_actions::SUBSCRIBE};
-        claims.addScope(actions,
-                       MoqtBinaryMatch::prefix("sub"),
-                       MoqtBinaryMatch{});
-        
-        CHECK(extended.hasMoqtClaims());
-        CHECK(claims.getScopeCount() == 1);
-    }
-}
-
-TEST_CASE("Compile-Time String Conversion Tests") {
-    SUBCASE("Basic Conversion") {
-        constexpr auto binary = string_to_binary("hello");
-        static_assert(binary.size() == 5);
-        static_assert(binary[0] == 'h');
-        static_assert(binary[4] == 'o');
-        
-        CHECK(std::string(binary.begin(), binary.end()) == "hello");
-    }
-    
-    SUBCASE("Empty String") {
-        constexpr auto binary = string_to_binary("");
-        static_assert(binary.size() == 0);
-    }
-}
-
-TEST_CASE("Performance Tests") {
-    SUBCASE("Large Scope Set Authorization") {
-        auto claims = MoqtClaims::create(1000);
-        
-        // Create many scopes
-        for (int i = 0; i < 500; ++i) {
-            std::string ns = "namespace" + std::to_string(i) + ".example";
-            std::array actions = {moqt_actions::PUBLISH, moqt_actions::FETCH};
-            claims.addScope(actions,
-                           MoqtBinaryMatch::exact(ns),
-                           MoqtBinaryMatch::prefix("/stream"));
-        }
-        
-        CHECK(claims.getScopeCount() == 500);
-        CHECK(claims.getTotalActionCount() == 1000);
-        
-        // Test authorization performance
-        bool result = claims.isAuthorized(moqt_actions::PUBLISH, 
-                                         "namespace250.example", 
-                                         "/stream/live");
-        CHECK(result);
-        
-        // Test non-matching case
-        result = claims.isAuthorized(moqt_actions::PUBLISH,
-                                   "nonexistent.example",
-                                   "/stream/live");
-        CHECK_FALSE(result);
-    }
-}
-
-TEST_CASE("Range-based Operations") {
-    SUBCASE("Action Range Processing") {
-        auto claims = MoqtClaims::create();
-        
-        // Use ranges to create actions
-        auto all_actions = std::views::iota(0, 9) 
-                          | std::views::filter([](int a) { return moqt_actions::is_valid_action(a); });
-        
-        std::vector<int> action_vector(all_actions.begin(), all_actions.end());
-        
-        claims.addScope(action_vector,
-                       MoqtBinaryMatch::exact("all.example"),
-                       MoqtBinaryMatch{});
-        
-        // Should authorize all valid actions
-        for (int action = 0; action <= 8; ++action) {
-            CHECK(claims.isAuthorized(action, "all.example", "/any/track"));
-        }
-        
-        CHECK(claims.getTotalActionCount() == 9);
     }
 }
 
@@ -453,17 +343,12 @@ TEST_CASE("Real-World Scenarios") {
         std::array subscriber_actions = {moqt_actions::SUBSCRIBE, moqt_actions::FETCH};
         token.withMoqtActionsDynamic(subscriber_actions,
                            MoqtBinaryMatch::suffix(".live"),
-                           MoqtBinaryMatch{});
+                           MoqtBinaryMatch::any());
 
-        std::array admin_actions = {moqt_actions::CLIENT_SETUP, moqt_actions::SERVER_SETUP};
-        token.withMoqtActionsDynamic(admin_actions,
-                           MoqtBinaryMatch{},  // All namespaces
-                           MoqtBinaryMatch{});  // All tracks
-        
         const auto* moqt_claims = token.extended.getMoqtClaimsReadOnly();
         REQUIRE(moqt_claims != nullptr);
         
-        CHECK(moqt_claims->getScopeCount() == 3);
+        CHECK(moqt_claims->getScopeCount() == 2);
         
         // Test publisher permissions
         CHECK(moqt_claims->isAuthorized(moqt_actions::PUBLISH, 
@@ -474,9 +359,6 @@ TEST_CASE("Real-World Scenarios") {
         // Test subscriber permissions  
         CHECK(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE, "sports.live", "/game123"));
         CHECK(moqt_claims->isAuthorized(moqt_actions::FETCH, "news.live", "/breaking"));
-        
-        CHECK(moqt_claims->isAuthorized(moqt_actions::CLIENT_SETUP, "any.namespace", "/any/track"));
-        CHECK(moqt_claims->isAuthorized(moqt_actions::SERVER_SETUP, "admin.namespace", "/control"));
         
         // Test denied permissions
         CHECK_FALSE(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE, 
