@@ -12,13 +12,9 @@ find_package(OpenSSL REQUIRED)
 # Add submodules
 add_subdirectory(external/libcbor)
 
-# Only add nlohmann_json if not already available from parent project
-if(NOT TARGET nlohmann_json::nlohmann_json)
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND NOT TARGET nlohmann_json::nlohmann_json)
     add_subdirectory(external/nlohmann_json)
 endif()
-
-# Include directories
-include_directories(include)
 
 # Create library
 add_library(catapult STATIC
@@ -42,19 +38,28 @@ add_library(catapult STATIC
 target_link_libraries(catapult 
     cbor
     ${OPENSSL_LIBRARIES}
-    nlohmann_json::nlohmann_json
 )
 
-# Include OpenSSL headers
+# Link nlohmann_json if available
+if(TARGET nlohmann_json::nlohmann_json)
+    target_link_libraries(catapult nlohmann_json::nlohmann_json)
+endif()
+
+# Set up include directories for the library
 target_include_directories(catapult 
-    PRIVATE ${OPENSSL_INCLUDE_DIR}
     PUBLIC include
+    PRIVATE ${OPENSSL_INCLUDE_DIR}
 )
 
 # Add spdlog if logging is enabled
 if(ENABLE_LOGGING)
+    # Add spdlog as submodule if not already added
+    if(NOT TARGET spdlog::spdlog)
+        add_subdirectory(external/spdlog)
+    endif()
     target_link_libraries(catapult spdlog::spdlog)
 endif()
+
 # Set compiler flags with enhanced security and warnings
 target_compile_options(catapult PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
@@ -75,22 +80,20 @@ if(ENABLE_LOGGING)
     target_compile_definitions(catapult PRIVATE ENABLE_LOGGING)
 endif()
 
-# Only enable testing and build doctest when catapult is the main project
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     # Enable testing
     enable_testing()
 
     # Add Doctest
-    add_subdirectory(external/doctest)
-endif()
+    if(NOT TARGET doctest::doctest)
+        add_subdirectory(external/doctest)
+    endif()
 
-# Add spdlog if logging is enabled
-if(ENABLE_LOGGING AND NOT TARGET spdlog)
-    add_subdirectory(external/spdlog)
-endif()
+    # Add spdlog if logging is enabled and not already added
+    if(ENABLE_LOGGING AND NOT TARGET spdlog::spdlog)
+        add_subdirectory(external/spdlog)
+    endif()
 
-# Only build tests and benchmarks when catapult is the main project
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     # Find Google Benchmark
     find_package(benchmark QUIET)
     if(NOT benchmark_FOUND)
@@ -152,39 +155,38 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
             catapult
             benchmark::benchmark
         )
-        
+    
         # Optionally add benchmark as a test (though it's primarily for performance measurement)
         # add_test(NAME catapult_benchmarks COMMAND catapult_benchmarks)
     endif()
+
+    # Example executables
+    add_executable(cat_token_json_example
+            examples/cat_token_json_example.cpp
+    )
+
+    target_link_libraries(cat_token_json_example catapult)
+
+
+    add_executable(cat_cwt_per_signature_example
+            examples/cat_cwt_per_signature_example.cpp
+    )
+
+    target_link_libraries(cat_cwt_per_signature_example catapult)
+
+    if(ENABLE_LOGGING)
+        target_compile_definitions(cat_cwt_per_signature_example PRIVATE ENABLE_LOGGING)
+    endif()
+
+    add_executable(cat_cwt_crypto
+            examples/cat_cwt_crypto.cpp
+    )
+
+    target_link_libraries(cat_cwt_crypto catapult)
+
+    add_executable(moqt_dpop_example
+            examples/moqt_dpop_example.cpp
+    )
+
+    target_link_libraries(moqt_dpop_example catapult)
 endif()
-
-
-# Example executables
-add_executable(cat_token_json_example
-        examples/cat_token_json_example.cpp
-)
-
-target_link_libraries(cat_token_json_example catapult)
-
-
-add_executable(cat_cwt_per_signature_example
-        examples/cat_cwt_per_signature_example.cpp
-)
-
-target_link_libraries(cat_cwt_per_signature_example catapult)
-
-if(ENABLE_LOGGING)
-    target_compile_definitions(cat_cwt_per_signature_example PRIVATE ENABLE_LOGGING)
-endif()
-
-add_executable(cat_cwt_crypto
-        examples/cat_cwt_crypto.cpp
-)
-
-target_link_libraries(cat_cwt_crypto catapult)
-
-add_executable(moqt_dpop_example
-        examples/moqt_dpop_example.cpp
-)
-
-target_link_libraries(moqt_dpop_example catapult)
