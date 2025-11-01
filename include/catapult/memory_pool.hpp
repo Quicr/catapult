@@ -7,7 +7,8 @@
 
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable: 4324) // structure was padded due to alignment specifier
+#pragma warning( \
+    disable : 4324)  // structure was padded due to alignment specifier
 #endif
 
 #include <array>
