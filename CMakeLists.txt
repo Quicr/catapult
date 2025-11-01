@@ -11,7 +11,11 @@ find_package(OpenSSL REQUIRED)
 
 # Add submodules
 add_subdirectory(external/libcbor)
-add_subdirectory(external/nlohmann_json)
+
+# Only add nlohmann_json if not already available from parent project
+if(NOT TARGET nlohmann_json::nlohmann_json)
+    add_subdirectory(external/nlohmann_json)
+endif()
 
 # Include directories
 include_directories(include)
@@ -42,7 +46,10 @@ target_link_libraries(catapult
 )
 
 # Include OpenSSL headers
-target_include_directories(catapult PRIVATE ${OPENSSL_INCLUDE_DIR})
+target_include_directories(catapult 
+    PRIVATE ${OPENSSL_INCLUDE_DIR}
+    PUBLIC include
+)
 
 # Add spdlog if logging is enabled
 if(ENABLE_LOGGING)
@@ -68,81 +75,87 @@ if(ENABLE_LOGGING)
     target_compile_definitions(catapult PRIVATE ENABLE_LOGGING)
 endif()
 
-# Enable testing
-enable_testing()
+# Only enable testing and build doctest when catapult is the main project
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    # Enable testing
+    enable_testing()
 
-# Add Doctest
-add_subdirectory(external/doctest)
+    # Add Doctest
+    add_subdirectory(external/doctest)
+endif()
 
 # Add spdlog if logging is enabled
-if(ENABLE_LOGGING)
+if(ENABLE_LOGGING AND NOT TARGET spdlog)
     add_subdirectory(external/spdlog)
 endif()
 
-# Find Google Benchmark
-find_package(benchmark QUIET)
-if(NOT benchmark_FOUND)
-    message(STATUS "Google Benchmark not found, benchmark targets will be disabled")
-endif()
+# Only build tests and benchmarks when catapult is the main project
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    # Find Google Benchmark
+    find_package(benchmark QUIET)
+    if(NOT benchmark_FOUND)
+        message(STATUS "Google Benchmark not found, benchmark targets will be disabled")
+    endif()
 
-# Create test executable
-add_executable(catapult_tests
-    tests/main.cpp
-    tests/base64.cpp
-    tests/claims.cpp
-    tests/composite_claims.cpp
-    tests/crypto.cpp
-    tests/cwt.cpp
-    tests/cwt_crypto.cpp
-    tests/cwt_encode_decode.cpp
-    tests/cwt_signing.cpp
-    tests/rfc8152_compliance.cpp
-    tests/memory_pool.cpp
-    tests/moqt_claims.cpp
-    tests/secure_vector.cpp
-    tests/token.cpp
-    tests/token_factory.cpp
-    tests/trie.cpp
-    tests/validator.cpp
-)
-
-target_link_libraries(catapult_tests 
-    catapult
-    ${OPENSSL_LIBRARIES}
-    cbor
-    doctest::doctest
-)
-
-# Apply same security flags to tests
-target_compile_options(catapult_tests PRIVATE 
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-fstack-protector-strong>
-    $<$<CXX_COMPILER_ID:MSVC>:/W4 /GS>
-)
-
-# Add test
-add_test(NAME catapult_unit_tests COMMAND catapult_tests)
-
-# Create benchmark executable (if Google Benchmark is available)
-if(benchmark_FOUND)
-    add_executable(catapult_benchmarks
-        benchmarks/benchmark_main.cpp
-        benchmarks/base64_bench.cpp
-        benchmarks/trie_bench.cpp
-        benchmarks/memory_pool_bench.cpp
-        benchmarks/secure_vector_bench.cpp
-        benchmarks/cbor_bench.cpp
-        benchmarks/crypto_bench.cpp
-        benchmarks/token_bench.cpp
+    # Create test executable
+    add_executable(catapult_tests
+        tests/main.cpp
+        tests/base64.cpp
+        tests/claims.cpp
+        tests/composite_claims.cpp
+        tests/crypto.cpp
+        tests/cwt.cpp
+        tests/cwt_crypto.cpp
+        tests/cwt_encode_decode.cpp
+        tests/cwt_signing.cpp
+        tests/rfc8152_compliance.cpp
+        tests/memory_pool.cpp
+        tests/moqt_claims.cpp
+        tests/secure_vector.cpp
+        tests/token.cpp
+        tests/token_factory.cpp
+        tests/trie.cpp
+        tests/validator.cpp
     )
-    
-    target_link_libraries(catapult_benchmarks
+
+    target_link_libraries(catapult_tests 
         catapult
-        benchmark::benchmark
+        ${OPENSSL_LIBRARIES}
+        cbor
+        doctest::doctest
     )
-    
-    # Optionally add benchmark as a test (though it's primarily for performance measurement)
-    # add_test(NAME catapult_benchmarks COMMAND catapult_benchmarks)
+
+    # Apply same security flags to tests
+    target_compile_options(catapult_tests PRIVATE 
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-fstack-protector-strong>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /GS>
+    )
+
+    # Add test
+    add_test(NAME catapult_unit_tests COMMAND catapult_tests)
+
+    # Create benchmark executable (if Google Benchmark is available)
+    if(benchmark_FOUND)
+        add_executable(catapult_benchmarks
+            benchmarks/benchmark_main.cpp
+            benchmarks/base64_bench.cpp
+            benchmarks/trie_bench.cpp
+            benchmarks/memory_pool_bench.cpp
+            benchmarks/secure_vector_bench.cpp
+            benchmarks/cbor_bench.cpp
+            benchmarks/crypto_bench.cpp
+            benchmarks/token_bench.cpp
+        )
+        
+        target_link_libraries(catapult_benchmarks
+            catapult
+            benchmark::benchmark
+        )
+        
+        # Optionally add benchmark as a test (though it's primarily for performance measurement)
+        # add_test(NAME catapult_benchmarks COMMAND catapult_benchmarks)
+    endif()
 endif()
 
 
