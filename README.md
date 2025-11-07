@@ -25,6 +25,7 @@ where secure token-based access control is required.
 - C++ Compiler: GCC-12+ or Clang-17+ with full C++20 support
 - CMake: 3.16 or later
 - Git: For cloning and submodule management
+- Just: `cargo install just` or `brew install just` (optional, for justfile support)
 - Dependencies: OpenSSL, libcbor, nlohmann-json, spdlog
 
 ### Clone and Setup
@@ -39,6 +40,44 @@ git submodule update --init --recursive
 ```
 
 ### Local Build
+
+#### Using Just (Recommended)
+
+```bash
+# Build the project (using make internally)
+just build
+
+# Build using cmake directly
+just build-cmake
+
+# Run tests
+just test
+
+# Run specific test categories
+./build/catapult_tests --test-case="moqt"      # MOQT tests only
+./build/catapult_tests --test-case="claims"    # Claims tests only
+
+# Clean build directory
+just clean
+
+# Show all available commands
+just help
+```
+
+#### Using Make (Traditional)
+
+```bash
+# Build the project
+make
+
+# Run tests  
+make test
+
+# Show all available commands
+make help
+```
+
+#### Using CMake Directly
 
 ```bash
 # Create build directory
