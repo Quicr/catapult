@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(ENABLE_LOGGING "Enable logging with spdlog" ON)
+option(CATAPULT_ENABLE_JSON "Enable JSON serialization support (requires nlohmann_json)" ON)
 
 # Dependency management
 find_package(OpenSSL REQUIRED)
@@ -12,21 +13,21 @@ find_package(OpenSSL REQUIRED)
 # Add submodules
 add_subdirectory(external/libcbor)
 
-if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND NOT TARGET nlohmann_json::nlohmann_json)
-    add_subdirectory(external/nlohmann_json)
+if(CATAPULT_ENABLE_JSON)
+    if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND NOT TARGET nlohmann_json::nlohmann_json)
+        add_subdirectory(external/nlohmann_json)
+    endif()
 endif()
 
 # Create library
-add_library(catapult STATIC
+set(CATAPULT_SOURCES
     src/base64.cpp
     src/claims.cpp
     src/composite.cpp
     src/crypto.cpp
     src/cwt.cpp
-    src/jwk.cpp
     src/dpop.cpp
     src/error.cpp
-    src/json_serialization.cpp
     src/moqt_claims.cpp
     src/token.cpp
     src/trie.cpp
@@ -34,15 +35,26 @@ add_library(catapult STATIC
     src/validator.cpp
 )
 
+# Add JSON-dependent sources only when JSON is enabled
+if(CATAPULT_ENABLE_JSON)
+    list(APPEND CATAPULT_SOURCES
+        src/json_serialization.cpp
+        src/jwk.cpp
+    )
+endif()
+
+add_library(catapult STATIC ${CATAPULT_SOURCES})
+
 # Link libraries
 target_link_libraries(catapult 
     cbor
     ${OPENSSL_LIBRARIES}
 )
 
-# Link nlohmann_json if available
-if(TARGET nlohmann_json::nlohmann_json)
+# Link nlohmann_json if JSON support is enabled
+if(CATAPULT_ENABLE_JSON AND TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(catapult nlohmann_json::nlohmann_json)
+    target_compile_definitions(catapult PUBLIC CATAPULT_ENABLE_JSON)
 endif()
 
 # Set up include directories for the library
@@ -161,11 +173,12 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     endif()
 
     # Example executables
-    add_executable(cat_token_json_example
-            examples/cat_token_json_example.cpp
-    )
-
-    target_link_libraries(cat_token_json_example catapult)
+    if(CATAPULT_ENABLE_JSON)
+        add_executable(cat_token_json_example
+                examples/cat_token_json_example.cpp
+        )
+        target_link_libraries(cat_token_json_example catapult)
+    endif()
 
 
     add_executable(cat_cwt_per_signature_example

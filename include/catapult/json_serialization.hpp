@@ -1,9 +1,16 @@
 /**
  * @file json_serialization.hpp
  * @brief JSON serialization utilities for CAT tokens
+ *
+ * This header requires CATAPULT_ENABLE_JSON to be defined.
+ * It provides JSON serialization for debugging and interoperability.
  */
 
 #pragma once
+
+#ifndef CATAPULT_ENABLE_JSON
+#error "json_serialization.hpp requires CATAPULT_ENABLE_JSON to be defined"
+#endif
 
 #include <nlohmann/json.hpp>
 
