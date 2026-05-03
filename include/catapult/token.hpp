@@ -31,6 +31,26 @@ class ExtendedCatClaims;
  * 2. Factory methods for new tokens:
  *    auto tokenPtr = CatToken::createValidated(core_claims, cat_claims);
  */
+// Forward declaration
+class CatTokenBuilder;
+
+/**
+ * @brief Main CAT token class containing all claim groups
+ *
+ * Usage patterns:
+ * 1. Builder pattern (recommended):
+ *    auto token = CatToken::builder()
+ *        .issuer("example.com")
+ *        .audience("client")
+ *        .expiresIn(std::chrono::hours{1})
+ *        .build();
+ *
+ * 2. Direct modification:
+ *    token.withIssuer("example.com").withAudience({"client1", "client2"});
+ *
+ * 3. Factory methods:
+ *    auto tokenPtr = CatToken::createValidated(core_claims, cat_claims);
+ */
 class CatToken {
  public:
   CoreClaims core{};                    ///< Core CWT claims
@@ -44,6 +64,11 @@ class CatToken {
 
   CatToken() = default;
   virtual ~CatToken() = default;
+
+  /**
+   * @brief Create a builder for fluent token construction
+   */
+  [[nodiscard]] static CatTokenBuilder builder();
 
   /**
    * @brief Constructor for runtime initialization with validation
@@ -420,5 +445,163 @@ inline std::string operator""_iss(const char* str, size_t len) {
   return std::string(str, len);
 }
 }  // namespace literals
+
+/**
+ * @brief Builder class for fluent CatToken construction
+ */
+class CatTokenBuilder {
+ private:
+  CatToken token_;
+
+ public:
+  CatTokenBuilder() = default;
+
+  CatTokenBuilder& issuer(const std::string& iss);
+  CatTokenBuilder& audience(const std::string& aud);
+  CatTokenBuilder& audience(const std::vector<std::string>& auds);
+  CatTokenBuilder& expiresAt(int64_t exp);
+  CatTokenBuilder& expiresIn(std::chrono::seconds duration);
+  CatTokenBuilder& notBefore(int64_t nbf);
+  CatTokenBuilder& tokenId(const std::string& cti);
+  CatTokenBuilder& version(const std::string& v);
+  CatTokenBuilder& usageLimit(uint32_t limit);
+  CatTokenBuilder& replayNonce(const std::string& nonce);
+  CatTokenBuilder& proofOfPossession(bool enabled = true);
+  CatTokenBuilder& subject(const std::string& sub);
+  CatTokenBuilder& geoCoordinate(double lat, double lon,
+                                  std::optional<double> accuracy = std::nullopt);
+  CatTokenBuilder& geohash(const std::string& hash);
+  CatTokenBuilder& altitude(int32_t alt);
+  CatTokenBuilder& networkInterfaces(const std::vector<std::string>& nips);
+  CatTokenBuilder& methods(const std::string& m);
+  CatTokenBuilder& alpn(const std::vector<std::string>& protocols);
+  CatTokenBuilder& hosts(const std::vector<std::string>& h);
+  CatTokenBuilder& countries(const std::vector<std::string>& iso3166);
+  CatTokenBuilder& dpopThumbprint(const std::string& cnf);
+  [[nodiscard]] CatToken build();
+};
+
+inline CatTokenBuilder CatToken::builder() { return CatTokenBuilder{}; }
+
+// CatTokenBuilder inline implementations
+inline CatTokenBuilder& CatTokenBuilder::issuer(const std::string& iss) {
+  token_.core.iss = iss;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::audience(const std::string& aud) {
+  token_.core.aud = std::vector<std::string>{aud};
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::audience(
+    const std::vector<std::string>& auds) {
+  token_.core.aud = auds;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::expiresAt(int64_t exp) {
+  token_.core.exp = exp;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::expiresIn(std::chrono::seconds duration) {
+  token_.core.exp = std::chrono::system_clock::to_time_t(
+      std::chrono::system_clock::now() + duration);
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::notBefore(int64_t nbf) {
+  token_.core.nbf = nbf;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::tokenId(const std::string& cti) {
+  token_.core.cti = cti;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::version(const std::string& v) {
+  token_.cat.catv = v;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::usageLimit(uint32_t limit) {
+  token_.cat.catu = limit;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::replayNonce(const std::string& nonce) {
+  token_.cat.catreplay = nonce;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::proofOfPossession(bool enabled) {
+  token_.cat.catpor = enabled;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::subject(const std::string& sub) {
+  token_.informational.sub = sub;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::geoCoordinate(
+    double lat, double lon, std::optional<double> accuracy) {
+  auto coord = GeoCoordinate::createSafe(lat, lon, accuracy);
+  if (coord.has_value()) {
+    token_.cat.catgeocoord = coord.value();
+  }
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::geohash(const std::string& hash) {
+  token_.cat.geohash = hash;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::altitude(int32_t alt) {
+  token_.cat.catgeoalt = alt;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::networkInterfaces(
+    const std::vector<std::string>& nips) {
+  token_.cat.catnip = nips;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::methods(const std::string& m) {
+  token_.cat.catm = m;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::alpn(
+    const std::vector<std::string>& protocols) {
+  token_.cat.catalpn = protocols;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::hosts(
+    const std::vector<std::string>& h) {
+  token_.cat.cath = h;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::countries(
+    const std::vector<std::string>& iso3166) {
+  token_.cat.catgeoiso3166 = iso3166;
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::dpopThumbprint(const std::string& cnf) {
+  token_.dpop.cnf = cnf;
+  return *this;
+}
+
+inline CatToken CatTokenBuilder::build() {
+  token_.validateTokenStructure();
+  return std::move(token_);
+}
 
 }  // namespace catapult
