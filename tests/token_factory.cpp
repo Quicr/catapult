@@ -1,5 +1,5 @@
 #include <doctest/doctest.h>
-#include "catapult/token_factory.hpp"
+#include "catapult/token.hpp"
 #include "catapult/crypto.hpp"
 #include "catapult/claims.hpp"
 

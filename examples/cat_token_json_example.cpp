@@ -9,7 +9,7 @@
  */
 
 #include "catapult/token.hpp"
-#include "catapult/token_factory.hpp"
+#include "catapult/token.hpp"
 #include "catapult/claims.hpp"
 #include "catapult/moqt_claims.hpp"
 #include "catapult/composite.hpp"

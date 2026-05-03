@@ -8,6 +8,7 @@
 #include <chrono>
 #include <concepts>
 #include <memory>
+#include <stdexcept>
 #include <unordered_map>
 
 #include "claims.hpp"
@@ -349,5 +350,75 @@ CatToken& CatToken::withMoqtActions(MoqtBinaryMatch namespace_match,
       std::move(namespace_match), std::move(track_match));
   return *this;
 }
+
+/**
+ * @brief Runtime token factory functions
+ */
+namespace token_factory {
+
+/**
+ * @brief Create a token with geographic restrictions (runtime version)
+ */
+inline CatToken create_geo_token(const std::string& issuer,
+                                 const std::string& audience, double lat,
+                                 double lon) {
+  if (lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) {
+    throw std::invalid_argument("Invalid geographic coordinates");
+  }
+
+  CatToken token;
+  token.core.iss = issuer;
+  token.core.aud = std::vector<std::string>{audience};
+
+  auto coord = GeoCoordinate::createSafe(lat, lon);
+  if (!coord.has_value()) {
+    throw std::invalid_argument("Failed to create valid geographic coordinate");
+  }
+  token.cat.catgeocoord = coord.value();
+
+  return token;
+}
+
+/**
+ * @brief Create a token with geographic restrictions (compile-time version)
+ * @tparam LatInt Latitude as integer (lat * 10000)
+ * @tparam LonInt Longitude as integer (lon * 10000)
+ */
+template <int LatInt, int LonInt>
+CatToken create_geo_token_fixed(const std::string& issuer,
+                                const std::string& audience) {
+  constexpr double lat = static_cast<double>(LatInt) / 10000.0;
+  constexpr double lon = static_cast<double>(LonInt) / 10000.0;
+
+  static_assert(composite_constants::is_valid_latitude(lat),
+                "Invalid latitude at compile time");
+  static_assert(composite_constants::is_valid_longitude(lon),
+                "Invalid longitude at compile time");
+
+  CatToken token;
+  token.core.iss = issuer;
+  token.core.aud = std::vector<std::string>{audience};
+
+  GeoCoordinate coord;
+  coord.lat = lat;
+  coord.lon = lon;
+  token.cat.catgeocoord = coord;
+
+  return token;
+}
+}  // namespace token_factory
+
+/**
+ * @brief Literal operators for common claim values
+ */
+namespace literals {
+inline std::string operator""_catv(const char* str, size_t len) {
+  return std::string(str, len);
+}
+
+inline std::string operator""_iss(const char* str, size_t len) {
+  return std::string(str, len);
+}
+}  // namespace literals
 
 }  // namespace catapult
