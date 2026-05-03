@@ -26,8 +26,7 @@
 // Composite claims
 #include "composite.hpp"
 
-// Token factory utilities
-#include "token_factory.hpp"
+// Token factory utilities are included in token.hpp
 
 // URI utilities
 #include "uri.hpp"
