@@ -13,7 +13,6 @@
 #include "catapult/moqt_claims.hpp"
 #include "catapult/dpop.hpp"
 #include "catapult/crypto.hpp"
-#include "catapult/json_serialization.hpp"
 #include "catapult/cwt.hpp"
 #include <iostream>
 #include <chrono>

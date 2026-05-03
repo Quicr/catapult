@@ -3,8 +3,12 @@
  * @brief DPoP (Demonstrating Proof-of-Possession) support for CAT tokens
  *
  * This file implements DPoP functionality as defined in
- * https://www.ietf.org/archive/id/draft-nandakumar-oauth-dpop-proof-00.txt and
- * integrated with CAT tokens according to draft-law-moq-cat4moqt specification.
+ * https://www.ietf.org/archive/id/draft-nandakumar-moq-generic-dpop-proof-00.html
+ * and integrated with CAT tokens according to draft-law-moq-cat4moqt specification.
+ *
+ * Supports both JWT and CWT encoding formats:
+ * - JWT: dpop-proof+jwt (JSON-based, interoperable with OAuth 2.0)
+ * - CWT: dpop-proof+cwt (CBOR-based, compact, suitable for constrained environments)
  */
 
 #pragma once
@@ -25,18 +29,79 @@
 namespace catapult {
 
 /**
+ * @brief DPoP proof encoding format
+ *
+ * Per draft-nandakumar-moq-generic-dpop-proof-00:
+ * - JWT: Use when integrating with OAuth 2.0 infrastructure or debugging
+ * - CWT: Use when integrating with CAT systems or in bandwidth-constrained environments
+ */
+enum class DpopEncoding {
+  JWT,  ///< JSON Web Token format (typ: dpop-proof+jwt)
+  CWT   ///< CBOR Web Token format (typ: dpop-proof+cwt, uses COSE_Sign1)
+};
+
+/**
+ * @brief COSE header labels for CWT DPoP proofs
+ */
+namespace dpop_labels {
+constexpr int64_t ALG = 1;       ///< Algorithm (COSE header)
+constexpr int64_t TYP = 16;      ///< Type (COSE header)
+constexpr int64_t COSE_KEY = 4;  ///< COSE_Key in header
+constexpr int64_t CTI = 7;       ///< Unique identifier (CWT claim)
+constexpr int64_t IAT = 6;       ///< Issued-at timestamp (CWT claim)
+constexpr int64_t ACTX = 400;    ///< Authorization context (TBD in spec)
+constexpr int64_t ATH = 401;     ///< Access token hash (TBD in spec)
+constexpr int64_t NONCE = 402;   ///< Server-provided nonce (TBD in spec)
+}  // namespace dpop_labels
+
+/**
+ * @brief Get recommended encoding based on context
+ * @param for_cat_integration True if integrating with CAT token systems
+ * @param bandwidth_constrained True if operating in constrained environment
+ * @return Recommended DpopEncoding
+ */
+[[nodiscard]] constexpr DpopEncoding recommended_dpop_encoding(
+    bool for_cat_integration = true,
+    bool bandwidth_constrained = false) noexcept {
+  if (for_cat_integration || bandwidth_constrained) {
+    return DpopEncoding::CWT;
+  }
+  return DpopEncoding::JWT;
+}
+
+/**
  * @brief DPoP header parameters
  */
 struct DpopHeader {
-  std::string typ = "dpop-proof+jwt";  ///< Token type, must be "dpop-proof+jwt"
+  std::string typ = "dpop-proof+cwt";  ///< Token type (dpop-proof+jwt or dpop-proof+cwt)
   std::string alg;  ///< Signing algorithm (e.g., "ES256", "RS256")
-  std::string jwk;  ///< JSON Web Key (public key)
+  std::string jwk;  ///< JSON Web Key (public key) - for JWT format
+  std::vector<uint8_t> cose_key;  ///< COSE_Key (public key) - for CWT format
+  int64_t alg_id = 0;  ///< COSE algorithm ID - for CWT format
+
+  /**
+   * @brief Get the encoding format from typ
+   */
+  [[nodiscard]] DpopEncoding encoding() const noexcept {
+    return typ == "dpop-proof+jwt" ? DpopEncoding::JWT : DpopEncoding::CWT;
+  }
+
+  /**
+   * @brief Set encoding format (updates typ accordingly)
+   */
+  void set_encoding(DpopEncoding enc) noexcept {
+    typ = (enc == DpopEncoding::JWT) ? "dpop-proof+jwt" : "dpop-proof+cwt";
+  }
 
   /**
    * @brief Validate header parameters
    */
   [[nodiscard]] bool is_valid() const noexcept {
-    return typ == "dpop-proof+jwt" && !alg.empty() && !jwk.empty();
+    bool valid_typ = (typ == "dpop-proof+jwt" || typ == "dpop-proof+cwt");
+    if (encoding() == DpopEncoding::JWT) {
+      return valid_typ && !alg.empty() && !jwk.empty();
+    }
+    return valid_typ && alg_id != 0 && !cose_key.empty();
   }
 };
 
@@ -167,26 +232,58 @@ struct CatDpopSettings {
 };
 
 /**
- * @brief DPoP proof JWT
+ * @brief DPoP proof supporting both JWT and CWT formats
+ *
+ * Per draft-nandakumar-moq-generic-dpop-proof-00:
+ * - CWT format uses COSE_Sign1 envelope with CBOR-encoded claims
+ * - JWT format uses JSON encoding (requires CATAPULT_ENABLE_JSON)
  */
 class DpopProof {
  private:
   DpopHeader header_;
   DpopPayload payload_;
   std::vector<uint8_t> signature_;
+  DpopEncoding encoding_ = DpopEncoding::CWT;
 
  public:
   /**
    * @brief Constructor
    */
   DpopProof(DpopHeader header, DpopPayload payload,
-            std::span<const uint8_t> signature)
+            std::span<const uint8_t> signature,
+            DpopEncoding encoding = DpopEncoding::CWT)
       : header_(std::move(header)),
         payload_(std::move(payload)),
-        signature_(signature.begin(), signature.end()) {}
+        signature_(signature.begin(), signature.end()),
+        encoding_(encoding) {
+    header_.set_encoding(encoding);
+  }
 
   /**
-   * @brief Create DPoP proof for MOQT action
+   * @brief Create DPoP proof for MOQT action (CWT format)
+   */
+  template <MoqtActionType ActionT>
+  static DpopProof create_for_moqt_action_cwt(
+      ActionT moqt_action, std::string_view namespace_name,
+      std::string_view track_name, std::string_view endpoint_uri,
+      int64_t alg_id, std::vector<uint8_t> cose_key,
+      std::optional<std::string> jti = std::nullopt);
+
+#ifdef CATAPULT_ENABLE_JSON
+  /**
+   * @brief Create DPoP proof for MOQT action (JWT format, requires JSON support)
+   */
+  template <MoqtActionType ActionT>
+  static DpopProof create_for_moqt_action_jwt(
+      ActionT moqt_action, std::string_view namespace_name,
+      std::string_view track_name, std::string_view endpoint_uri,
+      const std::string& algorithm, const std::string& public_key_jwk,
+      std::optional<std::string> jti = std::nullopt);
+#endif
+
+  /**
+   * @brief Create DPoP proof for MOQT action (legacy, defaults to CWT)
+   * @deprecated Use create_for_moqt_action_cwt or create_for_moqt_action_jwt
    */
   template <MoqtActionType ActionT>
   static DpopProof create_for_moqt_action(
@@ -207,7 +304,7 @@ class DpopProof {
       const CryptographicAlgorithm& algorithm) const;
 
   /**
-   * @brief Verify the proof signature using public key from header JWK
+   * @brief Verify the proof signature using public key from header
    */
   [[nodiscard]] bool verify_signature() const;
 
@@ -233,14 +330,43 @@ class DpopProof {
   }
 
   /**
-   * @brief Serialize to CBOR format
+   * @brief Get encoding format
+   */
+  [[nodiscard]] DpopEncoding encoding() const noexcept { return encoding_; }
+
+  /**
+   * @brief Serialize to wire format (CWT or JWT based on encoding)
    */
   [[nodiscard]] std::string serialize() const;
 
   /**
-   * @brief Deserialize from CBOR string
+   * @brief Serialize to CWT format (COSE_Sign1)
    */
-  static DpopProof deserialize(std::string_view cbor_data);
+  [[nodiscard]] std::string serialize_cwt() const;
+
+#ifdef CATAPULT_ENABLE_JSON
+  /**
+   * @brief Serialize to JWT format (requires JSON support)
+   */
+  [[nodiscard]] std::string serialize_jwt() const;
+#endif
+
+  /**
+   * @brief Deserialize from wire format (auto-detects CWT vs JWT)
+   */
+  static DpopProof deserialize(std::string_view data);
+
+  /**
+   * @brief Deserialize from CWT format
+   */
+  static DpopProof deserialize_cwt(std::string_view cwt_data);
+
+#ifdef CATAPULT_ENABLE_JSON
+  /**
+   * @brief Deserialize from JWT format (requires JSON support)
+   */
+  static DpopProof deserialize_jwt(std::string_view jwt_data);
+#endif
 
   /**
    * @brief Validate proof structure and freshness
@@ -388,12 +514,19 @@ class DpopProofValidator {
 
 /**
  * @brief DPoP key pair for proof generation
+ *
+ * Supports generating proofs in both CWT and JWT formats.
+ * CWT is the default and recommended format for CAT integrations.
  */
 class DpopKeyPair {
  private:
   std::unique_ptr<CryptographicAlgorithm> algorithm_;
-  std::string public_key_jwk_;
+  std::vector<uint8_t> public_key_der_;
+  std::vector<uint8_t> cose_key_;
   std::string public_key_thumbprint_;
+#ifdef CATAPULT_ENABLE_JSON
+  std::string public_key_jwk_;
+#endif
 
  public:
   /**
@@ -402,32 +535,67 @@ class DpopKeyPair {
   explicit DpopKeyPair(std::unique_ptr<CryptographicAlgorithm> alg);
 
   /**
-   * @brief Generate proof for MOQT action
+   * @brief Generate proof for MOQT action (uses recommended encoding)
    */
   template <MoqtActionType ActionT>
   [[nodiscard]] DpopProof generate_proof(
       ActionT moqt_action, std::string_view namespace_name,
       std::string_view track_name, std::string_view endpoint_uri,
+      std::optional<std::string> jti = std::nullopt,
+      DpopEncoding encoding = DpopEncoding::CWT) const;
+
+  /**
+   * @brief Generate proof in CWT format (always available)
+   */
+  template <MoqtActionType ActionT>
+  [[nodiscard]] DpopProof generate_proof_cwt(
+      ActionT moqt_action, std::string_view namespace_name,
+      std::string_view track_name, std::string_view endpoint_uri,
+      std::optional<std::string> jti = std::nullopt) const;
+
+#ifdef CATAPULT_ENABLE_JSON
+  /**
+   * @brief Generate proof in JWT format (requires JSON support)
+   */
+  template <MoqtActionType ActionT>
+  [[nodiscard]] DpopProof generate_proof_jwt(
+      ActionT moqt_action, std::string_view namespace_name,
+      std::string_view track_name, std::string_view endpoint_uri,
       std::optional<std::string> jti = std::nullopt) const;
 
   /**
-   * @brief Get public key JWK
+   * @brief Get public key JWK (requires JSON support)
    */
   [[nodiscard]] const std::string& get_public_key_jwk() const noexcept {
     return public_key_jwk_;
   }
+#endif
 
   /**
-   * @brief Get public key thumbprint
+   * @brief Get public key as COSE_Key bytes
+   */
+  [[nodiscard]] const std::vector<uint8_t>& get_cose_key() const noexcept {
+    return cose_key_;
+  }
+
+  /**
+   * @brief Get public key thumbprint (base64url-encoded SHA-256)
    */
   [[nodiscard]] const std::string& get_public_key_thumbprint() const noexcept {
     return public_key_thumbprint_;
   }
 
   /**
-   * @brief Get algorithm name
+   * @brief Get algorithm name (e.g., "ES256", "PS256")
    */
   [[nodiscard]] std::string get_algorithm_name() const;
+
+  /**
+   * @brief Get COSE algorithm ID
+   */
+  [[nodiscard]] int64_t get_algorithm_id() const noexcept {
+    return algorithm_ ? algorithm_->algorithmId() : 0;
+  }
 };
 
 /**
@@ -480,20 +648,16 @@ struct EnhancedDpopClaims {
 };
 
 template <MoqtActionType ActionT>
-DpopProof DpopProof::create_for_moqt_action(ActionT moqt_action,
-                                            std::string_view namespace_name,
-                                            std::string_view track_name,
-                                            std::string_view endpoint_uri,
-                                            const std::string& algorithm,
-                                            const std::string& public_key_jwk,
-                                            std::optional<std::string> jti) {
-  // Create header
+DpopProof DpopProof::create_for_moqt_action_cwt(
+    ActionT moqt_action, std::string_view namespace_name,
+    std::string_view track_name, std::string_view endpoint_uri,
+    int64_t alg_id, std::vector<uint8_t> cose_key,
+    std::optional<std::string> jti) {
   DpopHeader header;
-  header.typ = "dpop-proof+jwt";
-  header.alg = algorithm;
-  header.jwk = public_key_jwk;
+  header.set_encoding(DpopEncoding::CWT);
+  header.alg_id = alg_id;
+  header.cose_key = std::move(cose_key);
 
-  // Create payload with track namespace and name
   auto resource_uri =
       moqt_dpop::construct_moqt_uri(endpoint_uri, namespace_name, track_name);
 
@@ -503,28 +667,109 @@ DpopProof DpopProof::create_for_moqt_action(ActionT moqt_action,
     payload.jti = std::move(jti.value());
   }
 
-  // For now, create empty signature - this should be signed by the caller
   std::vector<uint8_t> empty_signature;
-
-  return DpopProof{std::move(header), std::move(payload), empty_signature};
+  return DpopProof{std::move(header), std::move(payload), empty_signature,
+                   DpopEncoding::CWT};
 }
+
+#ifdef CATAPULT_ENABLE_JSON
+template <MoqtActionType ActionT>
+DpopProof DpopProof::create_for_moqt_action_jwt(
+    ActionT moqt_action, std::string_view namespace_name,
+    std::string_view track_name, std::string_view endpoint_uri,
+    const std::string& algorithm, const std::string& public_key_jwk,
+    std::optional<std::string> jti) {
+  DpopHeader header;
+  header.set_encoding(DpopEncoding::JWT);
+  header.alg = algorithm;
+  header.jwk = public_key_jwk;
+
+  auto resource_uri =
+      moqt_dpop::construct_moqt_uri(endpoint_uri, namespace_name, track_name);
+
+  DpopPayload payload(static_cast<int>(moqt_action), namespace_name, track_name,
+                      resource_uri);
+  if (jti.has_value()) {
+    payload.jti = std::move(jti.value());
+  }
+
+  std::vector<uint8_t> empty_signature;
+  return DpopProof{std::move(header), std::move(payload), empty_signature,
+                   DpopEncoding::JWT};
+}
+#endif
+
+template <MoqtActionType ActionT>
+DpopProof DpopProof::create_for_moqt_action(
+    ActionT moqt_action, std::string_view namespace_name,
+    std::string_view track_name, std::string_view endpoint_uri,
+    const std::string& algorithm, const std::string& public_key_jwk,
+    std::optional<std::string> jti) {
+#ifdef CATAPULT_ENABLE_JSON
+  return create_for_moqt_action_jwt(moqt_action, namespace_name, track_name,
+                                    endpoint_uri, algorithm, public_key_jwk,
+                                    std::move(jti));
+#else
+  (void)algorithm;
+  (void)public_key_jwk;
+  (void)jti;
+  throw CryptoError(
+      "JWT DPoP format requires CATAPULT_ENABLE_JSON. Use CWT format instead.");
+#endif
+}
+
+template <MoqtActionType ActionT>
+DpopProof DpopKeyPair::generate_proof_cwt(
+    ActionT moqt_action, std::string_view namespace_name,
+    std::string_view track_name, std::string_view endpoint_uri,
+    std::optional<std::string> jti) const {
+  auto proof = DpopProof::create_for_moqt_action_cwt(
+      moqt_action, namespace_name, track_name, endpoint_uri,
+      algorithm_->algorithmId(), cose_key_, std::move(jti));
+
+  auto signing_input = proof.create_signing_input();
+  auto signature = algorithm_->sign(signing_input);
+
+  return DpopProof{proof.get_header(), proof.get_payload(), signature,
+                   DpopEncoding::CWT};
+}
+
+#ifdef CATAPULT_ENABLE_JSON
+template <MoqtActionType ActionT>
+DpopProof DpopKeyPair::generate_proof_jwt(
+    ActionT moqt_action, std::string_view namespace_name,
+    std::string_view track_name, std::string_view endpoint_uri,
+    std::optional<std::string> jti) const {
+  auto proof = DpopProof::create_for_moqt_action_jwt(
+      moqt_action, namespace_name, track_name, endpoint_uri,
+      get_algorithm_name(), public_key_jwk_, std::move(jti));
+
+  auto signing_input = proof.create_signing_input();
+  auto signature = algorithm_->sign(signing_input);
+
+  return DpopProof{proof.get_header(), proof.get_payload(), signature,
+                   DpopEncoding::JWT};
+}
+#endif
 
 template <MoqtActionType ActionT>
 DpopProof DpopKeyPair::generate_proof(ActionT moqt_action,
                                       std::string_view namespace_name,
                                       std::string_view track_name,
                                       std::string_view endpoint_uri,
-                                      std::optional<std::string> jti) const {
-  auto proof = DpopProof::create_for_moqt_action(
-      moqt_action, namespace_name, track_name, endpoint_uri,
-      get_algorithm_name(), public_key_jwk_, std::move(jti));
-
-  // Sign the proof
-  auto signing_input = proof.create_signing_input();
-  auto signature = algorithm_->sign(signing_input);
-
-  // Create new proof with signature
-  return DpopProof{proof.get_header(), proof.get_payload(), signature};
+                                      std::optional<std::string> jti,
+                                      DpopEncoding encoding) const {
+  if (encoding == DpopEncoding::CWT) {
+    return generate_proof_cwt(moqt_action, namespace_name, track_name,
+                              endpoint_uri, std::move(jti));
+  }
+#ifdef CATAPULT_ENABLE_JSON
+  return generate_proof_jwt(moqt_action, namespace_name, track_name,
+                            endpoint_uri, std::move(jti));
+#else
+  throw CryptoError(
+      "JWT DPoP format requires CATAPULT_ENABLE_JSON. Use CWT format instead.");
+#endif
 }
 
 }  // namespace catapult
