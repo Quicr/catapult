@@ -15,7 +15,7 @@
 #include <vector>
 
 #include "error.hpp"
-#include "memory_pool.hpp"
+#include "internal/memory_pool.hpp"
 
 namespace catapult {
 

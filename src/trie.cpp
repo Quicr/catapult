@@ -1,4 +1,4 @@
-#include "catapult/trie.hpp"
+#include "catapult/internal/trie.hpp"
 
 #include <algorithm>
 #include <iomanip>

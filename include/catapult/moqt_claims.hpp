@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "error.hpp"
-#include "secure_vector.hpp"
+#include "internal/secure_vector.hpp"
 
 namespace catapult {
 

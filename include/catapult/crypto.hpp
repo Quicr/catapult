@@ -14,7 +14,7 @@
 #include <string_view>
 #include <vector>
 
-#include "memory_pool.hpp"
+#include "internal/memory_pool.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -25,7 +25,7 @@
 
 #include "base64.hpp"
 #include "error.hpp"
-#include "secure_vector.hpp"
+#include "internal/secure_vector.hpp"
 
 // Forward declarations for OpenSSL types
 typedef struct evp_pkey_st EVP_PKEY;

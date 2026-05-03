@@ -4,7 +4,7 @@
 #include <chrono>
 #include <atomic>
 #include <memory>
-#include "catapult/memory_pool.hpp"
+#include "catapult/internal/memory_pool.hpp"
 
 using namespace catapult;
 
