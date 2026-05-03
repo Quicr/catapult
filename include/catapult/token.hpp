@@ -12,7 +12,7 @@
 
 #include "claims.hpp"
 #include "composite.hpp"
-#include "memory_pool.hpp"
+#include "internal/memory_pool.hpp"
 #include "moqt_claims.hpp"
 
 namespace catapult {

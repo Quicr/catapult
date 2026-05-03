@@ -10,8 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "memory_pool.hpp"
-#include "trie.hpp"
+#include "internal/memory_pool.hpp"
+#include "internal/trie.hpp"
 
 namespace catapult {
 

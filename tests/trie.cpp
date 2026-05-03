@@ -1,5 +1,5 @@
 #include <doctest/doctest.h>
-#include "catapult/trie.hpp"
+#include "catapult/internal/trie.hpp"
 
 using namespace catapult;
 
