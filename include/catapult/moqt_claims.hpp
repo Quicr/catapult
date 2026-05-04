@@ -35,46 +35,37 @@ constexpr int64_t CLAIM_MOQT_REVAL =
     65001;  ///< MOQT revalidation claim (was TBD_MOQT_REVAL in spec)
 
 /**
- * @brief MOQT action identifiers according to Section 4 of the specification
+ * @brief MOQT action identifiers per draft-ietf-moq-c4m
  */
 namespace moqt_actions {
-constexpr int CLIENT_SETUP = 0;         ///< CLIENT_SETUP action
-constexpr int SERVER_SETUP = 1;         ///< SERVER_SETUP action
-constexpr int ANNOUNCE = 2;             ///< ANNOUNCE action
-constexpr int SUBSCRIBE_NAMESPACE = 3;  ///< SUBSCRIBE_NAMESPACE action
-constexpr int SUBSCRIBE = 4;            ///< SUBSCRIBE action
-constexpr int SUBSCRIBE_UPDATE = 5;     ///< SUBSCRIBE_UPDATE action
-constexpr int PUBLISH = 6;              ///< PUBLISH action
-constexpr int FETCH = 7;                ///< FETCH action
-constexpr int TRACK_STATUS = 8;         ///< TRACK_STATUS action
+constexpr int CLIENT_SETUP = 0;
+constexpr int SERVER_SETUP = 1;
+constexpr int PUBLISH_NAMESPACE = 2;  ///< Per spec naming
+constexpr int ANNOUNCE = 2;           ///< Alias for backward compatibility
+constexpr int SUBSCRIBE_NAMESPACE = 3;
+constexpr int SUBSCRIBE = 4;
+constexpr int REQUEST_UPDATE = 5;     ///< Per spec naming
+constexpr int SUBSCRIBE_UPDATE = 5;   ///< Alias for backward compatibility
+constexpr int PUBLISH = 6;
+constexpr int FETCH = 7;
+constexpr int TRACK_STATUS = 8;
 
 constexpr bool is_valid_action(int action) noexcept {
   return action >= CLIENT_SETUP && action <= TRACK_STATUS;
 }
 
-// Get action name for debugging
 constexpr std::string_view action_name(int action) noexcept {
   switch (action) {
-    case CLIENT_SETUP:
-      return "CLIENT_SETUP";
-    case SERVER_SETUP:
-      return "SERVER_SETUP";
-    case ANNOUNCE:
-      return "ANNOUNCE";
-    case SUBSCRIBE_NAMESPACE:
-      return "SUBSCRIBE_NAMESPACE";
-    case SUBSCRIBE:
-      return "SUBSCRIBE";
-    case SUBSCRIBE_UPDATE:
-      return "SUBSCRIBE_UPDATE";
-    case PUBLISH:
-      return "PUBLISH";
-    case FETCH:
-      return "FETCH";
-    case TRACK_STATUS:
-      return "TRACK_STATUS";
-    default:
-      return "UNKNOWN";
+    case CLIENT_SETUP: return "CLIENT_SETUP";
+    case SERVER_SETUP: return "SERVER_SETUP";
+    case PUBLISH_NAMESPACE: return "PUBLISH_NAMESPACE";
+    case SUBSCRIBE_NAMESPACE: return "SUBSCRIBE_NAMESPACE";
+    case SUBSCRIBE: return "SUBSCRIBE";
+    case REQUEST_UPDATE: return "REQUEST_UPDATE";
+    case PUBLISH: return "PUBLISH";
+    case FETCH: return "FETCH";
+    case TRACK_STATUS: return "TRACK_STATUS";
+    default: return "UNKNOWN";
   }
 }
 }  // namespace moqt_actions

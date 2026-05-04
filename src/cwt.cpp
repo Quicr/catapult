@@ -257,90 +257,89 @@ class ClaimProcessor {
     }
   }
 
+  static cbor_item_t* serializeBinaryMatch(const MoqtBinaryMatch& match) {
+    if (match.is_empty()) {
+      return nullptr;
+    }
+    if (match.match_type == BinaryMatchType::EXACT) {
+      return cbor_build_bytestring(match.pattern.data(), match.pattern.size());
+    }
+    auto arr = cbor_new_definite_array(2);
+    (void)cbor_array_push(arr, cbor_build_uint8(static_cast<uint8_t>(match.match_type)));
+    (void)cbor_array_push(arr, cbor_build_bytestring(match.pattern.data(), match.pattern.size()));
+    return arr;
+  }
+
   static std::vector<uint8_t> serializeMoqtClaimsToCbor(
       const MoqtClaims& moqt_claims) {
-    // Create a CBOR map for MOQT claims with proper scope serialization
-    size_t map_size = 1;  // Always include scopes
-    auto revalidation_interval = moqt_claims.getRevalidationInterval();
-    if (revalidation_interval.has_value()) {
-      map_size++;
-    }
-
-    auto moqt_map = CborItemPtr(cbor_new_definite_map(map_size));
-    if (!moqt_map) {
-      throw InvalidCborError("Failed to create MOQT claims map");
-    }
-
-    // Add scopes array
     const auto& scopes = moqt_claims.getScopes();
-    auto scopes_key = CborItemPtr(cbor_build_string("scopes"));
-    auto scopes_array = CborItemPtr(cbor_new_definite_array(scopes.size()));
-    if (!scopes_key || !scopes_array) {
-      throw InvalidCborError("Failed to create MOQT scopes CBOR items");
+    auto revalidation_interval = moqt_claims.getRevalidationInterval();
+
+    auto moqt_array = CborItemPtr(cbor_new_definite_array(scopes.size()));
+    if (!moqt_array) {
+      throw InvalidCborError("Failed to create MOQT claims array");
     }
 
-    // Serialize each scope (simplified serialization for now)
     for (const auto& scope : scopes) {
-      // Create a simple scope map with basic info
-      auto scope_map = CborItemPtr(cbor_new_definite_map(1));
-      auto scope_info_key = CborItemPtr(cbor_build_string("info"));
-      auto scope_info_val = CborItemPtr(cbor_build_string("scope_data"));
-      if (!scope_map || !scope_info_key || !scope_info_val) {
-        throw InvalidCborError("Failed to create scope CBOR items");
+      size_t scope_len = 1;
+      bool has_ns = !scope.namespace_match.is_empty();
+      bool has_track = !scope.track_match.is_empty();
+      if (has_ns || has_track) scope_len = 2;
+      if (has_track) scope_len = 3;
+
+      auto scope_array = CborItemPtr(cbor_new_definite_array(scope_len));
+
+      auto actions_array = CborItemPtr(cbor_new_definite_array(scope.actions.size()));
+      for (int action : scope.actions) {
+        (void)cbor_array_push(actions_array.get(), cbor_build_uint8(static_cast<uint8_t>(action)));
+      }
+      (void)cbor_array_push(scope_array.get(), actions_array.release());
+
+      if (scope_len >= 2) {
+        auto ns_matches = CborItemPtr(cbor_new_definite_array(1));
+        auto ns_item = serializeBinaryMatch(scope.namespace_match);
+        if (ns_item) {
+          (void)cbor_array_push(ns_matches.get(), ns_item);
+        } else {
+          (void)cbor_array_push(ns_matches.get(), cbor_new_null());
+        }
+        (void)cbor_array_push(scope_array.get(), ns_matches.release());
       }
 
-      struct cbor_pair scope_info_pair = {scope_info_key.release(),
-                                          scope_info_val.release()};
-      if (!cbor_map_add(scope_map.get(), scope_info_pair)) {
-        cbor_decref(&scope_info_pair.key);
-        cbor_decref(&scope_info_pair.value);
-        throw InvalidCborError("Failed to add scope info");
+      if (scope_len >= 3) {
+        auto track_item = serializeBinaryMatch(scope.track_match);
+        if (track_item) {
+          (void)cbor_array_push(scope_array.get(), track_item);
+        } else {
+          (void)cbor_array_push(scope_array.get(), cbor_new_null());
+        }
       }
 
-      if (!cbor_array_push(scopes_array.get(), scope_map.release())) {
-        throw InvalidCborError("Failed to add scope to array");
-      }
+      (void)cbor_array_push(moqt_array.get(), scope_array.release());
     }
 
-    struct cbor_pair scopes_pair = {scopes_key.release(),
-                                    scopes_array.release()};
-    if (!cbor_map_add(moqt_map.get(), scopes_pair)) {
-      cbor_decref(&scopes_pair.key);
-      cbor_decref(&scopes_pair.value);
-      throw InvalidCborError("Failed to add scopes to MOQT map");
-    }
-
-    // Add revalidation interval if present
-    if (revalidation_interval.has_value()) {
-      auto reval_key = CborItemPtr(cbor_build_string("revalidation_interval"));
-      auto reval_val =
-          CborItemPtr(cbor_build_uint64(revalidation_interval->count()));
-      if (!reval_key || !reval_val) {
-        throw InvalidCborError(
-            "Failed to create revalidation interval CBOR items");
-      }
-
-      struct cbor_pair reval_pair = {reval_key.release(), reval_val.release()};
-      if (!cbor_map_add(moqt_map.get(), reval_pair)) {
-        cbor_decref(&reval_pair.key);
-        cbor_decref(&reval_pair.value);
-        throw InvalidCborError(
-            "Failed to add revalidation interval to MOQT map");
-      }
-    }
-
-    // Serialize to bytes
+    std::vector<uint8_t> result;
     unsigned char* raw_buffer;
     size_t buffer_size;
-    size_t length =
-        cbor_serialize_alloc(moqt_map.get(), &raw_buffer, &buffer_size);
-
+    size_t length = cbor_serialize_alloc(moqt_array.get(), &raw_buffer, &buffer_size);
     if (length == 0) {
       throw InvalidCborError("Failed to serialize MOQT claims CBOR");
     }
+    result.assign(raw_buffer, raw_buffer + length);
+    free(raw_buffer);
 
-    auto buffer = CborBufferPtr(raw_buffer);
-    return std::vector<uint8_t>(buffer.get(), buffer.get() + length);
+    if (revalidation_interval.has_value()) {
+      auto reval = CborItemPtr(cbor_build_uint64(revalidation_interval->count()));
+      unsigned char* reval_buf;
+      size_t reval_size;
+      size_t reval_len = cbor_serialize_alloc(reval.get(), &reval_buf, &reval_size);
+      if (reval_len > 0) {
+        result.insert(result.end(), reval_buf, reval_buf + reval_len);
+        free(reval_buf);
+      }
+    }
+
+    return result;
   }
 };
 
@@ -659,27 +658,73 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
 
       case CLAIM_MOQT:
         if (cbor_isa_bytestring(value_item)) {
-          // Decode MOQT claims from CBOR bytestring
           auto moqt_data = extract_bytestring(value_item);
-          // Create MOQT claims with the scopes from the original example
-          // This is a temporary fix to recreate the expected scopes
-          auto moqt_claims = MoqtClaims::create(2);
+          cbor_load_result moqt_result;
+          cbor_item_t* moqt_array = cbor_load(reinterpret_cast<const unsigned char*>(moqt_data.data()), moqt_data.size(), &moqt_result);
+          if (moqt_array && cbor_isa_array(moqt_array)) {
+            auto moqt_claims = MoqtClaims::create(cbor_array_size(moqt_array));
+            for (size_t si = 0; si < cbor_array_size(moqt_array); ++si) {
+              cbor_item_t* scope_arr = cbor_array_get(moqt_array, si);
+              if (!scope_arr || !cbor_isa_array(scope_arr)) continue;
+              size_t scope_len = cbor_array_size(scope_arr);
+              if (scope_len < 1) continue;
 
-          // Recreate the scopes from the example
-          std::vector<int> publish_actions = {moqt_actions::PUBLISH};
-          moqt_claims.addScope(publish_actions,
-                               MoqtBinaryMatch::exact("live-stream"),
-                               MoqtBinaryMatch::any());
+              std::vector<int> actions;
+              cbor_item_t* actions_arr = cbor_array_get(scope_arr, 0);
+              if (actions_arr && cbor_isa_array(actions_arr)) {
+                for (size_t ai = 0; ai < cbor_array_size(actions_arr); ++ai) {
+                  cbor_item_t* act = cbor_array_get(actions_arr, ai);
+                  if (act && cbor_isa_uint(act)) {
+                    actions.push_back(static_cast<int>(cbor_get_uint8(act)));
+                  }
+                }
+              }
 
-          std::vector<int> read_actions = {moqt_actions::SUBSCRIBE,
-                                           moqt_actions::FETCH};
-          moqt_claims.addScope(read_actions,
-                               MoqtBinaryMatch::exact("live-stream"),
-                               MoqtBinaryMatch::prefix("public-"));
+              auto parse_bin_match = [](cbor_item_t* item) -> MoqtBinaryMatch {
+                if (!item || cbor_is_null(item)) return MoqtBinaryMatch::any();
+                if (cbor_isa_bytestring(item)) {
+                  std::string_view sv(reinterpret_cast<const char*>(cbor_bytestring_handle(item)),
+                                      cbor_bytestring_length(item));
+                  return MoqtBinaryMatch::exact(sv);
+                }
+                if (cbor_isa_array(item) && cbor_array_size(item) == 2) {
+                  cbor_item_t* type_item = cbor_array_get(item, 0);
+                  cbor_item_t* val_item = cbor_array_get(item, 1);
+                  if (type_item && cbor_isa_uint(type_item) && val_item && cbor_isa_bytestring(val_item)) {
+                    int type = static_cast<int>(cbor_get_uint8(type_item));
+                    std::string_view sv(reinterpret_cast<const char*>(cbor_bytestring_handle(val_item)),
+                                        cbor_bytestring_length(val_item));
+                    switch (type) {
+                      case 1: return MoqtBinaryMatch::prefix(sv);
+                      case 2: return MoqtBinaryMatch::suffix(sv);
+                      case 3: return MoqtBinaryMatch::contains(sv);
+                      default: return MoqtBinaryMatch::exact(sv);
+                    }
+                  }
+                }
+                return MoqtBinaryMatch::any();
+              };
 
-          moqt_claims.setRevalidationInterval(std::chrono::seconds{1800});
+              MoqtBinaryMatch ns_match = MoqtBinaryMatch::any();
+              MoqtBinaryMatch track_match = MoqtBinaryMatch::any();
 
-          token.extended.setMoqtClaims(std::move(moqt_claims));
+              if (scope_len >= 2) {
+                cbor_item_t* ns_arr = cbor_array_get(scope_arr, 1);
+                if (ns_arr && cbor_isa_array(ns_arr) && cbor_array_size(ns_arr) > 0) {
+                  ns_match = parse_bin_match(cbor_array_get(ns_arr, 0));
+                }
+              }
+              if (scope_len >= 3) {
+                track_match = parse_bin_match(cbor_array_get(scope_arr, 2));
+              }
+
+              if (!actions.empty()) {
+                moqt_claims.addScope(actions, std::move(ns_match), std::move(track_match));
+              }
+            }
+            cbor_decref(&moqt_array);
+            token.extended.setMoqtClaims(std::move(moqt_claims));
+          }
         }
         break;
     }
