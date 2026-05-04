@@ -285,24 +285,28 @@ TEST_CASE("End-to-end relay validation throughput", "[performance][e2e]") {
     dpop_settings.set_window(std::chrono::seconds{300});
     DpopProofValidator dpop_validator(dpop_settings);
 
-    constexpr size_t iterations = 5000;
+    // Pre-generate proofs (client does this, not relay)
+    constexpr size_t iterations = 100000;
+    std::vector<DpopProof> proofs;
+    proofs.reserve(iterations);
+    for (size_t i = 0; i < iterations; ++i) {
+        auto jti = moqt_dpop::generate_jti();
+        proofs.push_back(client_keys.generate_proof(moqt_actions::PUBLISH, "ns", "track", "relay:4433", jti));
+    }
+
     size_t authorized = 0;
+    std::string expected_uri = moqt_dpop::construct_moqt_uri("relay:4433", "ns", "track");
 
     auto start = std::chrono::high_resolution_clock::now();
 
     for (size_t i = 0; i < iterations; ++i) {
-        // Generate fresh proof for each request
-        auto jti = moqt_dpop::generate_jti();
-        auto proof = client_keys.generate_proof(moqt_actions::PUBLISH, "ns", "track", "relay:4433", jti);
-
-        // Relay validation
+        // Relay validation only (no proof generation)
         auto validated = Cwt::validateCwtBase64(token_str, auth_verifier);
 
         if (validated.payload.extended.hasMoqtClaims()) {
             const auto* moqt_claims = validated.payload.extended.getMoqtClaimsReadOnly();
             if (moqt_claims->isAuthorized(moqt_actions::PUBLISH, "ns", "track")) {
-                auto expected_uri = moqt_dpop::construct_moqt_uri("relay:4433", "ns", "track");
-                if (dpop_validator.validate_proof(proof, moqt_actions::PUBLISH, expected_uri,
+                if (dpop_validator.validate_proof(proofs[i], moqt_actions::PUBLISH, expected_uri,
                         *validated.payload.dpop.cnf)) {
                     ++authorized;
                 }
@@ -319,5 +323,76 @@ TEST_CASE("End-to-end relay validation throughput", "[performance][e2e]") {
     INFO("Throughput: " << ops_per_sec << " ops/sec");
 
     REQUIRE(authorized == iterations);
-    REQUIRE(ops_per_sec > 100);  // Expect >100 full validations/sec
+    REQUIRE(ops_per_sec > 1000);  // Expect >1000 relay validations/sec
+}
+
+TEST_CASE("End-to-end relay validation with token cache", "[performance][e2e][cache]") {
+    // Setup: auth server keys
+    auto [auth_priv, auth_pub] = Es256Algorithm::generateSecureKeyPair();
+    Es256Algorithm auth_signer(auth_priv, auth_pub);
+    Es256Algorithm auth_verifier(auth_pub);
+
+    // Setup: client DPoP keys
+    auto client_algo = std::make_unique<Es256Algorithm>();
+    DpopKeyPair client_keys(std::move(client_algo));
+
+    // Create token
+    auto token = CatToken::builder()
+        .issuer("auth.example.com")
+        .audience("relay.example.com")
+        .expiresIn(std::chrono::hours{1})
+        .dpopThumbprint(client_keys.get_public_key_thumbprint())
+        .build();
+
+    MoqtClaims moqt;
+    std::vector<int> pub = {moqt_actions::PUBLISH};
+    moqt.addScope(pub, MoqtBinaryMatch::any(), MoqtBinaryMatch::any());
+    token.extended.setMoqtClaims(std::move(moqt));
+
+    Cwt cwt(ALG_ES256, token);
+    std::string token_str = cwt.createCwtBase64(CwtMode::Signed, auth_signer);
+
+    CatDpopSettings dpop_settings;
+    dpop_settings.set_window(std::chrono::seconds{300});
+    DpopProofValidator dpop_validator(dpop_settings);
+
+    // Pre-generate proofs
+    constexpr size_t iterations = 100000;
+    std::vector<DpopProof> proofs;
+    proofs.reserve(iterations);
+    for (size_t i = 0; i < iterations; ++i) {
+        auto jti = moqt_dpop::generate_jti();
+        proofs.push_back(client_keys.generate_proof(moqt_actions::PUBLISH, "ns", "track", "relay:4433", jti));
+    }
+
+    // Simulate token cache: validate once, reuse the result
+    auto cached_token = Cwt::validateCwtBase64(token_str, auth_verifier);
+    const auto* cached_moqt = cached_token.payload.extended.getMoqtClaimsReadOnly();
+    const std::string& cached_thumbprint = *cached_token.payload.dpop.cnf;
+
+    size_t authorized = 0;
+    std::string expected_uri = moqt_dpop::construct_moqt_uri("relay:4433", "ns", "track");
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    for (size_t i = 0; i < iterations; ++i) {
+        // Cached validation: skip CWT signature verification
+        if (cached_moqt->isAuthorized(moqt_actions::PUBLISH, "ns", "track")) {
+            if (dpop_validator.validate_proof(proofs[i], moqt_actions::PUBLISH, expected_uri,
+                    cached_thumbprint)) {
+                ++authorized;
+            }
+        }
+    }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    double ops_per_sec = (iterations * 1000.0) / duration_ms;
+
+    INFO("Cached E2E validations: " << iterations);
+    INFO("Duration: " << duration_ms << " ms");
+    INFO("Throughput: " << ops_per_sec << " ops/sec");
+
+    REQUIRE(authorized == iterations);
+    REQUIRE(ops_per_sec > 50000);  // Expect >50k with caching
 }
