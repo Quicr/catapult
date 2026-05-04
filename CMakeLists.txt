@@ -202,4 +202,22 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     )
 
     target_link_libraries(moqt_dpop_example catapult)
+
+    # Focused scenario examples
+    add_executable(server_token_issuance examples/server_token_issuance.cpp)
+    target_link_libraries(server_token_issuance catapult)
+
+    add_executable(client_token_usage examples/client_token_usage.cpp)
+    target_link_libraries(client_token_usage catapult)
+
+    add_executable(relay_token_validation examples/relay_token_validation.cpp)
+    target_link_libraries(relay_token_validation catapult)
+
+    # Performance tests (using Catch2)
+    find_package(Catch2 3 QUIET)
+    if(Catch2_FOUND)
+        add_executable(catapult_perf_tests tests/performance.cpp)
+        target_link_libraries(catapult_perf_tests catapult Catch2::Catch2WithMain)
+        add_test(NAME catapult_performance_tests COMMAND catapult_perf_tests)
+    endif()
 endif()
