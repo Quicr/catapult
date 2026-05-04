@@ -483,15 +483,49 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
       size_t map_size = cbor_map_size(pay_map);
       cbor_pair* pairs = cbor_map_handle(pay_map);
       for (size_t i = 0; i < map_size; ++i) {
-        if (cbor_isa_uint(pairs[i].key)) {
-          int64_t key = cbor_get_uint64(pairs[i].key);
-          if (key == dpop_labels::IAT && cbor_isa_uint(pairs[i].value)) {
-            payload.iat = static_cast<int64_t>(cbor_get_uint64(pairs[i].value));
-          } else if (key == dpop_labels::CTI &&
-                     cbor_isa_string(pairs[i].value)) {
-            payload.jti = std::string(
-                reinterpret_cast<const char*>(cbor_string_handle(pairs[i].value)),
-                cbor_string_length(pairs[i].value));
+        std::string key_str;
+        if (cbor_isa_string(pairs[i].key)) {
+          key_str = std::string(
+              reinterpret_cast<const char*>(cbor_string_handle(pairs[i].key)),
+              cbor_string_length(pairs[i].key));
+        }
+
+        if (key_str == "iat" && cbor_isa_uint(pairs[i].value)) {
+          payload.iat = static_cast<int64_t>(cbor_get_uint64(pairs[i].value));
+        } else if (key_str == "jti" && cbor_isa_string(pairs[i].value)) {
+          payload.jti = std::string(
+              reinterpret_cast<const char*>(cbor_string_handle(pairs[i].value)),
+              cbor_string_length(pairs[i].value));
+        } else if (key_str == "actx" && cbor_isa_map(pairs[i].value)) {
+          cbor_item_t* actx_map = pairs[i].value;
+          size_t actx_size = cbor_map_size(actx_map);
+          cbor_pair* actx_pairs = cbor_map_handle(actx_map);
+          for (size_t j = 0; j < actx_size; ++j) {
+            std::string actx_key;
+            if (cbor_isa_string(actx_pairs[j].key)) {
+              actx_key = std::string(
+                  reinterpret_cast<const char*>(cbor_string_handle(actx_pairs[j].key)),
+                  cbor_string_length(actx_pairs[j].key));
+            }
+            if (actx_key == "type" && cbor_isa_string(actx_pairs[j].value)) {
+              payload.actx.type = std::string(
+                  reinterpret_cast<const char*>(cbor_string_handle(actx_pairs[j].value)),
+                  cbor_string_length(actx_pairs[j].value));
+            } else if (actx_key == "action" && cbor_isa_uint(actx_pairs[j].value)) {
+              payload.actx.action = static_cast<int>(cbor_get_uint64(actx_pairs[j].value));
+            } else if (actx_key == "tns" && cbor_isa_string(actx_pairs[j].value)) {
+              payload.actx.tns = std::string(
+                  reinterpret_cast<const char*>(cbor_string_handle(actx_pairs[j].value)),
+                  cbor_string_length(actx_pairs[j].value));
+            } else if (actx_key == "tn" && cbor_isa_string(actx_pairs[j].value)) {
+              payload.actx.tn = std::string(
+                  reinterpret_cast<const char*>(cbor_string_handle(actx_pairs[j].value)),
+                  cbor_string_length(actx_pairs[j].value));
+            } else if (actx_key == "resource" && cbor_isa_string(actx_pairs[j].value)) {
+              payload.actx.resource_uri = std::string(
+                  reinterpret_cast<const char*>(cbor_string_handle(actx_pairs[j].value)),
+                  cbor_string_length(actx_pairs[j].value));
+            }
           }
         }
       }
