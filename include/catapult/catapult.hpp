@@ -9,13 +9,13 @@
 #pragma once
 
 // Core token functionality
-#include "token.hpp"
-#include "claims.hpp"
-#include "cwt.hpp"
-#include "crypto.hpp"
-#include "validator.hpp"
-#include "error.hpp"
 #include "base64.hpp"
+#include "claims.hpp"
+#include "crypto.hpp"
+#include "cwt.hpp"
+#include "error.hpp"
+#include "token.hpp"
+#include "validator.hpp"
 
 // MOQT support
 #include "moqt_claims.hpp"

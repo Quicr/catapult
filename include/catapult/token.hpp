@@ -469,7 +469,7 @@ class CatTokenBuilder {
   CatTokenBuilder& proofOfPossession(bool enabled = true);
   CatTokenBuilder& subject(const std::string& sub);
   CatTokenBuilder& geoCoordinate(double lat, double lon,
-                                  std::optional<double> accuracy = std::nullopt);
+                                 std::optional<double> accuracy = std::nullopt);
   CatTokenBuilder& geohash(const std::string& hash);
   CatTokenBuilder& altitude(int32_t alt);
   CatTokenBuilder& networkInterfaces(const std::vector<std::string>& nips);
@@ -505,7 +505,8 @@ inline CatTokenBuilder& CatTokenBuilder::expiresAt(int64_t exp) {
   return *this;
 }
 
-inline CatTokenBuilder& CatTokenBuilder::expiresIn(std::chrono::seconds duration) {
+inline CatTokenBuilder& CatTokenBuilder::expiresIn(
+    std::chrono::seconds duration) {
   token_.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + duration);
   return *this;
@@ -594,7 +595,8 @@ inline CatTokenBuilder& CatTokenBuilder::countries(
   return *this;
 }
 
-inline CatTokenBuilder& CatTokenBuilder::dpopThumbprint(const std::string& cnf) {
+inline CatTokenBuilder& CatTokenBuilder::dpopThumbprint(
+    const std::string& cnf) {
   token_.dpop.cnf = cnf;
   return *this;
 }
