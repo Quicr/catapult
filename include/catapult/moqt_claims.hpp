@@ -44,8 +44,8 @@ constexpr int PUBLISH_NAMESPACE = 2;  ///< Per spec naming
 constexpr int ANNOUNCE = 2;           ///< Alias for backward compatibility
 constexpr int SUBSCRIBE_NAMESPACE = 3;
 constexpr int SUBSCRIBE = 4;
-constexpr int REQUEST_UPDATE = 5;     ///< Per spec naming
-constexpr int SUBSCRIBE_UPDATE = 5;   ///< Alias for backward compatibility
+constexpr int REQUEST_UPDATE = 5;    ///< Per spec naming
+constexpr int SUBSCRIBE_UPDATE = 5;  ///< Alias for backward compatibility
 constexpr int PUBLISH = 6;
 constexpr int FETCH = 7;
 constexpr int TRACK_STATUS = 8;
@@ -56,16 +56,26 @@ constexpr bool is_valid_action(int action) noexcept {
 
 constexpr std::string_view action_name(int action) noexcept {
   switch (action) {
-    case CLIENT_SETUP: return "CLIENT_SETUP";
-    case SERVER_SETUP: return "SERVER_SETUP";
-    case PUBLISH_NAMESPACE: return "PUBLISH_NAMESPACE";
-    case SUBSCRIBE_NAMESPACE: return "SUBSCRIBE_NAMESPACE";
-    case SUBSCRIBE: return "SUBSCRIBE";
-    case REQUEST_UPDATE: return "REQUEST_UPDATE";
-    case PUBLISH: return "PUBLISH";
-    case FETCH: return "FETCH";
-    case TRACK_STATUS: return "TRACK_STATUS";
-    default: return "UNKNOWN";
+    case CLIENT_SETUP:
+      return "CLIENT_SETUP";
+    case SERVER_SETUP:
+      return "SERVER_SETUP";
+    case PUBLISH_NAMESPACE:
+      return "PUBLISH_NAMESPACE";
+    case SUBSCRIBE_NAMESPACE:
+      return "SUBSCRIBE_NAMESPACE";
+    case SUBSCRIBE:
+      return "SUBSCRIBE";
+    case REQUEST_UPDATE:
+      return "REQUEST_UPDATE";
+    case PUBLISH:
+      return "PUBLISH";
+    case FETCH:
+      return "FETCH";
+    case TRACK_STATUS:
+      return "TRACK_STATUS";
+    default:
+      return "UNKNOWN";
   }
 }
 }  // namespace moqt_actions

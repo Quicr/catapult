@@ -265,8 +265,10 @@ class ClaimProcessor {
       return cbor_build_bytestring(match.pattern.data(), match.pattern.size());
     }
     auto arr = cbor_new_definite_array(2);
-    (void)cbor_array_push(arr, cbor_build_uint8(static_cast<uint8_t>(match.match_type)));
-    (void)cbor_array_push(arr, cbor_build_bytestring(match.pattern.data(), match.pattern.size()));
+    (void)cbor_array_push(
+        arr, cbor_build_uint8(static_cast<uint8_t>(match.match_type)));
+    (void)cbor_array_push(
+        arr, cbor_build_bytestring(match.pattern.data(), match.pattern.size()));
     return arr;
   }
 
@@ -289,9 +291,11 @@ class ClaimProcessor {
 
       auto scope_array = CborItemPtr(cbor_new_definite_array(scope_len));
 
-      auto actions_array = CborItemPtr(cbor_new_definite_array(scope.actions.size()));
+      auto actions_array =
+          CborItemPtr(cbor_new_definite_array(scope.actions.size()));
       for (int action : scope.actions) {
-        (void)cbor_array_push(actions_array.get(), cbor_build_uint8(static_cast<uint8_t>(action)));
+        (void)cbor_array_push(actions_array.get(),
+                              cbor_build_uint8(static_cast<uint8_t>(action)));
       }
       (void)cbor_array_push(scope_array.get(), actions_array.release());
 
@@ -321,7 +325,8 @@ class ClaimProcessor {
     std::vector<uint8_t> result;
     unsigned char* raw_buffer;
     size_t buffer_size;
-    size_t length = cbor_serialize_alloc(moqt_array.get(), &raw_buffer, &buffer_size);
+    size_t length =
+        cbor_serialize_alloc(moqt_array.get(), &raw_buffer, &buffer_size);
     if (length == 0) {
       throw InvalidCborError("Failed to serialize MOQT claims CBOR");
     }
@@ -329,10 +334,12 @@ class ClaimProcessor {
     free(raw_buffer);
 
     if (revalidation_interval.has_value()) {
-      auto reval = CborItemPtr(cbor_build_uint64(revalidation_interval->count()));
+      auto reval =
+          CborItemPtr(cbor_build_uint64(revalidation_interval->count()));
       unsigned char* reval_buf;
       size_t reval_size;
-      size_t reval_len = cbor_serialize_alloc(reval.get(), &reval_buf, &reval_size);
+      size_t reval_len =
+          cbor_serialize_alloc(reval.get(), &reval_buf, &reval_size);
       if (reval_len > 0) {
         result.insert(result.end(), reval_buf, reval_buf + reval_len);
         free(reval_buf);
@@ -660,7 +667,9 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
         if (cbor_isa_bytestring(value_item)) {
           auto moqt_data = extract_bytestring(value_item);
           cbor_load_result moqt_result;
-          cbor_item_t* moqt_array = cbor_load(reinterpret_cast<const unsigned char*>(moqt_data.data()), moqt_data.size(), &moqt_result);
+          cbor_item_t* moqt_array = cbor_load(
+              reinterpret_cast<const unsigned char*>(moqt_data.data()),
+              moqt_data.size(), &moqt_result);
           if (moqt_array && cbor_isa_array(moqt_array)) {
             auto moqt_claims = MoqtClaims::create(cbor_array_size(moqt_array));
             for (size_t si = 0; si < cbor_array_size(moqt_array); ++si) {
@@ -683,22 +692,29 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
               auto parse_bin_match = [](cbor_item_t* item) -> MoqtBinaryMatch {
                 if (!item || cbor_is_null(item)) return MoqtBinaryMatch::any();
                 if (cbor_isa_bytestring(item)) {
-                  std::string_view sv(reinterpret_cast<const char*>(cbor_bytestring_handle(item)),
+                  std::string_view sv(reinterpret_cast<const char*>(
+                                          cbor_bytestring_handle(item)),
                                       cbor_bytestring_length(item));
                   return MoqtBinaryMatch::exact(sv);
                 }
                 if (cbor_isa_array(item) && cbor_array_size(item) == 2) {
                   cbor_item_t* type_item = cbor_array_get(item, 0);
                   cbor_item_t* val_item = cbor_array_get(item, 1);
-                  if (type_item && cbor_isa_uint(type_item) && val_item && cbor_isa_bytestring(val_item)) {
+                  if (type_item && cbor_isa_uint(type_item) && val_item &&
+                      cbor_isa_bytestring(val_item)) {
                     int type = static_cast<int>(cbor_get_uint8(type_item));
-                    std::string_view sv(reinterpret_cast<const char*>(cbor_bytestring_handle(val_item)),
+                    std::string_view sv(reinterpret_cast<const char*>(
+                                            cbor_bytestring_handle(val_item)),
                                         cbor_bytestring_length(val_item));
                     switch (type) {
-                      case 1: return MoqtBinaryMatch::prefix(sv);
-                      case 2: return MoqtBinaryMatch::suffix(sv);
-                      case 3: return MoqtBinaryMatch::contains(sv);
-                      default: return MoqtBinaryMatch::exact(sv);
+                      case 1:
+                        return MoqtBinaryMatch::prefix(sv);
+                      case 2:
+                        return MoqtBinaryMatch::suffix(sv);
+                      case 3:
+                        return MoqtBinaryMatch::contains(sv);
+                      default:
+                        return MoqtBinaryMatch::exact(sv);
                     }
                   }
                 }
@@ -710,7 +726,8 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
 
               if (scope_len >= 2) {
                 cbor_item_t* ns_arr = cbor_array_get(scope_arr, 1);
-                if (ns_arr && cbor_isa_array(ns_arr) && cbor_array_size(ns_arr) > 0) {
+                if (ns_arr && cbor_isa_array(ns_arr) &&
+                    cbor_array_size(ns_arr) > 0) {
                   ns_match = parse_bin_match(cbor_array_get(ns_arr, 0));
                 }
               }
@@ -719,7 +736,8 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
               }
 
               if (!actions.empty()) {
-                moqt_claims.addScope(actions, std::move(ns_match), std::move(track_match));
+                moqt_claims.addScope(actions, std::move(ns_match),
+                                     std::move(track_match));
               }
             }
             cbor_decref(&moqt_array);
@@ -804,8 +822,8 @@ std::vector<uint8_t> Cwt::createCoseHeader() const {
   }
 }
 
-std::vector<uint8_t> Cwt::createCwt(CwtMode mode,
-                                    const CryptographicAlgorithm& algorithm) const {
+std::vector<uint8_t> Cwt::createCwt(
+    CwtMode mode, const CryptographicAlgorithm& algorithm) const {
   try {
     CAT_LOG_DEBUG("Creating CWT with mode {}", static_cast<int>(mode));
 
@@ -1022,8 +1040,8 @@ std::vector<uint8_t> Cwt::createCwt(CwtMode mode,
   }
 }
 
-std::string Cwt::createCwtBase64(CwtMode mode,
-                                 const CryptographicAlgorithm& algorithm) const {
+std::string Cwt::createCwtBase64(
+    CwtMode mode, const CryptographicAlgorithm& algorithm) const {
   auto cwtBytes = createCwt(mode, algorithm);
   return base64UrlEncode(cwtBytes);
 }

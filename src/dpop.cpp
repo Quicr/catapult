@@ -20,6 +20,7 @@
 
 #ifdef CATAPULT_ENABLE_JSON
 #include <nlohmann/json.hpp>
+
 #include "catapult/jwk.hpp"
 using json = nlohmann::json;
 #endif
@@ -41,7 +42,8 @@ namespace {
 std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
                                           const std::vector<uint8_t>& der_key) {
   const uint8_t* data = der_key.data();
-  EVP_PKEY* pkey = d2i_PUBKEY(nullptr, &data, static_cast<long>(der_key.size()));
+  EVP_PKEY* pkey =
+      d2i_PUBKEY(nullptr, &data, static_cast<long>(der_key.size()));
   if (!pkey) {
     throw CryptoError("Failed to parse DER public key for COSE_Key");
   }
@@ -73,10 +75,12 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
     (void)cbor_map_add(cose_key, {cbor_build_uint8(1), cbor_build_uint8(2)});
     (void)cbor_map_add(cose_key, {cbor_build_uint8(3), cbor_build_negint8(6)});
     (void)cbor_map_add(cose_key, {cbor_build_negint8(0), cbor_build_uint8(1)});
-    (void)cbor_map_add(cose_key, {cbor_build_negint8(1),
-                           cbor_build_bytestring(x_bytes.data(), x_bytes.size())});
-    (void)cbor_map_add(cose_key, {cbor_build_negint8(2),
-                           cbor_build_bytestring(y_bytes.data(), y_bytes.size())});
+    (void)cbor_map_add(cose_key,
+                       {cbor_build_negint8(1),
+                        cbor_build_bytestring(x_bytes.data(), x_bytes.size())});
+    (void)cbor_map_add(cose_key,
+                       {cbor_build_negint8(2),
+                        cbor_build_bytestring(y_bytes.data(), y_bytes.size())});
   } else if (alg_id == ALG_PS256) {
     BIGNUM* n = nullptr;
     BIGNUM* e = nullptr;
@@ -99,10 +103,12 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
     // kty: RSA (3), alg: PS256 (-37), n, e
     (void)cbor_map_add(cose_key, {cbor_build_uint8(1), cbor_build_uint8(3)});
     (void)cbor_map_add(cose_key, {cbor_build_uint8(3), cbor_build_negint8(36)});
-    (void)cbor_map_add(cose_key, {cbor_build_negint8(0),
-                           cbor_build_bytestring(n_bytes.data(), n_bytes.size())});
-    (void)cbor_map_add(cose_key, {cbor_build_negint8(1),
-                           cbor_build_bytestring(e_bytes.data(), e_bytes.size())});
+    (void)cbor_map_add(cose_key,
+                       {cbor_build_negint8(0),
+                        cbor_build_bytestring(n_bytes.data(), n_bytes.size())});
+    (void)cbor_map_add(cose_key,
+                       {cbor_build_negint8(1),
+                        cbor_build_bytestring(e_bytes.data(), e_bytes.size())});
   } else {
     EVP_PKEY_free(pkey);
     cbor_decref(&cose_key);
@@ -178,8 +184,9 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
     OSSL_PARAM* params = OSSL_PARAM_BLD_to_param(param_bld);
     EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(nullptr, "EC", nullptr);
 
-    bool success = ctx && EVP_PKEY_fromdata_init(ctx) > 0 &&
-                   EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) > 0;
+    bool success =
+        ctx && EVP_PKEY_fromdata_init(ctx) > 0 &&
+        EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) > 0;
 
     OSSL_PARAM_BLD_free(param_bld);
     OSSL_PARAM_free(params);
@@ -235,8 +242,9 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
     OSSL_PARAM* params = OSSL_PARAM_BLD_to_param(param_bld);
     EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(nullptr, "RSA", nullptr);
 
-    bool success = ctx && EVP_PKEY_fromdata_init(ctx) > 0 &&
-                   EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) > 0;
+    bool success =
+        ctx && EVP_PKEY_fromdata_init(ctx) > 0 &&
+        EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) > 0;
 
     OSSL_PARAM_BLD_free(param_bld);
     OSSL_PARAM_free(params);
@@ -330,17 +338,17 @@ std::string DpopProof::serialize_cwt() const {
 
   // Protected header with alg and typ
   auto protected_map = cbor_new_definite_map(3);
-  (void)cbor_map_add(protected_map,
-               {cbor_build_uint8(dpop_labels::ALG),
-                cbor_build_negint8(static_cast<uint8_t>(-header_.alg_id - 1))});
-  (void)cbor_map_add(protected_map,
-               {cbor_build_uint8(dpop_labels::TYP),
-                cbor_build_string("dpop-proof+cwt")});
+  (void)cbor_map_add(
+      protected_map,
+      {cbor_build_uint8(dpop_labels::ALG),
+       cbor_build_negint8(static_cast<uint8_t>(-header_.alg_id - 1))});
+  (void)cbor_map_add(protected_map, {cbor_build_uint8(dpop_labels::TYP),
+                                     cbor_build_string("dpop-proof+cwt")});
   if (!header_.cose_key.empty()) {
     (void)cbor_map_add(protected_map,
-                 {cbor_build_uint8(dpop_labels::COSE_KEY),
-                  cbor_build_bytestring(header_.cose_key.data(),
-                                        header_.cose_key.size())});
+                       {cbor_build_uint8(dpop_labels::COSE_KEY),
+                        cbor_build_bytestring(header_.cose_key.data(),
+                                              header_.cose_key.size())});
   }
 
   unsigned char* prot_buf = nullptr;
@@ -357,12 +365,12 @@ std::string DpopProof::serialize_cwt() const {
 
   // Payload (CBOR-encoded claims)
   auto cbor_payload = create_signing_input();
-  (void)cbor_array_push(cose_array,
-                  cbor_build_bytestring(cbor_payload.data(), cbor_payload.size()));
+  (void)cbor_array_push(cose_array, cbor_build_bytestring(cbor_payload.data(),
+                                                          cbor_payload.size()));
 
   // Signature
-  (void)cbor_array_push(cose_array,
-                  cbor_build_bytestring(signature_.data(), signature_.size()));
+  (void)cbor_array_push(
+      cose_array, cbor_build_bytestring(signature_.data(), signature_.size()));
 
   unsigned char* buffer = nullptr;
   size_t buffer_size = 0;
@@ -381,8 +389,9 @@ std::string DpopProof::serialize_cwt() const {
 
 #ifdef CATAPULT_ENABLE_JSON
 std::string DpopProof::serialize_jwt() const {
-  json header_json = {
-      {"typ", "dpop-proof+jwt"}, {"alg", header_.alg}, {"jwk", json::parse(header_.jwk)}};
+  json header_json = {{"typ", "dpop-proof+jwt"},
+                      {"alg", header_.alg},
+                      {"jwk", json::parse(header_.jwk)}};
 
   json payload_json = {{"iat", payload_.iat},
                        {"actx",
@@ -433,7 +442,8 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   cbor_item_t* cose_array =
       cbor_load(cose_bytes.data(), cose_bytes.size(), &result);
 
-  if (!cose_array || !cbor_isa_array(cose_array) || cbor_array_size(cose_array) != 4) {
+  if (!cose_array || !cbor_isa_array(cose_array) ||
+      cbor_array_size(cose_array) != 4) {
     if (cose_array) cbor_decref(&cose_array);
     throw InvalidTokenFormatError{};
   }
@@ -448,7 +458,7 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
     if (prot_len > 0) {
       cbor_load_result prot_result;
       cbor_item_t* prot_map = cbor_load(cbor_bytestring_handle(protected_bstr),
-                                         prot_len, &prot_result);
+                                        prot_len, &prot_result);
       if (prot_map && cbor_isa_map(prot_map)) {
         size_t map_size = cbor_map_size(prot_map);
         cbor_pair* pairs = cbor_map_handle(prot_map);
@@ -456,12 +466,14 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
           if (cbor_isa_uint(pairs[i].key)) {
             uint8_t key = cbor_get_uint8(pairs[i].key);
             if (key == dpop_labels::ALG && cbor_isa_negint(pairs[i].value)) {
-              header.alg_id = -1 - static_cast<int64_t>(cbor_get_uint8(pairs[i].value));
+              header.alg_id =
+                  -1 - static_cast<int64_t>(cbor_get_uint8(pairs[i].value));
             } else if (key == dpop_labels::COSE_KEY &&
                        cbor_isa_bytestring(pairs[i].value)) {
               size_t ck_len = cbor_bytestring_length(pairs[i].value);
-              header.cose_key.assign(cbor_bytestring_handle(pairs[i].value),
-                                     cbor_bytestring_handle(pairs[i].value) + ck_len);
+              header.cose_key.assign(
+                  cbor_bytestring_handle(pairs[i].value),
+                  cbor_bytestring_handle(pairs[i].value) + ck_len);
             }
           }
         }
@@ -503,28 +515,37 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
           for (size_t j = 0; j < actx_size; ++j) {
             std::string actx_key;
             if (cbor_isa_string(actx_pairs[j].key)) {
-              actx_key = std::string(
-                  reinterpret_cast<const char*>(cbor_string_handle(actx_pairs[j].key)),
-                  cbor_string_length(actx_pairs[j].key));
+              actx_key = std::string(reinterpret_cast<const char*>(
+                                         cbor_string_handle(actx_pairs[j].key)),
+                                     cbor_string_length(actx_pairs[j].key));
             }
             if (actx_key == "type" && cbor_isa_string(actx_pairs[j].value)) {
-              payload.actx.type = std::string(
-                  reinterpret_cast<const char*>(cbor_string_handle(actx_pairs[j].value)),
-                  cbor_string_length(actx_pairs[j].value));
-            } else if (actx_key == "action" && cbor_isa_uint(actx_pairs[j].value)) {
-              payload.actx.action = static_cast<int>(cbor_get_uint64(actx_pairs[j].value));
-            } else if (actx_key == "tns" && cbor_isa_string(actx_pairs[j].value)) {
-              payload.actx.tns = std::string(
-                  reinterpret_cast<const char*>(cbor_string_handle(actx_pairs[j].value)),
-                  cbor_string_length(actx_pairs[j].value));
-            } else if (actx_key == "tn" && cbor_isa_string(actx_pairs[j].value)) {
-              payload.actx.tn = std::string(
-                  reinterpret_cast<const char*>(cbor_string_handle(actx_pairs[j].value)),
-                  cbor_string_length(actx_pairs[j].value));
-            } else if (actx_key == "resource" && cbor_isa_string(actx_pairs[j].value)) {
-              payload.actx.resource_uri = std::string(
-                  reinterpret_cast<const char*>(cbor_string_handle(actx_pairs[j].value)),
-                  cbor_string_length(actx_pairs[j].value));
+              payload.actx.type =
+                  std::string(reinterpret_cast<const char*>(
+                                  cbor_string_handle(actx_pairs[j].value)),
+                              cbor_string_length(actx_pairs[j].value));
+            } else if (actx_key == "action" &&
+                       cbor_isa_uint(actx_pairs[j].value)) {
+              payload.actx.action =
+                  static_cast<int>(cbor_get_uint64(actx_pairs[j].value));
+            } else if (actx_key == "tns" &&
+                       cbor_isa_string(actx_pairs[j].value)) {
+              payload.actx.tns =
+                  std::string(reinterpret_cast<const char*>(
+                                  cbor_string_handle(actx_pairs[j].value)),
+                              cbor_string_length(actx_pairs[j].value));
+            } else if (actx_key == "tn" &&
+                       cbor_isa_string(actx_pairs[j].value)) {
+              payload.actx.tn =
+                  std::string(reinterpret_cast<const char*>(
+                                  cbor_string_handle(actx_pairs[j].value)),
+                              cbor_string_length(actx_pairs[j].value));
+            } else if (actx_key == "resource" &&
+                       cbor_isa_string(actx_pairs[j].value)) {
+              payload.actx.resource_uri =
+                  std::string(reinterpret_cast<const char*>(
+                                  cbor_string_handle(actx_pairs[j].value)),
+                              cbor_string_length(actx_pairs[j].value));
             }
           }
         }
@@ -673,8 +694,7 @@ bool DpopProofValidator::validate_proof(
       }
 #ifdef CATAPULT_ENABLE_JSON
       else {
-        actual_thumbprint =
-            jwk::calculateJWKThumbprint(proof.get_header().jwk);
+        actual_thumbprint = jwk::calculateJWKThumbprint(proof.get_header().jwk);
       }
 #endif
       if (actual_thumbprint != expected_public_key_thumbprint) {

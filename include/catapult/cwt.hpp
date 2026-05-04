@@ -141,8 +141,8 @@ class Cwt {
    * @param algorithm Cryptographic algorithm implementation
    * @return Raw CBOR-encoded CWT bytes
    */
-  std::vector<uint8_t> createCwt(CwtMode mode,
-                                 const class CryptographicAlgorithm& algorithm) const;
+  std::vector<uint8_t> createCwt(
+      CwtMode mode, const class CryptographicAlgorithm& algorithm) const;
 
   /**
    * @brief Validate a COSE_Sign1 CWT from raw CBOR bytes (RFC 8392)
@@ -173,8 +173,8 @@ class Cwt {
   /**
    * @brief Create CWT and return as base64url-encoded string
    */
-  std::string createCwtBase64(CwtMode mode,
-                              const class CryptographicAlgorithm& algorithm) const;
+  std::string createCwtBase64(
+      CwtMode mode, const class CryptographicAlgorithm& algorithm) const;
 
   /**
    * @brief Validate a base64url-encoded CWT string
