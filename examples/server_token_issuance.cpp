@@ -7,9 +7,7 @@
 #include <iostream>
 #include <vector>
 
-#include "catapult/catapult_minimal.hpp"  // Core CAT/CWT functionality
-#include "catapult/dpop.hpp"              // DPoP proof support
-#include "catapult/moqt_claims.hpp"       // MOQT-specific claims
+#include "catapult/catapult.hpp"
 
 using namespace catapult;
 
