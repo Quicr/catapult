@@ -29,7 +29,7 @@ TEST_SUITE("RFC 8152 Section 4.1 Compliance Tests") {
         Cwt cwt(hmac->algorithmId(), token);
         cwt.addSignature(*hmac);
         
-        std::string cwtString = cwt.createCwt(CwtMode::MultiSigned, *hmac);
+        std::string cwtString = cwt.createCwtBase64(CwtMode::MultiSigned, *hmac);
         auto coseBytes = base64UrlDecode(cwtString);
         
         // Parse COSE structure
@@ -72,7 +72,7 @@ TEST_SUITE("RFC 8152 Section 4.1 Compliance Tests") {
         auto hmac = std::make_unique<HmacSha256Algorithm>(hmacKey);
         
         Cwt cwt(hmac->algorithmId(), token);
-        std::string cwtString = cwt.createCwt(CwtMode::Signed, *hmac);
+        std::string cwtString = cwt.createCwtBase64(CwtMode::Signed, *hmac);
         auto coseBytes = base64UrlDecode(cwtString);
         
         // Parse COSE structure
@@ -118,7 +118,7 @@ TEST_SUITE("RFC 8152 Section 4.1 Compliance Tests") {
         cwt.addSignature(*hmac);
         cwt.addSignature(*hmac);
         
-        std::string cwtString = cwt.createCwt(CwtMode::MultiSigned, *hmac);
+        std::string cwtString = cwt.createCwtBase64(CwtMode::MultiSigned, *hmac);
         auto coseBytes = base64UrlDecode(cwtString);
         
         struct cbor_load_result result;
@@ -166,7 +166,7 @@ TEST_SUITE("RFC 8152 Section 4.1 Compliance Tests") {
         cwt.withKeyId("test-key-id");
         
         // Test COSE_Sign1
-        std::string sign1Cwt = cwt.createCwt(CwtMode::Signed, *hmac);
+        std::string sign1Cwt = cwt.createCwtBase64(CwtMode::Signed, *hmac);
         auto sign1Bytes = base64UrlDecode(sign1Cwt);
         
         struct cbor_load_result result;
@@ -207,7 +207,7 @@ TEST_SUITE("RFC 8152 Section 4.1 Compliance Tests") {
         auto hmac = std::make_unique<HmacSha256Algorithm>(hmacKey);
         
         Cwt cwt(hmac->algorithmId(), token);
-        std::string cwtString = cwt.createCwt(CwtMode::Signed, *hmac);
+        std::string cwtString = cwt.createCwtBase64(CwtMode::Signed, *hmac);
         auto coseBytes = base64UrlDecode(cwtString);
         
         struct cbor_load_result result;
@@ -235,7 +235,7 @@ TEST_SUITE("RFC 8152 Section 4.1 Compliance Tests") {
         auto hmac = std::make_unique<HmacSha256Algorithm>(hmacKey);
         
         Cwt cwt(hmac->algorithmId(), token);
-        std::string cwtString = cwt.createCwt(CwtMode::Signed, *hmac);
+        std::string cwtString = cwt.createCwtBase64(CwtMode::Signed, *hmac);
         auto coseBytes = base64UrlDecode(cwtString);
         
         struct cbor_load_result result;
@@ -265,22 +265,22 @@ TEST_SUITE("RFC 8152 Section 4.1 Compliance Tests") {
         
         // Create COSE_Sign1
         Cwt sign1Cwt(hmac->algorithmId(), token);
-        std::string sign1Token = sign1Cwt.createCwt(CwtMode::Signed, *hmac);
+        std::string sign1Token = sign1Cwt.createCwtBase64(CwtMode::Signed, *hmac);
         
         // Create COSE_Sign with same payload
         Cwt signCwt(hmac->algorithmId(), token);
         signCwt.addSignature(*hmac);
-        std::string signToken = signCwt.createCwt(CwtMode::MultiSigned, *hmac);
+        std::string signToken = signCwt.createCwtBase64(CwtMode::MultiSigned, *hmac);
         
         // Tokens should be different even with same algorithm and payload
         CHECK(sign1Token != signToken);
         
         // COSE_Sign1 validation should fail on COSE_Sign token
-        CHECK_THROWS(Cwt::validateCwt(signToken, *hmac));
+        CHECK_THROWS(Cwt::validateCwtBase64(signToken, *hmac));
         
         // COSE_Sign validation should succeed on COSE_Sign token
         std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithms;
         algorithms.emplace(hmac->algorithmId(), std::cref(*hmac));
-        REQUIRE_NOTHROW(Cwt::validateMultiSignedCwt(signToken, algorithms));
+        REQUIRE_NOTHROW(Cwt::validateMultiSignedCwtBase64(signToken, algorithms));
     }
 }

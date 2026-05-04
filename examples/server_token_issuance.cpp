@@ -54,7 +54,7 @@ int main() {
     // Create signed CWT
     Cwt cwt(ALG_ES256, token);
     cwt.withKeyId("auth-server-key-2024");
-    std::string signed_token = cwt.createCwt(CwtMode::Signed, signer);
+    std::string signed_token = cwt.createCwtBase64(CwtMode::Signed, signer);
 
     std::cout << "Issued token:\n" << signed_token << "\n\n";
     std::cout << "Token length: " << signed_token.size() << " bytes\n";

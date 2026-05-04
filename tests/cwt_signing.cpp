@@ -153,11 +153,11 @@ TEST_SUITE("CWT Single Signature (COSE_Sign1) Tests") {
         
         // Create single-signed CWT
         Cwt cwt(algorithm->algorithmId(), token);
-        std::string singleSigCwt = cwt.createCwt(CwtMode::Signed, *algorithm);
+        std::string singleSigCwt = cwt.createCwtBase64(CwtMode::Signed, *algorithm);
         CHECK_FALSE(singleSigCwt.empty());
         
         // Validate the CWT
-        Cwt validatedCwt = Cwt::validateCwt(singleSigCwt, *algorithm);
+        Cwt validatedCwt = Cwt::validateCwtBase64(singleSigCwt, *algorithm);
         CHECK(validatedCwt.payload.core.iss == "single-sig-issuer");
         CHECK(validatedCwt.payload.core.exp == 1234567890);
         CHECK(validatedCwt.payload.cat.catv == "1.0");
@@ -173,10 +173,10 @@ TEST_SUITE("CWT Single Signature (COSE_Sign1) Tests") {
         Cwt cwt(algorithm->algorithmId(), token);
         cwt.withKeyId("test-key-2024");
         
-        std::string cwtString = cwt.createCwt(CwtMode::Signed, *algorithm);
+        std::string cwtString = cwt.createCwtBase64(CwtMode::Signed, *algorithm);
         
         // Should validate successfully
-        Cwt validated = Cwt::validateCwt(cwtString, *algorithm);
+        Cwt validated = Cwt::validateCwtBase64(cwtString, *algorithm);
         CHECK(validated.payload.core.iss == "keyid-test");
         CHECK(validated.payload.core.exp == 9876543210);
     }
@@ -189,13 +189,13 @@ TEST_SUITE("CWT Single Signature (COSE_Sign1) Tests") {
         
         SUBCASE("Invalid CWT validation") {
             Cwt cwt(algorithm->algorithmId(), token);
-            std::string validCwt = cwt.createCwt(CwtMode::Signed, *algorithm);
+            std::string validCwt = cwt.createCwtBase64(CwtMode::Signed, *algorithm);
             
             // Corrupt the CWT
             std::string corruptedCwt = validCwt;
             corruptedCwt[10] = 'X'; // Corrupt a character
             
-            CHECK_THROWS(Cwt::validateCwt(corruptedCwt, *algorithm));
+            CHECK_THROWS(Cwt::validateCwtBase64(corruptedCwt, *algorithm));
         }
     }
 }
@@ -224,13 +224,13 @@ TEST_SUITE("CWT Multi-Signature (COSE_Sign) Tests") {
         CHECK(cwt.signatures.size() == 3);
         
         // Create COSE_Sign CWT
-        std::string multiSignedCwt = cwt.createCwt(CwtMode::MultiSigned, *hmac);
+        std::string multiSignedCwt = cwt.createCwtBase64(CwtMode::MultiSigned, *hmac);
         CHECK_FALSE(multiSignedCwt.empty());
         
         // Validate the CWT using validateMultiSignedCwt
         std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithms;
         algorithms.emplace(hmac->algorithmId(), std::cref(*hmac));
-        Cwt validatedCwt = Cwt::validateMultiSignedCwt(multiSignedCwt, algorithms);
+        Cwt validatedCwt = Cwt::validateMultiSignedCwtBase64(multiSignedCwt, algorithms);
         CHECK(validatedCwt.signatures.size() == 3);
         CHECK(validatedCwt.payload.core.iss == "multi-sig-issuer");
     }
@@ -247,15 +247,15 @@ TEST_SUITE("CWT Multi-Signature (COSE_Sign) Tests") {
         cwt.addSignature(*algorithm);
         cwt.addSignature(*algorithm); // Add second signature with same key
         
-        std::string cwtString = cwt.createCwt(CwtMode::MultiSigned, *algorithm);
+        std::string cwtString = cwt.createCwtBase64(CwtMode::MultiSigned, *algorithm);
         
         // Validate - should succeed
         std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithms;
         algorithms.emplace(algorithm->algorithmId(), std::cref(*algorithm));
-        REQUIRE_NOTHROW(Cwt::validateMultiSignedCwt(cwtString, algorithms));
+        REQUIRE_NOTHROW(Cwt::validateMultiSignedCwtBase64(cwtString, algorithms));
         
         // Validate structure
-        Cwt validated = Cwt::validateMultiSignedCwt(cwtString, algorithms);
+        Cwt validated = Cwt::validateMultiSignedCwtBase64(cwtString, algorithms);
         CHECK(validated.signatures.size() == 2);
         CHECK(validated.payload.core.iss == "validation-test");
         CHECK(validated.payload.core.exp == 9876543210);
@@ -269,18 +269,18 @@ TEST_SUITE("CWT Multi-Signature (COSE_Sign) Tests") {
         
         // Create COSE_Sign1 (single signature)
         Cwt singleCwt(algorithm->algorithmId(), token);
-        std::string singleSigCwt = singleCwt.createCwt(CwtMode::Signed, *algorithm);
+        std::string singleSigCwt = singleCwt.createCwtBase64(CwtMode::Signed, *algorithm);
         
         // Create COSE_Sign (multi signature)
         Cwt multiCwt(algorithm->algorithmId(), token);
         multiCwt.addSignature(*algorithm);
-        std::string multiSigCwt = multiCwt.createCwt(CwtMode::MultiSigned, *algorithm);
+        std::string multiSigCwt = multiCwt.createCwtBase64(CwtMode::MultiSigned, *algorithm);
         
         // Both should validate successfully
-        Cwt validatedSingle = Cwt::validateCwt(singleSigCwt, *algorithm);
+        Cwt validatedSingle = Cwt::validateCwtBase64(singleSigCwt, *algorithm);
         std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithms;
         algorithms.emplace(algorithm->algorithmId(), std::cref(*algorithm));
-        Cwt validatedMulti = Cwt::validateMultiSignedCwt(multiSigCwt, algorithms);
+        Cwt validatedMulti = Cwt::validateMultiSignedCwtBase64(multiSigCwt, algorithms);
         
         // Check structure differences
         CHECK(validatedSingle.signatures.size() == 0); // COSE_Sign1 doesn't populate signatures array
@@ -307,12 +307,12 @@ TEST_SUITE("CWT Multi-Signature (COSE_Sign) Tests") {
         
         CHECK(cwt.signatures.size() == 3);
         
-        std::string cwtString = cwt.createCwt(CwtMode::MultiSigned, *hmac);
+        std::string cwtString = cwt.createCwtBase64(CwtMode::MultiSigned, *hmac);
         
         // Should validate successfully
         std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithms;
         algorithms.emplace(hmac->algorithmId(), std::cref(*hmac));
-        REQUIRE_NOTHROW(Cwt::validateMultiSignedCwt(cwtString, algorithms));
+        REQUIRE_NOTHROW(Cwt::validateMultiSignedCwtBase64(cwtString, algorithms));
     }
 
     TEST_CASE("Error Cases - COSE_Sign") {
@@ -324,14 +324,14 @@ TEST_SUITE("CWT Multi-Signature (COSE_Sign) Tests") {
         SUBCASE("No signatures for MultiSigned mode") {
             Cwt cwt(algorithm->algorithmId(), token);
             // Don't add any signatures
-            CHECK_THROWS_AS(cwt.createCwt(CwtMode::MultiSigned, *algorithm), CryptoError);
+            CHECK_THROWS_AS(cwt.createCwtBase64(CwtMode::MultiSigned, *algorithm), CryptoError);
         }
         
         SUBCASE("Invalid CWT validation") {
             // Create a valid CWT first
             Cwt cwt(algorithm->algorithmId(), token);
             cwt.addSignature(*algorithm);
-            std::string validCwt = cwt.createCwt(CwtMode::MultiSigned, *algorithm);
+            std::string validCwt = cwt.createCwtBase64(CwtMode::MultiSigned, *algorithm);
             
             // Corrupt the CWT
             std::string corruptedCwt = validCwt;
@@ -339,7 +339,7 @@ TEST_SUITE("CWT Multi-Signature (COSE_Sign) Tests") {
             
             std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithms;
             algorithms.emplace(algorithm->algorithmId(), std::cref(*algorithm));
-            CHECK_THROWS(Cwt::validateMultiSignedCwt(corruptedCwt, algorithms));
+            CHECK_THROWS(Cwt::validateMultiSignedCwtBase64(corruptedCwt, algorithms));
         }
     }
 
@@ -362,10 +362,10 @@ TEST_SUITE("CWT Multi-Signature (COSE_Sign) Tests") {
         CHECK(cwt.signatures.size() == NUM_SIGNATURES);
         
         // Should create and validate successfully
-        std::string cwtString = cwt.createCwt(CwtMode::MultiSigned, *algorithm);
+        std::string cwtString = cwt.createCwtBase64(CwtMode::MultiSigned, *algorithm);
         std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithms;
         algorithms.emplace(algorithm->algorithmId(), std::cref(*algorithm));
-        Cwt validated = Cwt::validateMultiSignedCwt(cwtString, algorithms);
+        Cwt validated = Cwt::validateMultiSignedCwtBase64(cwtString, algorithms);
         
         CHECK(validated.signatures.size() == NUM_SIGNATURES);
     }
@@ -400,12 +400,12 @@ TEST_SUITE("CWT Signing Integration Tests") {
         corporateCwt.addSignature(*userAlgorithm);   // User signature
         
         // Create the multi-signed token
-        std::string corporateToken = corporateCwt.createCwt(CwtMode::MultiSigned, *caAlgorithm);
+        std::string corporateToken = corporateCwt.createCwtBase64(CwtMode::MultiSigned, *caAlgorithm);
         
         // Validate with algorithm map
         std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithms;
         algorithms.emplace(caAlgorithm->algorithmId(), std::cref(*caAlgorithm));
-        Cwt caValidated = Cwt::validateMultiSignedCwt(corporateToken, algorithms);
+        Cwt caValidated = Cwt::validateMultiSignedCwtBase64(corporateToken, algorithms);
         
         // Check all claims are preserved
         CHECK(caValidated.payload.core.iss == "corporate-ca");
@@ -445,7 +445,7 @@ TEST_SUITE("CWT Signing Integration Tests") {
         CHECK(cwt.signatures[2].algorithmId == hmac->algorithmId());
         
         // Create the token
-        std::string cwtString = cwt.createCwt(CwtMode::MultiSigned, *es256);
+        std::string cwtString = cwt.createCwtBase64(CwtMode::MultiSigned, *es256);
         
         // Create algorithm map for validation
         std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithms;
@@ -454,7 +454,7 @@ TEST_SUITE("CWT Signing Integration Tests") {
         algorithms.emplace(hmac->algorithmId(), std::cref(*hmac));
         
         // Validate with per-signature algorithms
-        Cwt validated = Cwt::validateMultiSignedCwt(cwtString, algorithms);
+        Cwt validated = Cwt::validateMultiSignedCwtBase64(cwtString, algorithms);
         
         CHECK(validated.signatures.size() == 3);
         CHECK(validated.signatures[0].algorithmId == es256->algorithmId());
@@ -467,7 +467,7 @@ TEST_SUITE("CWT Signing Integration Tests") {
         incompleteAlgorithms.emplace(es256->algorithmId(), std::cref(*es256));
         // Missing ps256 and hmac
         
-        CHECK_THROWS_AS(Cwt::validateMultiSignedCwt(cwtString, incompleteAlgorithms), CryptoError);
+        CHECK_THROWS_AS(Cwt::validateMultiSignedCwtBase64(cwtString, incompleteAlgorithms), CryptoError);
     }
 
     TEST_CASE("Single vs Multi-Signature Mode Comparison") {
@@ -479,21 +479,21 @@ TEST_SUITE("CWT Signing Integration Tests") {
         
         // Create single signature CWT
         Cwt singleCwt(algorithm->algorithmId(), token);
-        std::string singleToken = singleCwt.createCwt(CwtMode::Signed, *algorithm);
+        std::string singleToken = singleCwt.createCwtBase64(CwtMode::Signed, *algorithm);
         
         // Create multi signature CWT with one signature
         Cwt multiCwt(algorithm->algorithmId(), token);
         multiCwt.addSignature(*algorithm);
-        std::string multiToken = multiCwt.createCwt(CwtMode::MultiSigned, *algorithm);
+        std::string multiToken = multiCwt.createCwtBase64(CwtMode::MultiSigned, *algorithm);
         
         // Tokens should be different despite same content
         CHECK(singleToken != multiToken);
         
         // Both should validate to same payload
-        Cwt validatedSingle = Cwt::validateCwt(singleToken, *algorithm);
+        Cwt validatedSingle = Cwt::validateCwtBase64(singleToken, *algorithm);
         std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithms;
         algorithms.emplace(algorithm->algorithmId(), std::cref(*algorithm));
-        Cwt validatedMulti = Cwt::validateMultiSignedCwt(multiToken, algorithms);
+        Cwt validatedMulti = Cwt::validateMultiSignedCwtBase64(multiToken, algorithms);
         
         CHECK(validatedSingle.payload.core.iss == validatedMulti.payload.core.iss);
         CHECK(validatedSingle.payload.core.exp == validatedMulti.payload.core.exp);
@@ -507,9 +507,9 @@ TEST_SUITE("CWT Signing Integration Tests") {
         
         SUBCASE("Single signature with tags") {
             Cwt cwt(algorithm->algorithmId(), token);
-            std::string cwtString = cwt.createCwt(CwtMode::Signed, *algorithm);
+            std::string cwtString = cwt.createCwtBase64(CwtMode::Signed, *algorithm);
             
-            Cwt validated = Cwt::validateCwt(cwtString, *algorithm);
+            Cwt validated = Cwt::validateCwtBase64(cwtString, *algorithm);
             CHECK(validated.payload.core.iss == "tag-test");
         }
         
@@ -517,11 +517,11 @@ TEST_SUITE("CWT Signing Integration Tests") {
             Cwt cwt(algorithm->algorithmId(), token);
             cwt.addSignature(*algorithm);
             
-            std::string cwtString = cwt.createCwt(CwtMode::MultiSigned, *algorithm);
+            std::string cwtString = cwt.createCwtBase64(CwtMode::MultiSigned, *algorithm);
             
             std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithms;
             algorithms.emplace(algorithm->algorithmId(), std::cref(*algorithm));
-            Cwt validated = Cwt::validateMultiSignedCwt(cwtString, algorithms);
+            Cwt validated = Cwt::validateMultiSignedCwtBase64(cwtString, algorithms);
             CHECK(validated.payload.core.iss == "tag-test");
         }
     }

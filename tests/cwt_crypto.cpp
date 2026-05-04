@@ -46,7 +46,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         
         // Create signed CWT according to RFC 8392 Section 7
         REQUIRE_NOTHROW({
-            std::string signedCwt = cwt.createCwt(CwtMode::Signed, es256Alg);
+            std::string signedCwt = cwt.createCwtBase64(CwtMode::Signed, es256Alg);
             
             // Verify the result is base64url encoded
             checkBase64UrlEncoding(signedCwt);
@@ -72,7 +72,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         
         // Create MACed CWT according to RFC 8392 Section 7
         REQUIRE_NOTHROW({
-            std::string macedCwt = cwt.createCwt(CwtMode::MACed, hmacAlg);
+            std::string macedCwt = cwt.createCwtBase64(CwtMode::MACed, hmacAlg);
             
             // Verify base64url encoding
             checkBase64UrlEncoding(macedCwt);
@@ -92,7 +92,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         
         // Create signed CWT
         REQUIRE_NOTHROW({
-            std::string signedCwt = cwt.createCwt(CwtMode::Signed, ps256Alg);
+            std::string signedCwt = cwt.createCwtBase64(CwtMode::Signed, ps256Alg);
             
             checkBase64UrlEncoding(signedCwt);
             
@@ -111,11 +111,11 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         Es256Algorithm verificationAlg(keyPair.second); // Verification-only (public key only)
         
         // Step 1: Create signed CWT according to RFC 8392
-        std::string signedCwt = originalCwt.createCwt(CwtMode::Signed, signingAlg);
+        std::string signedCwt = originalCwt.createCwtBase64(CwtMode::Signed, signingAlg);
         
         // Step 2: Validate the CWT according to RFC 8392
         REQUIRE_NOTHROW({
-            Cwt validatedCwt = Cwt::validateCwt(signedCwt, verificationAlg);
+            Cwt validatedCwt = Cwt::validateCwtBase64(signedCwt, verificationAlg);
             
             // Verify payload was correctly recovered
             CHECK(validatedCwt.payload.core.iss == originalToken.core.iss);
@@ -143,11 +143,11 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         HmacSha256Algorithm hmacAlg(sharedKey);
         
         // Step 1: Create MACed CWT
-        std::string macedCwt = originalCwt.createCwt(CwtMode::MACed, hmacAlg);
+        std::string macedCwt = originalCwt.createCwtBase64(CwtMode::MACed, hmacAlg);
         
         // Step 2: Validate the CWT
         REQUIRE_NOTHROW({
-            Cwt validatedCwt = Cwt::validateCwt(macedCwt, hmacAlg);
+            Cwt validatedCwt = Cwt::validateCwtBase64(macedCwt, hmacAlg);
             
             // Verify payload integrity
             CHECK(validatedCwt.payload.core.iss == originalToken.core.iss);
@@ -170,10 +170,10 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         Es256Algorithm wrongAlg(wrongKeyPair.second); // Wrong public key
         
         // Create CWT with correct key
-        std::string signedCwt = cwt.createCwt(CwtMode::Signed, correctAlg);
+        std::string signedCwt = cwt.createCwtBase64(CwtMode::Signed, correctAlg);
         
         // Try to validate with wrong key - should fail
-        CHECK_THROWS_AS(Cwt::validateCwt(signedCwt, wrongAlg), CryptoError);
+        CHECK_THROWS_AS(Cwt::validateCwtBase64(signedCwt, wrongAlg), CryptoError);
     }
 
     TEST_CASE("RFC 8392 Section 7 - Validate Tampered CWT Should Fail") {
@@ -184,7 +184,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         Es256Algorithm es256Alg(keyPair.first, keyPair.second);
         
         // Create valid CWT
-        std::string signedCwt = cwt.createCwt(CwtMode::Signed, es256Alg);
+        std::string signedCwt = cwt.createCwtBase64(CwtMode::Signed, es256Alg);
         
         // Tamper with the CWT (change one character)
 
@@ -196,7 +196,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         
         // Validation should fail
         Es256Algorithm verificationAlg(keyPair.second);
-        CHECK_THROWS_AS(Cwt::validateCwt(tamperedCwt, verificationAlg), CryptoError);
+        CHECK_THROWS_AS(Cwt::validateCwtBase64(tamperedCwt, verificationAlg), CryptoError);
     }
 
     TEST_CASE("RFC 8392 Section 7 - Base64url Encoding Compliance") {
@@ -206,7 +206,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         auto hmacKey = HmacSha256Algorithm::generateKey();
         HmacSha256Algorithm hmacAlg(hmacKey);
         
-        std::string encodedCwt = cwt.createCwt(CwtMode::MACed, hmacAlg);
+        std::string encodedCwt = cwt.createCwtBase64(CwtMode::MACed, hmacAlg);
         
         // RFC 4648 Section 5 compliance checks
         CHECK_FALSE(encodedCwt.empty());
@@ -247,7 +247,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         
         for (const auto& invalid : invalidInputs) {
             INFO("Testing invalid input: " << invalid);
-            CHECK_THROWS(Cwt::validateCwt(invalid, es256Alg));
+            CHECK_THROWS(Cwt::validateCwtBase64(invalid, es256Alg));
         }
     }
 
@@ -273,7 +273,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         Es256Algorithm es256Alg(keyPair.first, keyPair.second);
         
         REQUIRE_NOTHROW({
-            std::string largeCwtString = largeCwt.createCwt(CwtMode::Signed, es256Alg);
+            std::string largeCwtString = largeCwt.createCwtBase64(CwtMode::Signed, es256Alg);
             
             INFO("Large CWT size: " << largeCwtString.size() << " characters");
             CHECK_FALSE(largeCwtString.empty());
@@ -281,7 +281,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
             
             // Validate round trip
             Es256Algorithm verifyAlg(keyPair.second);
-            Cwt validated = Cwt::validateCwt(largeCwtString, verifyAlg);
+            Cwt validated = Cwt::validateCwtBase64(largeCwtString, verifyAlg);
             CHECK(validated.payload.core.iss == largeToken.core.iss);
             CHECK(validated.payload.core.aud.value().size() == 50);
         });
@@ -294,13 +294,13 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         Cwt es256Cwt(ALG_ES256, token);
         auto es256KeyPair = Es256Algorithm::generateKeyPair();
         Es256Algorithm es256Alg(es256KeyPair.first, es256KeyPair.second);
-        std::string es256Token = es256Cwt.createCwt(CwtMode::Signed, es256Alg);
+        std::string es256Token = es256Cwt.createCwtBase64(CwtMode::Signed, es256Alg);
         
         // Try to validate with HMAC algorithm - should fail
         auto hmacKey = HmacSha256Algorithm::generateKey();
         HmacSha256Algorithm hmacAlg(hmacKey);
         
-        CHECK_THROWS(Cwt::validateCwt(es256Token, hmacAlg));
+        CHECK_THROWS(Cwt::validateCwtBase64(es256Token, hmacAlg));
     }
 
     TEST_CASE("RFC 8392 Section 7 - Create Encrypted CWT with AES-128-GCM") {
@@ -314,7 +314,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         
         // Create encrypted CWT according to RFC 8392 Section 7
         REQUIRE_NOTHROW({
-            std::string encryptedCwt = cwt.createCwt(CwtMode::Encrypted, aes128Alg);
+            std::string encryptedCwt = cwt.createCwtBase64(CwtMode::Encrypted, aes128Alg);
 
             // Verify the result is base64url encoded
             checkBase64UrlEncoding(encryptedCwt);
@@ -333,7 +333,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         AesGcmAlgorithm aes256Alg(aesKey, ALG_A256GCM);
         
         REQUIRE_NOTHROW({
-            std::string encryptedCwt = cwt.createCwt(CwtMode::Encrypted, aes256Alg);
+            std::string encryptedCwt = cwt.createCwtBase64(CwtMode::Encrypted, aes256Alg);
 
             checkBase64UrlEncoding(encryptedCwt);
 
@@ -351,7 +351,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         ChaCha20Poly1305Algorithm chachaAlg(chachaKey);
         
         REQUIRE_NOTHROW({
-            std::string encryptedCwt = cwt.createCwt(CwtMode::Encrypted, chachaAlg);
+            std::string encryptedCwt = cwt.createCwtBase64(CwtMode::Encrypted, chachaAlg);
             
             checkBase64UrlEncoding(encryptedCwt);
             
@@ -369,11 +369,11 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         AesGcmAlgorithm aesAlg(sharedKey, ALG_A256GCM);
         
         // Step 1: Create encrypted CWT
-        std::string encryptedCwt = originalCwt.createCwt(CwtMode::Encrypted, aesAlg);
+        std::string encryptedCwt = originalCwt.createCwtBase64(CwtMode::Encrypted, aesAlg);
         
         // Step 2: Validate the CWT
         REQUIRE_NOTHROW({
-            Cwt validatedCwt = Cwt::validateCwt(encryptedCwt, aesAlg);
+            Cwt validatedCwt = Cwt::validateCwtBase64(encryptedCwt, aesAlg);
             
             // Verify payload integrity
             CHECK(validatedCwt.payload.core.iss == originalToken.core.iss);
@@ -401,11 +401,11 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         ChaCha20Poly1305Algorithm chachaAlg(sharedKey);
         
         // Step 1: Create encrypted CWT
-        std::string encryptedCwt = originalCwt.createCwt(CwtMode::Encrypted, chachaAlg);
+        std::string encryptedCwt = originalCwt.createCwtBase64(CwtMode::Encrypted, chachaAlg);
         
         // Step 2: Validate the CWT
         REQUIRE_NOTHROW({
-            Cwt validatedCwt = Cwt::validateCwt(encryptedCwt, chachaAlg);
+            Cwt validatedCwt = Cwt::validateCwtBase64(encryptedCwt, chachaAlg);
             
             // Verify payload integrity
             CHECK(validatedCwt.payload.core.iss == originalToken.core.iss);
@@ -428,10 +428,10 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         AesGcmAlgorithm wrongAlg(wrongKey, ALG_A128GCM);
         
         // Create CWT with correct key
-        std::string encryptedCwt = cwt.createCwt(CwtMode::Encrypted, correctAlg);
+        std::string encryptedCwt = cwt.createCwtBase64(CwtMode::Encrypted, correctAlg);
         
         // Try to validate with wrong key - should fail
-        CHECK_THROWS_AS(Cwt::validateCwt(encryptedCwt, wrongAlg), CryptoError);
+        CHECK_THROWS_AS(Cwt::validateCwtBase64(encryptedCwt, wrongAlg), CryptoError);
     }
 
     TEST_CASE("RFC 8392 Section 7 - Validate Tampered Encrypted CWT Should Fail") {
@@ -442,10 +442,10 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         AesGcmAlgorithm aesAlg(aesKey, ALG_A256GCM);
         
         // Create valid encrypted CWT
-        std::string encryptedCwt = cwt.createCwt(CwtMode::Encrypted, aesAlg);
+        std::string encryptedCwt = cwt.createCwtBase64(CwtMode::Encrypted, aesAlg);
         
         // First verify the original CWT validates correctly
-        REQUIRE_NOTHROW(Cwt::validateCwt(encryptedCwt, aesAlg));
+        REQUIRE_NOTHROW(Cwt::validateCwtBase64(encryptedCwt, aesAlg));
         
         // Decode the CWT to tamper with the actual encrypted data
         auto coseBytes = base64UrlDecode(encryptedCwt);
@@ -461,7 +461,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         std::string tamperedCwt = base64UrlEncode(coseBytes);
         
         // Validation should fail due to authentication tag mismatch
-        CHECK_THROWS_AS(Cwt::validateCwt(tamperedCwt, aesAlg), CryptoError);
+        CHECK_THROWS_AS(Cwt::validateCwtBase64(tamperedCwt, aesAlg), CryptoError);
     }
 
     TEST_CASE("RFC 8392 Section 7 - Encryption with Non-Encryption Algorithm Should Fail") {
@@ -472,7 +472,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         Es256Algorithm es256Alg(keyPair.first, keyPair.second);
         
         // Encryption mode should throw for signature-only algorithms
-        CHECK_THROWS_AS(cwt.createCwt(CwtMode::Encrypted, es256Alg), CryptoError);
+        CHECK_THROWS_AS(cwt.createCwtBase64(CwtMode::Encrypted, es256Alg), CryptoError);
     }
 
     TEST_CASE("RFC 8392 Section 7 - AES-GCM Key Generation and Validation") {
