@@ -6,8 +6,7 @@
 #include <chrono>
 #include <iostream>
 
-#include "catapult/catapult_minimal.hpp"  // Core CAT/CWT functionality
-#include "catapult/dpop.hpp"              // DPoP proof support
+#include "catapult/catapult.hpp"
 
 using namespace catapult;
 
