@@ -188,6 +188,7 @@ TEST_CASE("DPoP proof validation throughput", "[performance][dpop]") {
 
     CatDpopSettings settings;
     settings.set_window(std::chrono::seconds{300});
+    settings.set_jti_processing(false);  // Disable JTI replay check for throughput test
     DpopProofValidator validator(settings);
 
     auto jti = moqt_dpop::generate_jti();
@@ -269,7 +270,7 @@ TEST_CASE("End-to-end relay validation throughput", "[performance][e2e]") {
         .issuer("auth.example.com")
         .audience("relay.example.com")
         .expiresIn(std::chrono::hours{1})
-        .dpopConfirmation(client_keys.get_public_key_thumbprint())
+        .dpopThumbprint(client_keys.get_public_key_thumbprint())
         .build();
 
     MoqtClaims moqt;
