@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "error.hpp"
@@ -135,37 +136,56 @@ class Cwt {
   static CatToken decodePayload(const std::vector<uint8_t>& cborData);
 
   /**
-   * @brief Create and sign/MAC/encrypt a complete CWT according to RFC 8392
-   * Section 7
+   * @brief Create and sign/MAC/encrypt a CWT (RFC 8392)
    * @param mode Creation mode (Signed, MACed, or Encrypted)
    * @param algorithm Cryptographic algorithm implementation
-   * @return Base64url-encoded CWT string
+   * @return Raw CBOR-encoded CWT bytes
    */
-  std::string createCwt(CwtMode mode,
-                        const class CryptographicAlgorithm& algorithm) const;
+  std::vector<uint8_t> createCwt(CwtMode mode,
+                                 const class CryptographicAlgorithm& algorithm) const;
 
   /**
-   * @brief Validate a base64url-encoded COSE_Sign1 CWT according to RFC 8392
-   * Section 7
-   * @param encodedCwt Base64url-encoded CWT string (must be COSE_Sign1 format)
+   * @brief Validate a COSE_Sign1 CWT from raw CBOR bytes (RFC 8392)
+   * @param cwtBytes Raw CBOR-encoded CWT bytes
    * @param algorithm Cryptographic algorithm implementation
    * @return Decoded and verified CWT instance
    * @throws CryptoError if validation fails
-   * @throws InvalidTokenFormatError if token is COSE_Sign format (use
-   * validateMultiSignedCwt)
+   * @throws InvalidTokenFormatError if token is COSE_Sign format
    */
-  static Cwt validateCwt(const std::string& encodedCwt,
+  static Cwt validateCwt(std::span<const uint8_t> cwtBytes,
                          const class CryptographicAlgorithm& algorithm);
 
   /**
    * @brief Validate a multi-signed CWT with per-signature algorithms
-   * @param encodedCwt Base64url-encoded CWT string
+   * @param cwtBytes Raw CBOR-encoded CWT bytes
    * @param algorithms Map of algorithm ID to cryptographic algorithm
-   * implementation
    * @return Decoded and verified CWT instance
    * @throws CryptoError if validation fails
    */
   static Cwt validateMultiSignedCwt(
+      std::span<const uint8_t> cwtBytes,
+      const std::map<
+          int64_t, std::reference_wrapper<const class CryptographicAlgorithm>>&
+          algorithms);
+
+  // Base64url convenience helpers
+
+  /**
+   * @brief Create CWT and return as base64url-encoded string
+   */
+  std::string createCwtBase64(CwtMode mode,
+                              const class CryptographicAlgorithm& algorithm) const;
+
+  /**
+   * @brief Validate a base64url-encoded CWT string
+   */
+  static Cwt validateCwtBase64(const std::string& encodedCwt,
+                               const class CryptographicAlgorithm& algorithm);
+
+  /**
+   * @brief Validate a base64url-encoded multi-signed CWT
+   */
+  static Cwt validateMultiSignedCwtBase64(
       const std::string& encodedCwt,
       const std::map<
           int64_t, std::reference_wrapper<const class CryptographicAlgorithm>>&

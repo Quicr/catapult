@@ -135,12 +135,12 @@ void perform_hmac_operation(const CatToken& token, bool single_key) {
         
         if (single_key) {
             // Single MAC
-            std::string mac_cwt = cwt.createCwt(CwtMode::MACed, hmac_algo);
+            std::string mac_cwt = cwt.createCwtBase64(CwtMode::MACed, hmac_algo);
             std::cout << "Single MAC CWT (Base64): " << mac_cwt << "\n";
             std::cout << "Single MAC CWT (Hex): " << bytes_to_hex(base64UrlDecode(mac_cwt)) << "\n";
             
             // Verify
-            auto verified_cwt = Cwt::validateCwt(mac_cwt, hmac_algo);
+            auto verified_cwt = Cwt::validateCwtBase64(mac_cwt, hmac_algo);
             std::cout << "MAC Verification: SUCCESS\n";
             std::cout << "Verified Token Issuer: " << (verified_cwt.payload.core.iss.has_value() ? *verified_cwt.payload.core.iss : "none") << "\n";
         } else {
@@ -150,8 +150,8 @@ void perform_hmac_operation(const CatToken& token, bool single_key) {
             
             HmacSha256Algorithm hmac_algo2(key2);
             
-            std::string mac_cwt1 = cwt.createCwt(CwtMode::MACed, hmac_algo);
-            std::string mac_cwt2 = cwt.createCwt(CwtMode::MACed, hmac_algo2);
+            std::string mac_cwt1 = cwt.createCwtBase64(CwtMode::MACed, hmac_algo);
+            std::string mac_cwt2 = cwt.createCwtBase64(CwtMode::MACed, hmac_algo2);
             
             std::cout << "Multiple MAC CWT 1 (Base64): " << mac_cwt1 << "\n";
             std::cout << "Multiple MAC CWT 1 (Hex): " << bytes_to_hex(base64UrlDecode(mac_cwt1)) << "\n";
@@ -159,8 +159,8 @@ void perform_hmac_operation(const CatToken& token, bool single_key) {
             std::cout << "Multiple MAC CWT 2 (Hex): " << bytes_to_hex(base64UrlDecode(mac_cwt2)) << "\n";
             
             // Verify both
-            auto verified_cwt1 = Cwt::validateCwt(mac_cwt1, hmac_algo);
-            auto verified_cwt2 = Cwt::validateCwt(mac_cwt2, hmac_algo2);
+            auto verified_cwt1 = Cwt::validateCwtBase64(mac_cwt1, hmac_algo);
+            auto verified_cwt2 = Cwt::validateCwtBase64(mac_cwt2, hmac_algo2);
             std::cout << "Multiple MAC Verification: SUCCESS\n";
         }
         
@@ -188,13 +188,13 @@ void perform_sign_operation(const CatToken& token, bool single_signer) {
         
         if (single_signer) {
             // Single signature
-            std::string signed_cwt = cwt.createCwt(CwtMode::Signed, sign_algo);
+            std::string signed_cwt = cwt.createCwtBase64(CwtMode::Signed, sign_algo);
             std::cout << "Single Signature CWT (Base64): " << signed_cwt << "\n";
             std::cout << "Single Signature CWT (Hex): " << bytes_to_hex(base64UrlDecode(signed_cwt)) << "\n";
             
             // Verify with public key only
             Es256Algorithm verify_algo(public_key1);
-            auto verified_cwt = Cwt::validateCwt(signed_cwt, verify_algo);
+            auto verified_cwt = Cwt::validateCwtBase64(signed_cwt, verify_algo);
             std::cout << "Signature Verification: SUCCESS\n";
             std::cout << "Verified Token Issuer: " << (verified_cwt.payload.core.iss.has_value() ? *verified_cwt.payload.core.iss : "none") << "\n";
         } else {
@@ -205,8 +205,8 @@ void perform_sign_operation(const CatToken& token, bool single_signer) {
             
             Es256Algorithm sign_algo2(private_key2, public_key2);
             
-            std::string signed_cwt1 = cwt.createCwt(CwtMode::Signed, sign_algo);
-            std::string signed_cwt2 = cwt.createCwt(CwtMode::Signed, sign_algo2);
+            std::string signed_cwt1 = cwt.createCwtBase64(CwtMode::Signed, sign_algo);
+            std::string signed_cwt2 = cwt.createCwtBase64(CwtMode::Signed, sign_algo2);
             
             std::cout << "Multiple Signature CWT 1 (Base64): " << signed_cwt1 << "\n";
             std::cout << "Multiple Signature CWT 1 (Hex): " << bytes_to_hex(base64UrlDecode(signed_cwt1)) << "\n";
@@ -216,8 +216,8 @@ void perform_sign_operation(const CatToken& token, bool single_signer) {
             // Verify both
             Es256Algorithm verify_algo1(public_key1);
             Es256Algorithm verify_algo2(public_key2);
-            auto verified_cwt1 = Cwt::validateCwt(signed_cwt1, verify_algo1);
-            auto verified_cwt2 = Cwt::validateCwt(signed_cwt2, verify_algo2);
+            auto verified_cwt1 = Cwt::validateCwtBase64(signed_cwt1, verify_algo1);
+            auto verified_cwt2 = Cwt::validateCwtBase64(signed_cwt2, verify_algo2);
             std::cout << "Multiple Signature Verification: SUCCESS\n";
         }
         
@@ -246,12 +246,12 @@ void perform_encrypt_operation(const CatToken& token, bool single_recipient) {
         
         if (single_recipient) {
             // Single recipient
-            std::string encrypted_cwt = cwt.createCwt(CwtMode::Encrypted, aes_algo);
+            std::string encrypted_cwt = cwt.createCwtBase64(CwtMode::Encrypted, aes_algo);
             std::cout << "Single Recipient Encrypted CWT (Base64): " << encrypted_cwt << "\n";
             std::cout << "Single Recipient Encrypted CWT (Hex): " << bytes_to_hex(base64UrlDecode(encrypted_cwt)) << "\n";
             
             // Decrypt
-            auto decrypted_cwt = Cwt::validateCwt(encrypted_cwt, aes_algo);
+            auto decrypted_cwt = Cwt::validateCwtBase64(encrypted_cwt, aes_algo);
             std::cout << "Decryption: SUCCESS\n";
             std::cout << "Decrypted Token Issuer: " << (decrypted_cwt.payload.core.iss.has_value() ? *decrypted_cwt.payload.core.iss : "none") << "\n";
         } else {
@@ -263,8 +263,8 @@ void perform_encrypt_operation(const CatToken& token, bool single_recipient) {
             
             AesGcmAlgorithm aes_algo2(key2, ALG_A256GCM);
             
-            std::string encrypted_cwt1 = cwt.createCwt(CwtMode::Encrypted, aes_algo);
-            std::string encrypted_cwt2 = cwt.createCwt(CwtMode::Encrypted, aes_algo2);
+            std::string encrypted_cwt1 = cwt.createCwtBase64(CwtMode::Encrypted, aes_algo);
+            std::string encrypted_cwt2 = cwt.createCwtBase64(CwtMode::Encrypted, aes_algo2);
             
             std::cout << "Multiple Recipients Encrypted CWT 1 (Base64): " << encrypted_cwt1 << "\n";
             std::cout << "Multiple Recipients Encrypted CWT 1 (Hex): " << bytes_to_hex(base64UrlDecode(encrypted_cwt1)) << "\n";
@@ -272,8 +272,8 @@ void perform_encrypt_operation(const CatToken& token, bool single_recipient) {
             std::cout << "Multiple Recipients Encrypted CWT 2 (Hex): " << bytes_to_hex(base64UrlDecode(encrypted_cwt2)) << "\n";
             
             // Decrypt both
-            auto decrypted_cwt1 = Cwt::validateCwt(encrypted_cwt1, aes_algo);
-            auto decrypted_cwt2 = Cwt::validateCwt(encrypted_cwt2, aes_algo2);
+            auto decrypted_cwt1 = Cwt::validateCwtBase64(encrypted_cwt1, aes_algo);
+            auto decrypted_cwt2 = Cwt::validateCwtBase64(encrypted_cwt2, aes_algo2);
             std::cout << "Multiple Recipients Decryption: SUCCESS\n";
         }
         

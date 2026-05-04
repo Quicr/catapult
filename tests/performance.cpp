@@ -43,11 +43,11 @@ struct TestFixture {
 
         HmacSha256Algorithm hmac(hmac_key);
         Cwt hmac_cwt(ALG_HMAC256_256, base_token);
-        hmac_token = hmac_cwt.createCwt(CwtMode::MACed, hmac);
+        hmac_token = hmac_cwt.createCwtBase64(CwtMode::MACed, hmac);
 
         Es256Algorithm es256(es256_private, es256_public);
         Cwt es256_cwt(ALG_ES256, base_token);
-        es256_token = es256_cwt.createCwt(CwtMode::Signed, es256);
+        es256_token = es256_cwt.createCwtBase64(CwtMode::Signed, es256);
     }
 };
 
@@ -64,7 +64,7 @@ TEST_CASE("HMAC token validation throughput", "[performance][hmac]") {
 
     for (size_t i = 0; i < iterations; ++i) {
         try {
-            auto validated = Cwt::validateCwt(fixture.hmac_token, hmac);
+            auto validated = Cwt::validateCwtBase64(fixture.hmac_token, hmac);
             if (validated.payload.core.iss.has_value()) {
                 ++successful;
             }
@@ -96,7 +96,7 @@ TEST_CASE("ES256 token validation throughput", "[performance][es256]") {
 
     for (size_t i = 0; i < iterations; ++i) {
         try {
-            auto validated = Cwt::validateCwt(fixture.es256_token, verifier);
+            auto validated = Cwt::validateCwtBase64(fixture.es256_token, verifier);
             if (validated.payload.core.iss.has_value()) {
                 ++successful;
             }
@@ -236,7 +236,7 @@ TEST_CASE("Token creation throughput", "[performance][creation]") {
             .build();
 
         Cwt cwt(ALG_ES256, token);
-        auto encoded = cwt.createCwt(CwtMode::Signed, signer);
+        auto encoded = cwt.createCwtBase64(CwtMode::Signed, signer);
         if (!encoded.empty()) {
             ++created;
         }
@@ -278,7 +278,7 @@ TEST_CASE("End-to-end relay validation throughput", "[performance][e2e]") {
     token.extended.setMoqtClaims(std::move(moqt));
 
     Cwt cwt(ALG_ES256, token);
-    std::string token_str = cwt.createCwt(CwtMode::Signed, auth_signer);
+    std::string token_str = cwt.createCwtBase64(CwtMode::Signed, auth_signer);
 
     CatDpopSettings dpop_settings;
     dpop_settings.set_window(std::chrono::seconds{300});
@@ -295,7 +295,7 @@ TEST_CASE("End-to-end relay validation throughput", "[performance][e2e]") {
         auto proof = client_keys.generate_proof(moqt_actions::PUBLISH, "ns", "track", "relay:4433", jti);
 
         // Relay validation
-        auto validated = Cwt::validateCwt(token_str, auth_verifier);
+        auto validated = Cwt::validateCwtBase64(token_str, auth_verifier);
 
         if (validated.payload.extended.hasMoqtClaims()) {
             const auto* moqt_claims = validated.payload.extended.getMoqtClaimsReadOnly();

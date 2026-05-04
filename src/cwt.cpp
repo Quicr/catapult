@@ -804,8 +804,8 @@ std::vector<uint8_t> Cwt::createCoseHeader() const {
   }
 }
 
-std::string Cwt::createCwt(CwtMode mode,
-                           const CryptographicAlgorithm& algorithm) const {
+std::vector<uint8_t> Cwt::createCwt(CwtMode mode,
+                                    const CryptographicAlgorithm& algorithm) const {
   try {
     CAT_LOG_DEBUG("Creating CWT with mode {}", static_cast<int>(mode));
 
@@ -999,7 +999,7 @@ std::string Cwt::createCwt(CwtMode mode,
       }
     }
 
-    // Step 6: Serialize COSE structure
+    // Step 6: Serialize COSE structure to raw CBOR bytes (RFC 8392 Section 9.2)
     unsigned char* raw_buffer;
     size_t buffer_size;
     size_t length =
@@ -1012,13 +1012,9 @@ std::string Cwt::createCwt(CwtMode mode,
     auto buffer = CborBufferPtr(raw_buffer);
     std::vector<uint8_t> coseBytes(buffer.get(), buffer.get() + length);
 
-    // Step 7: Base64url encode according to RFC 4648 Section 5
-    std::string result = base64UrlEncode(coseBytes);
+    CAT_LOG_DEBUG("Created CWT token of {} bytes", coseBytes.size());
 
-    CAT_LOG_DEBUG("Created CWT token of {} bytes, base64url length {}",
-                  coseBytes.size(), result.size());
-
-    return result;
+    return coseBytes;
 
   } catch (const std::exception& e) {
     CAT_LOG_ERROR("CWT creation failed: {}", e.what());
@@ -1026,18 +1022,21 @@ std::string Cwt::createCwt(CwtMode mode,
   }
 }
 
-Cwt Cwt::validateCwt(const std::string& encodedCwt,
+std::string Cwt::createCwtBase64(CwtMode mode,
+                                 const CryptographicAlgorithm& algorithm) const {
+  auto cwtBytes = createCwt(mode, algorithm);
+  return base64UrlEncode(cwtBytes);
+}
+
+Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
                      const CryptographicAlgorithm& algorithm) {
   try {
-    CAT_LOG_DEBUG("Validating CWT token of {} characters", encodedCwt.size());
+    CAT_LOG_DEBUG("Validating CWT token of {} bytes", cwtBytes.size());
 
-    // Step 1: Base64url decode according to RFC 4648 Section 5
-    auto coseBytes = base64UrlDecode(encodedCwt);
-
-    // Step 2: Parse COSE structure
+    // Parse COSE structure from raw CBOR bytes (RFC 8392 Section 9.2)
     struct cbor_load_result result;
     cbor_item_t* coseItem =
-        cbor_load(coseBytes.data(), coseBytes.size(), &result);
+        cbor_load(cwtBytes.data(), cwtBytes.size(), &result);
 
     if (result.error.code != CBOR_ERR_NONE) {
       throw InvalidCborError("Failed to parse COSE structure");
@@ -1215,22 +1214,25 @@ Cwt Cwt::validateCwt(const std::string& encodedCwt,
   }
 }
 
+Cwt Cwt::validateCwtBase64(const std::string& encodedCwt,
+                           const CryptographicAlgorithm& algorithm) {
+  auto cwtBytes = base64UrlDecode(encodedCwt);
+  return validateCwt(cwtBytes, algorithm);
+}
+
 Cwt Cwt::validateMultiSignedCwt(
-    const std::string& encodedCwt,
+    std::span<const uint8_t> cwtBytes,
     const std::map<int64_t,
                    std::reference_wrapper<const CryptographicAlgorithm>>&
         algorithms) {
   try {
-    CAT_LOG_DEBUG("Validating multi-signed CWT token of {} characters",
-                  encodedCwt.size());
+    CAT_LOG_DEBUG("Validating multi-signed CWT token of {} bytes",
+                  cwtBytes.size());
 
-    // Step 1: Base64url decode according to RFC 4648 Section 5
-    auto coseBytes = base64UrlDecode(encodedCwt);
-
-    // Step 2: Parse COSE structure
+    // Parse COSE structure from raw CBOR bytes
     struct cbor_load_result result;
     cbor_item_t* coseItem =
-        cbor_load(coseBytes.data(), coseBytes.size(), &result);
+        cbor_load(cwtBytes.data(), cwtBytes.size(), &result);
 
     if (result.error.code != CBOR_ERR_NONE) {
       throw InvalidCborError("Failed to parse COSE structure");
@@ -1397,6 +1399,15 @@ Cwt Cwt::validateMultiSignedCwt(
     throw CryptoError(std::string("Multi-signed CWT validation failed: ") +
                       e.what());
   }
+}
+
+Cwt Cwt::validateMultiSignedCwtBase64(
+    const std::string& encodedCwt,
+    const std::map<int64_t,
+                   std::reference_wrapper<const CryptographicAlgorithm>>&
+        algorithms) {
+  auto cwtBytes = base64UrlDecode(encodedCwt);
+  return validateMultiSignedCwt(cwtBytes, algorithms);
 }
 
 std::vector<uint8_t> Cwt::createDpopSigningInput(

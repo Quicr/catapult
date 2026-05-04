@@ -58,7 +58,7 @@ int main() {
         }
         
         // Create the multi-signed CWT using COSE_Sign format and use ES256 as primary
-        std::string multiSignedCwt = cwt.createCwt(CwtMode::MultiSigned, *es256Algorithm);
+        std::string multiSignedCwt = cwt.createCwtBase64(CwtMode::MultiSigned, *es256Algorithm);
         
         CAT_LOG_INFO("COSE_Sign CWT created successfully!");
 
@@ -70,7 +70,7 @@ int main() {
         
 
         // Validate the multi-signed CWT with per-signature algorithms
-        Cwt validatedCwt = Cwt::validateMultiSignedCwt(multiSignedCwt, algorithmMap);
+        Cwt validatedCwt = Cwt::validateMultiSignedCwtBase64(multiSignedCwt, algorithmMap);
         
         CAT_LOG_INFO("Validated signatures count: {}", validatedCwt.signatures.size());
         CAT_LOG_INFO("Decoded issuer: {}", validatedCwt.payload.core.iss.value_or("none"));
