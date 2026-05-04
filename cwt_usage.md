@@ -4,12 +4,62 @@ This document provides examples for using the CWT (CBOR Web Token) API with CAT 
 
 ## Table of Contents
 
+- [Token Creation](#token-creation)
 - [MAC Operations](#mac-operations)
 - [Encryption Operations](#encryption-operations)
 - [Single Signature Operations](#single-signature-operations)
 - [Multi Signature Operations](#multi-signature-operations)
 - [Key Management](#key-management)
 - [Error Handling](#error-handling)
+
+## Token Creation
+
+Use the `CatToken::builder()` fluent API to construct tokens:
+
+```cpp
+#include "catapult/token.hpp"
+
+using namespace catapult;
+
+// Basic token with core claims
+auto token = CatToken::builder()
+    .issuer("auth.example.com")
+    .audience("api.example.com")
+    .expiresIn(std::chrono::hours{2})
+    .build();
+
+// Token with DPoP binding
+auto dpopToken = CatToken::builder()
+    .issuer("auth.moqt-cdn.example.com")
+    .audience("relay.moqt-cdn.example.com")
+    .expiresIn(std::chrono::hours{1})
+    .dpopThumbprint(client_keys.get_public_key_thumbprint())
+    .build();
+
+// Token with geographic and network restrictions
+auto restrictedToken = CatToken::builder()
+    .issuer("geo-auth.example.com")
+    .audience("cdn.example.com")
+    .expiresIn(std::chrono::hours{1})
+    .geoCoordinate(37.7749, -122.4194, 100.0)  // lat, lon, accuracy
+    .countries({"US", "CA"})
+    .networkInterfaces({"192.168.1.0/24"})
+    .hosts({"api.example.com"})
+    .alpn({"h3", "h2"})
+    .build();
+
+// Token with CAT-specific claims
+auto catToken = CatToken::builder()
+    .issuer("cat-issuer.example.com")
+    .audience("service.example.com")
+    .expiresIn(std::chrono::hours{1})
+    .version("1.0")
+    .usageLimit(100)
+    .replayNonce("nonce-12345")
+    .proofOfPossession(true)
+    .subject("user@example.com")
+    .build();
+```
 
 ## MAC Operations
 
@@ -24,30 +74,28 @@ Message Authentication Code (MAC) operations use HMAC-SHA256 to ensure message i
 
 using namespace catapult;
 
-// Create a CAT token
-CatToken token;
-token.core.iss = "example-issuer";
-token.core.aud = std::vector<std::string>{"audience1"};
-token.core.exp = std::chrono::system_clock::to_time_t(
-    std::chrono::system_clock::now() + std::chrono::hours{2}
-);
-token.cat.catv = "1.0";
-token.cat.catu = 100;
+// Create a CAT token using builder pattern
+auto token = CatToken::builder()
+    .issuer("example-issuer")
+    .audience("audience1")
+    .expiresIn(std::chrono::hours{2})
+    .version("1.0")
+    .usageLimit(100)
+    .build();
 
 // Generate secure HMAC key
 auto hmacKey = HmacSha256Algorithm::generateSecureKey();
 HmacSha256Algorithm hmacAlgo(hmacKey);
 
-// Create and sign CWT with MAC
-Cwt cwt(ALG_HMAC256_256, token);
-cwt.withKeyId("mac-key-001");
-
-std::string macCwt = cwt.createCwt(CwtMode::MACed, hmacAlgo);
+// Create and sign CWT with MAC using builder pattern
+std::string macCwt = Cwt(ALG_HMAC256_256, token)
+    .withKeyId("mac-key-001")
+    .createCwtBase64(CwtMode::MACed, hmacAlgo);
 std::cout << "MAC CWT: " << macCwt << std::endl;
 
 // Verify MAC
 try {
-    auto verifiedCwt = Cwt::validateCwt(macCwt, hmacAlgo);
+    auto verifiedCwt = Cwt::validateCwtBase64(macCwt, hmacAlgo);
     std::cout << "MAC verification successful!" << std::endl;
     std::cout << "Issuer: " << verifiedCwt.payload.core.iss.value_or("none") << std::endl;
 } catch (const CryptoError& e) {
@@ -66,12 +114,12 @@ HmacSha256Algorithm hmacAlgo1(key1);
 HmacSha256Algorithm hmacAlgo2(key2);
 
 // Create separate CWTs with different keys
-std::string macCwt1 = cwt.createCwt(CwtMode::MACed, hmacAlgo1);
-std::string macCwt2 = cwt.createCwt(CwtMode::MACed, hmacAlgo2);
+std::string macCwt1 = cwt.createCwtBase64(CwtMode::MACed, hmacAlgo1);
+std::string macCwt2 = cwt.createCwtBase64(CwtMode::MACed, hmacAlgo2);
 
 // Verify with appropriate keys
-auto verified1 = Cwt::validateCwt(macCwt1, hmacAlgo1);
-auto verified2 = Cwt::validateCwt(macCwt2, hmacAlgo2);
+auto verified1 = Cwt::validateCwtBase64(macCwt1, hmacAlgo1);
+auto verified2 = Cwt::validateCwtBase64(macCwt2, hmacAlgo2);
 ```
 
 ## Encryption Operations
@@ -96,16 +144,15 @@ auto iv = AesGcmAlgorithm::generateIV();
 
 AesGcmAlgorithm aesAlgo(aesKey, ALG_A256GCM);
 
-// Create and encrypt CWT
-Cwt cwt(ALG_A256GCM, token);
-cwt.withKeyId("aes-key-001");
-
-std::string encryptedCwt = cwt.createCwt(CwtMode::Encrypted, aesAlgo);
+// Create and encrypt CWT using builder pattern
+std::string encryptedCwt = Cwt(ALG_A256GCM, token)
+    .withKeyId("aes-key-001")
+    .createCwtBase64(CwtMode::Encrypted, aesAlgo);
 std::cout << "Encrypted CWT: " << encryptedCwt << std::endl;
 
 // Decrypt
 try {
-    auto decryptedCwt = Cwt::validateCwt(encryptedCwt, aesAlgo);
+    auto decryptedCwt = Cwt::validateCwtBase64(encryptedCwt, aesAlgo);
     std::cout << "Decryption successful!" << std::endl;
     std::cout << "Issuer: " << decryptedCwt.payload.core.iss.value_or("none") << std::endl;
 } catch (const CryptoError& e) {
@@ -123,12 +170,12 @@ auto nonce = ChaCha20Poly1305Algorithm::generateNonce();
 
 ChaCha20Poly1305Algorithm chachaAlgo(chachaKey);
 
-// Create and encrypt CWT
-Cwt cwt(ALG_ChaCha20_Poly1305, token);
-std::string encryptedCwt = cwt.createCwt(CwtMode::Encrypted, chachaAlgo);
+// Create and encrypt CWT using builder pattern
+std::string encryptedCwt = Cwt(ALG_ChaCha20_Poly1305, token)
+    .createCwtBase64(CwtMode::Encrypted, chachaAlgo);
 
 // Decrypt
-auto decryptedCwt = Cwt::validateCwt(encryptedCwt, chachaAlgo);
+auto decryptedCwt = Cwt::validateCwtBase64(encryptedCwt, chachaAlgo);
 ```
 
 ## Single Signature Operations
@@ -153,18 +200,17 @@ auto [privateKey, publicKey] = Es256Algorithm::generateSecureKeyPair();
 // For signing (requires private key)
 Es256Algorithm signAlgo(privateKey, publicKey);
 
-// Create and sign CWT
-Cwt cwt(ALG_ES256, token);
-cwt.withKeyId("es256-key-001");
-
-std::string signedCwt = cwt.createCwt(CwtMode::Signed, signAlgo);
+// Create and sign CWT using builder pattern
+std::string signedCwt = Cwt(ALG_ES256, token)
+    .withKeyId("es256-key-001")
+    .createCwtBase64(CwtMode::Signed, signAlgo);
 std::cout << "Signed CWT: " << signedCwt << std::endl;
 
 // For verification (public key only)
 Es256Algorithm verifyAlgo(publicKey);
 
 try {
-    auto verifiedCwt = Cwt::validateCwt(signedCwt, verifyAlgo);
+    auto verifiedCwt = Cwt::validateCwtBase64(signedCwt, verifyAlgo);
     std::cout << "Signature verification successful!" << std::endl;
     std::cout << "Issuer: " << verifiedCwt.payload.core.iss.value_or("none") << std::endl;
 } catch (const CryptoError& e) {
@@ -181,15 +227,14 @@ auto [rsaPrivateKey, rsaPublicKey] = Ps256Algorithm::generateSecureKeyPair();
 // For signing
 Ps256Algorithm signAlgo(rsaPrivateKey, rsaPublicKey);
 
-// Create and sign CWT
-Cwt cwt(ALG_PS256, token);
-cwt.withKeyId("ps256-key-001");
-
-std::string signedCwt = cwt.createCwt(CwtMode::Signed, signAlgo);
+// Create and sign CWT using builder pattern
+std::string signedCwt = Cwt(ALG_PS256, token)
+    .withKeyId("ps256-key-001")
+    .createCwtBase64(CwtMode::Signed, signAlgo);
 
 // For verification
 Ps256Algorithm verifyAlgo(rsaPublicKey);
-auto verifiedCwt = Cwt::validateCwt(signedCwt, verifyAlgo);
+auto verifiedCwt = Cwt::validateCwtBase64(signedCwt, verifyAlgo);
 ```
 
 ## Multi Signature Operations
@@ -218,19 +263,13 @@ Es256Algorithm es256Algo(es256PrivKey, es256PubKey);
 Ps256Algorithm ps256Algo(ps256PrivKey, ps256PubKey);
 HmacSha256Algorithm hmacAlgo(hmacKey);
 
-// Create CWT with primary algorithm
-Cwt cwt(ALG_ES256, token);
-cwt.withKeyId("multi-authority-key");
-
-// Add multiple signatures
-cwt.addSignature(es256Algo);  // PKI authority
-cwt.addSignature(ps256Algo);  // Government authority  
-cwt.addSignature(hmacAlgo);   // Internal authority
-
-std::cout << "Added " << cwt.signatures.size() << " signatures" << std::endl;
-
-// Create multi-signed CWT
-std::string multiSignedCwt = cwt.createCwt(CwtMode::MultiSigned, es256Algo);
+// Create multi-signed CWT using builder pattern
+std::string multiSignedCwt = Cwt(ALG_ES256, token)
+    .withKeyId("multi-authority-key")
+    .addSignature(es256Algo)   // PKI authority
+    .addSignature(ps256Algo)   // Government authority  
+    .addSignature(hmacAlgo)    // Internal authority
+    .createCwtBase64(CwtMode::MultiSigned, es256Algo);
 std::cout << "Multi-signed CWT: " << multiSignedCwt << std::endl;
 ```
 
@@ -250,7 +289,7 @@ algorithmMap.emplace(ALG_HMAC256_256, std::cref(hmacAlgo));
 
 // Validate with per-signature algorithms
 try {
-    auto validatedCwt = Cwt::validateMultiSignedCwt(multiSignedCwt, algorithmMap);
+    auto validatedCwt = Cwt::validateMultiSignedCwtBase64(multiSignedCwt, algorithmMap);
     std::cout << "Multi-signature validation successful!" << std::endl;
     std::cout << "Validated " << validatedCwt.signatures.size() << " signatures" << std::endl;
     
