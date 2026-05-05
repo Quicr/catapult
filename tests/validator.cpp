@@ -629,17 +629,16 @@ TEST_CASE("ValidatorNegativeTests - Geographic Validation") {
             
         REQUIRE_THROWS_AS(validator.validate(tooLongGeohashToken), GeographicValidationError);
         
-        // Current implementation doesn't validate character sets, only length
-        auto validCharSetToken = CatToken()
+        // Validator now validates geohash character set (base32)
+        auto invalidCharSetToken = CatToken()
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
-            .withGeohash("invalid@hash") // Invalid chars but length OK
+            .withGeohash("invalid@hash") // Invalid chars
             .withCwtId("invalid-chars-token");
-            
-            
-        // This passes because validator only checks length
-        REQUIRE_NOTHROW(validator.validate(validCharSetToken));
+
+        // This now throws because validator checks character set
+        REQUIRE_THROWS_AS(validator.validate(invalidCharSetToken), GeographicValidationError);
     }
 }
 
@@ -702,20 +701,9 @@ TEST_CASE("ValidatorNegativeTests - Edge Cases and Error Conditions") {
     auto exp = now + std::chrono::hours(1);
     
     SUBCASE("Negative clock skew tolerance") {
-        auto token = CatToken()
-            .withIssuer("https://trusted-issuer.com")
-            .withAudience({"https://trusted-service.com"})
-            .withExpiration(exp)
-            .withCwtId("negative-skew-token");
-            
-            
         CatTokenValidator validator;
-        // Current implementation allows negative tolerance values
-        REQUIRE_NOTHROW(validator.withClockSkewTolerance(-60));
-        
-        // However, negative tolerance would make validation stricter
-        // Test that it doesn't cause issues with valid tokens
-        REQUIRE_NOTHROW(validator.validate(token));
+        // Negative tolerance values are now rejected
+        REQUIRE_THROWS_AS(validator.withClockSkewTolerance(-60), InvalidClaimValueError);
     }
     
     SUBCASE("Extremely large clock skew tolerance") {
