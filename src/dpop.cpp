@@ -753,14 +753,13 @@ bool DpopProofValidator::validate_proof(
     }
 
     // Periodic cleanup to prevent unbounded memory growth
-    // For large-scale operations (100k+ concurrent subscribers), allow sufficient capacity
-    constexpr size_t MAX_JTI_ENTRIES = 1000000;
-    constexpr size_t CLEANUP_INTERVAL = 10000;
-    if (used_jtis_.size() >= MAX_JTI_ENTRIES ||
-        (used_jtis_.size() > 0 && used_jtis_.size() % CLEANUP_INTERVAL == 0)) {
+    const size_t max_entries = settings_.get_max_jti_entries();
+    const size_t cleanup_interval = settings_.get_jti_cleanup_interval();
+    if (used_jtis_.size() >= max_entries ||
+        (used_jtis_.size() > 0 && used_jtis_.size() % cleanup_interval == 0)) {
       cleanup_expired_jtis_locked();
       // If still too large after cleanup, reject to prevent DoS
-      if (used_jtis_.size() >= MAX_JTI_ENTRIES) {
+      if (used_jtis_.size() >= max_entries) {
         return false;
       }
     }
