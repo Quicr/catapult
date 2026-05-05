@@ -8,6 +8,7 @@
 #include <concepts>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <span>
 #include <vector>
@@ -55,6 +56,11 @@ class SecureAllocator {
   T* allocate(size_t n) {
     if (n == 0) return nullptr;
 
+    // Check for integer overflow before multiplication
+    if (n > std::numeric_limits<size_t>::max() / sizeof(T)) {
+      throw std::bad_alloc();
+    }
+
     // Calculate aligned size for better performance and security
     size_t size = n * sizeof(T);
     size_t page_size = getPageSize();
@@ -78,12 +84,14 @@ class SecureAllocator {
   void deallocate(T* ptr, size_t n) noexcept {
     if (ptr) {
       size_t size = n * sizeof(T);
+      size_t page_size = getPageSize();
+      size_t aligned_size = ((size + page_size - 1) / page_size) * page_size;
 
-      // Secure zeroing using volatile to prevent compiler optimization
-      secureZero(ptr, size);
+      // Secure zeroing of entire aligned region
+      secureZero(ptr, aligned_size);
 
-      // Unlock memory before freeing
-      unlockMemory(ptr, size);
+      // Unlock the same aligned size that was locked in allocate()
+      unlockMemory(ptr, aligned_size);
 
       std::free(ptr);
     }
