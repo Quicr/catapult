@@ -26,7 +26,7 @@ namespace jwk {
  * @return JWK JSON string
  * @throws CryptoError if key parsing or extraction fails
  */
-std::string createES256JWK(const std::vector<uint8_t>& public_key_der);
+std::string createES256JWK(const std::vector<uint8_t> &public_key_der);
 
 /**
  * @brief Create PS256 JWK from DER-encoded public key
@@ -34,7 +34,7 @@ std::string createES256JWK(const std::vector<uint8_t>& public_key_der);
  * @return JWK JSON string
  * @throws CryptoError if key parsing or extraction fails
  */
-std::string createPS256JWK(const std::vector<uint8_t>& public_key_der);
+std::string createPS256JWK(const std::vector<uint8_t> &public_key_der);
 
 /**
  * @brief Calculate JWK thumbprint using SHA-256
@@ -42,7 +42,7 @@ std::string createPS256JWK(const std::vector<uint8_t>& public_key_der);
  * @return Base64url-encoded thumbprint
  * @throws CryptoError if JWK format is invalid or unsupported
  */
-std::string calculateJWKThumbprint(const std::string& jwk_json);
+std::string calculateJWKThumbprint(const std::string &jwk_json);
 
 /**
  * @brief Create JWK from algorithm-specific public key
@@ -52,7 +52,7 @@ std::string calculateJWKThumbprint(const std::string& jwk_json);
  * @throws CryptoError if algorithm is unsupported or key parsing fails
  */
 std::string createJWKFromAlgorithm(int64_t algorithm_id,
-                                   const std::vector<uint8_t>& public_key_der);
+                                   const std::vector<uint8_t> &public_key_der);
 
-}  // namespace jwk
-}  // namespace catapult
+} // namespace jwk
+} // namespace catapult
