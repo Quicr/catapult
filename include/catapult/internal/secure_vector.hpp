@@ -64,6 +64,11 @@ class SecureAllocator {
     // Calculate aligned size for better performance and security
     size_t size = n * sizeof(T);
     size_t page_size = getPageSize();
+
+    // Check for overflow in alignment calculation
+    if (size > SIZE_MAX - page_size) {
+      throw std::bad_alloc();
+    }
     size_t aligned_size = ((size + page_size - 1) / page_size) * page_size;
 
     // Allocate memory with proper alignment
@@ -211,7 +216,8 @@ inline bool constantTimeEqual(const std::vector<T>& a,
   volatile bool sizes_equal = (size_a == size_b);
 
   // Compare up to the smaller size, then factor in size equality
-  size_t min_size = (a.size() < b.size()) ? a.size() : b.size();
+  // Use volatile variables consistently for timing safety
+  size_t min_size = (size_a < size_b) ? size_a : size_b;
   unsigned char content_equal =
       (min_size == 0)
           ? 0
@@ -236,7 +242,8 @@ inline bool constantTimeEqual(std::span<const T> a,
   volatile bool sizes_equal = (size_a == size_b);
 
   // Compare up to the smaller size, then factor in size equality
-  size_t min_size = (a.size() < b.size()) ? a.size() : b.size();
+  // Use volatile variables consistently for timing safety
+  size_t min_size = (size_a < size_b) ? size_a : size_b;
   unsigned char content_equal =
       (min_size == 0)
           ? 0
