@@ -6,6 +6,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <concepts>
 #include <limits>
 #include <memory>
@@ -221,6 +222,42 @@ class TypedCompositeClaim {
   constexpr TypedCompositeClaim() = default;
 
   /**
+   * @brief Copy constructor (atomic cache is not copied, will be recalculated)
+   */
+  TypedCompositeClaim(const TypedCompositeClaim& other)
+      : claims(other.claims), cached_depth_(0) {}
+
+  /**
+   * @brief Move constructor
+   */
+  TypedCompositeClaim(TypedCompositeClaim&& other) noexcept
+      : claims(std::move(other.claims)),
+        cached_depth_(other.cached_depth_.load(std::memory_order_relaxed)) {}
+
+  /**
+   * @brief Copy assignment
+   */
+  TypedCompositeClaim& operator=(const TypedCompositeClaim& other) {
+    if (this != &other) {
+      claims = other.claims;
+      cached_depth_.store(0, std::memory_order_relaxed);
+    }
+    return *this;
+  }
+
+  /**
+   * @brief Move assignment
+   */
+  TypedCompositeClaim& operator=(TypedCompositeClaim&& other) noexcept {
+    if (this != &other) {
+      claims = std::move(other.claims);
+      cached_depth_.store(other.cached_depth_.load(std::memory_order_relaxed),
+                          std::memory_order_relaxed);
+    }
+    return *this;
+  }
+
+  /**
    * @brief Constructor with designated initializers
    * @param init_claims Initial list of claim sets
    */
@@ -246,22 +283,26 @@ class TypedCompositeClaim {
   }
 
   /**
-   * @brief Optimized depth calculation with memoization
+   * @brief Optimized depth calculation with memoization (thread-safe)
    */
   size_t getDepth() const noexcept {
-    if (cached_depth_ == 0) {
-      cached_depth_ = calculateDepthRecursive();
+    size_t depth = cached_depth_.load(std::memory_order_relaxed);
+    if (depth == 0) {
+      depth = calculateDepthRecursive();
+      cached_depth_.store(depth, std::memory_order_relaxed);
     }
-    return cached_depth_;
+    return depth;
   }
 
   /**
    * @brief Invalidate depth cache when structure changes
    */
-  void invalidateDepthCache() noexcept { cached_depth_ = 0; }
+  void invalidateDepthCache() noexcept {
+    cached_depth_.store(0, std::memory_order_relaxed);
+  }
 
  private:
-  mutable size_t cached_depth_ = 0;  ///< Cached depth value
+  mutable std::atomic<size_t> cached_depth_{0};  ///< Cached depth value
 
   size_t calculateDepthRecursive() const noexcept {
     size_t maxDepth = 1;

@@ -479,32 +479,38 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
     throw InvalidTokenFormatError{};
   }
 
+  // Use RAII wrapper for main array
+  CborItemPtr cose_array_ptr(cose_array);
+
   DpopHeader header;
   header.set_encoding(DpopEncoding::CWT);
 
   // Parse protected header
   cbor_item_t* protected_bstr = cbor_array_get(cose_array, 0);
-  if (protected_bstr && cbor_isa_bytestring(protected_bstr)) {
+  if (!protected_bstr) {
+    throw InvalidTokenFormatError{};
+  }
+  if (cbor_isa_bytestring(protected_bstr)) {
     size_t prot_len = cbor_bytestring_length(protected_bstr);
     if (prot_len > 0) {
       cbor_load_result prot_result;
-      cbor_item_t* prot_map = cbor_load(cbor_bytestring_handle(protected_bstr),
-                                        prot_len, &prot_result);
-      if (prot_map && cbor_isa_map(prot_map)) {
-        size_t map_size = cbor_map_size(prot_map);
-        cbor_pair* pairs = cbor_map_handle(prot_map);
+      cbor_item_t* prot_map_raw = cbor_load(
+          cbor_bytestring_handle(protected_bstr), prot_len, &prot_result);
+      if (prot_map_raw && cbor_isa_map(prot_map_raw)) {
+        CborItemPtr prot_map(prot_map_raw);
+        size_t map_size = cbor_map_size(prot_map.get());
+        cbor_pair* pairs = cbor_map_handle(prot_map.get());
         if (!pairs) {
-          cbor_decref(&prot_map);
-          cbor_decref(&cose_array);
           throw InvalidTokenFormatError{};
         }
         for (size_t i = 0; i < map_size; ++i) {
-          if (cbor_isa_uint(pairs[i].key)) {
+          if (pairs[i].key && cbor_isa_uint(pairs[i].key)) {
             uint8_t key = cbor_get_uint8(pairs[i].key);
-            if (key == dpop_labels::ALG && cbor_isa_negint(pairs[i].value)) {
+            if (key == dpop_labels::ALG && pairs[i].value &&
+                cbor_isa_negint(pairs[i].value)) {
               header.alg_id =
                   -1 - static_cast<int64_t>(cbor_get_uint8(pairs[i].value));
-            } else if (key == dpop_labels::COSE_KEY &&
+            } else if (key == dpop_labels::COSE_KEY && pairs[i].value &&
                        cbor_isa_bytestring(pairs[i].value)) {
               size_t ck_len = cbor_bytestring_length(pairs[i].value);
               header.cose_key.assign(
@@ -513,7 +519,8 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
             }
           }
         }
-        cbor_decref(&prot_map);
+      } else if (prot_map_raw) {
+        cbor_decref(&prot_map_raw);
       }
     }
   }
@@ -522,20 +529,23 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   cbor_item_t* payload_bstr = cbor_array_get(cose_array, 2);
   DpopPayload payload(0, "", "");
 
-  if (payload_bstr && cbor_isa_bytestring(payload_bstr)) {
+  if (!payload_bstr) {
+    throw InvalidTokenFormatError{};
+  }
+  if (cbor_isa_bytestring(payload_bstr)) {
     size_t pay_len = cbor_bytestring_length(payload_bstr);
     cbor_load_result pay_result;
-    cbor_item_t* pay_map =
+    cbor_item_t* pay_map_raw =
         cbor_load(cbor_bytestring_handle(payload_bstr), pay_len, &pay_result);
-    if (pay_map && cbor_isa_map(pay_map)) {
-      size_t map_size = cbor_map_size(pay_map);
-      cbor_pair* pairs = cbor_map_handle(pay_map);
+    if (pay_map_raw && cbor_isa_map(pay_map_raw)) {
+      CborItemPtr pay_map(pay_map_raw);
+      size_t map_size = cbor_map_size(pay_map.get());
+      cbor_pair* pairs = cbor_map_handle(pay_map.get());
       if (!pairs) {
-        cbor_decref(&pay_map);
-        cbor_decref(&cose_array);
         throw InvalidTokenFormatError{};
       }
       for (size_t i = 0; i < map_size; ++i) {
+        if (!pairs[i].key || !pairs[i].value) continue;
         std::string key_str;
         if (cbor_isa_string(pairs[i].key)) {
           key_str = std::string(
@@ -555,6 +565,7 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
           cbor_pair* actx_pairs = cbor_map_handle(actx_map);
           if (!actx_pairs) continue;
           for (size_t j = 0; j < actx_size; ++j) {
+            if (!actx_pairs[j].key || !actx_pairs[j].value) continue;
             std::string actx_key;
             if (cbor_isa_string(actx_pairs[j].key)) {
               actx_key = std::string(reinterpret_cast<const char*>(
@@ -592,20 +603,23 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
           }
         }
       }
-      cbor_decref(&pay_map);
+    } else if (pay_map_raw) {
+      cbor_decref(&pay_map_raw);
     }
   }
 
   // Get signature
   cbor_item_t* sig_bstr = cbor_array_get(cose_array, 3);
   std::vector<uint8_t> signature;
-  if (sig_bstr && cbor_isa_bytestring(sig_bstr)) {
+  if (!sig_bstr) {
+    throw InvalidTokenFormatError{};
+  }
+  if (cbor_isa_bytestring(sig_bstr)) {
     size_t sig_len = cbor_bytestring_length(sig_bstr);
     signature.assign(cbor_bytestring_handle(sig_bstr),
                      cbor_bytestring_handle(sig_bstr) + sig_len);
   }
 
-  cbor_decref(&cose_array);
   return DpopProof{std::move(header), std::move(payload), signature,
                    DpopEncoding::CWT};
 }
@@ -739,8 +753,9 @@ bool DpopProofValidator::validate_proof(
     }
 
     // Periodic cleanup to prevent unbounded memory growth
-    constexpr size_t MAX_JTI_ENTRIES = 100000;
-    constexpr size_t CLEANUP_INTERVAL = 1000;
+    // For large-scale operations (100k+ concurrent subscribers), allow sufficient capacity
+    constexpr size_t MAX_JTI_ENTRIES = 1000000;
+    constexpr size_t CLEANUP_INTERVAL = 10000;
     if (used_jtis_.size() >= MAX_JTI_ENTRIES ||
         (used_jtis_.size() > 0 && used_jtis_.size() % CLEANUP_INTERVAL == 0)) {
       cleanup_expired_jtis_locked();

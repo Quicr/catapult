@@ -639,7 +639,10 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
               } else if (key_view == "lon") {
                 coord.lon = value;
               } else if (key_view == "accuracy") {
-                coord.accuracy = value;
+                // Validate accuracy is non-negative and reasonable
+                if (value >= 0.0 && value <= 1e9) {
+                  coord.accuracy = value;
+                }
               }
             }
             token.cat.catgeocoord = coord;
@@ -715,10 +718,16 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
                 for (size_t ai = 0; ai < action_count; ++ai) {
                   cbor_item_t* act = cbor_array_get(actions_arr, ai);
                   if (act && cbor_isa_uint(act)) {
-                    int action_val = static_cast<int>(cbor_get_uint8(act));
-                    // Validate action is within valid MOQT action range
-                    if (moqt_actions::is_valid_action(action_val)) {
-                      actions.push_back(action_val);
+                    // Use uint64 to handle all possible CBOR uint values
+                    uint64_t action_u64 = cbor_get_uint64(act);
+                    // Validate action is within valid range for int
+                    if (action_u64 <=
+                        static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+                      int action_val = static_cast<int>(action_u64);
+                      // Validate action is within valid MOQT action range
+                      if (moqt_actions::is_valid_action(action_val)) {
+                        actions.push_back(action_val);
+                      }
                     }
                   }
                 }
