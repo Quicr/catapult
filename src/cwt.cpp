@@ -481,20 +481,29 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
     throw InvalidTokenFormatError();
   }
 
-  // Helper lambda for extracting strings without allocating temporary string
+  // Maximum string length to prevent memory exhaustion
+  constexpr size_t MAX_STRING_LENGTH = 65536;  // 64KB
+
+  // Helper lambda for extracting strings with length validation
   auto extract_string = [](cbor_item_t* str_item) -> std::string {
     if (!str_item) return {};
+    size_t length = cbor_string_length(str_item);
+    if (length > MAX_STRING_LENGTH) {
+      throw InvalidClaimValueError("String value exceeds maximum length");
+    }
     const char* data =
         reinterpret_cast<const char*>(cbor_string_handle(str_item));
-    size_t length = cbor_string_length(str_item);
     return {data, length};
   };
 
   auto extract_bytestring = [](cbor_item_t* str_item) -> std::string {
     if (!str_item) return {};
+    size_t length = cbor_bytestring_length(str_item);
+    if (length > MAX_STRING_LENGTH) {
+      throw InvalidClaimValueError("Bytestring value exceeds maximum length");
+    }
     const char* data =
         reinterpret_cast<const char*>(cbor_bytestring_handle(str_item));
-    size_t length = cbor_bytestring_length(str_item);
     return {data, length};
   };
 
@@ -528,14 +537,19 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
       case CLAIM_AUD:
         if (cbor_isa_array(value_item)) {
           size_t array_size = cbor_array_size(value_item);
+          // Limit audience array size to prevent memory exhaustion
+          constexpr size_t MAX_AUDIENCE_COUNT = 100;
+          if (array_size > MAX_AUDIENCE_COUNT) {
+            throw InvalidClaimValueError("Too many audience values");
+          }
           cbor_item_t** array_handle = cbor_array_handle(value_item);
 
           if (array_handle && array_size > 0) {
             std::vector<std::string> audiences;
-            audiences.reserve(array_size);  // Pre-allocate capacity
+            audiences.reserve(array_size);
 
             for (size_t j = 0; j < array_size; j++) {
-              if (cbor_isa_string(array_handle[j])) {
+              if (array_handle[j] && cbor_isa_string(array_handle[j])) {
                 audiences.emplace_back(extract_string(array_handle[j]));
               }
             }
@@ -701,7 +715,11 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
                 for (size_t ai = 0; ai < action_count; ++ai) {
                   cbor_item_t* act = cbor_array_get(actions_arr, ai);
                   if (act && cbor_isa_uint(act)) {
-                    actions.push_back(static_cast<int>(cbor_get_uint8(act)));
+                    int action_val = static_cast<int>(cbor_get_uint8(act));
+                    // Validate action is within valid MOQT action range
+                    if (moqt_actions::is_valid_action(action_val)) {
+                      actions.push_back(action_val);
+                    }
                   }
                 }
               }
@@ -1235,10 +1253,47 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       throw InvalidCborError("Invalid COSE protected header");
     }
 
-    int64_t algId = algorithm.algorithmId();
-    // Extract other header fields if needed...
+    // Extract algorithm from header and verify it matches the provided
+    // algorithm
+    int64_t headerAlgId = 0;
+    struct cbor_pair* headerPairs = cbor_map_handle(headerItem);
+    size_t headerMapSize = cbor_map_size(headerItem);
+
+    if (headerPairs) {
+      for (size_t i = 0; i < headerMapSize; i++) {
+        if (cbor_isa_uint(headerPairs[i].key) &&
+            cbor_get_uint8(headerPairs[i].key) == 1) {  // algorithm label
+          if (cbor_isa_uint(headerPairs[i].value)) {
+            headerAlgId =
+                static_cast<int64_t>(cbor_get_uint64(headerPairs[i].value));
+          } else if (cbor_isa_negint(headerPairs[i].value)) {
+            headerAlgId =
+                -static_cast<int64_t>(cbor_get_uint64(headerPairs[i].value)) -
+                1;
+          }
+          break;
+        }
+      }
+    }
 
     cbor_decref(&headerItem);
+
+    // Verify algorithm matches to prevent algorithm confusion attacks
+    int64_t algId = algorithm.algorithmId();
+    if (headerAlgId != 0 && headerAlgId != algId) {
+      throw CryptoError(
+          "Token algorithm does not match provided verification algorithm");
+    }
+
+    // Validate algorithm ID is a known supported value
+    auto isKnownAlgorithm = [](int64_t alg) {
+      return alg == ALG_ES256 || alg == ALG_PS256 || alg == ALG_HMAC256_256 ||
+             alg == ALG_A128GCM || alg == ALG_A192GCM || alg == ALG_A256GCM ||
+             alg == ALG_ChaCha20_Poly1305;
+    };
+    if (headerAlgId != 0 && !isKnownAlgorithm(headerAlgId)) {
+      throw CryptoError("Unknown algorithm ID in token header");
+    }
 
     Cwt validatedCwt(algId, decodedPayload);
 

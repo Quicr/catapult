@@ -18,6 +18,7 @@
 #include <chrono>
 #include <concepts>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -172,13 +173,20 @@ struct DpopPayload {
 
   /**
    * @brief Check if timestamp is within acceptable window
+   * @note Rejects future timestamps beyond a small clock skew tolerance
    */
   [[nodiscard]] bool is_fresh(
-      std::chrono::seconds window = std::chrono::seconds{300}) const noexcept {
+      std::chrono::seconds window = std::chrono::seconds{300},
+      std::chrono::seconds future_tolerance = std::chrono::seconds{60}) const noexcept {
     auto now =
         std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    auto diff = std::abs(now - iat);
-    return diff <= window.count();
+    // Reject timestamps too far in the future (prevents pre-generated proofs)
+    if (iat > now + future_tolerance.count()) {
+      return false;
+    }
+    // Check if timestamp is within the past window
+    auto age = now - iat;
+    return age >= 0 && age <= window.count();
   }
 };
 
@@ -450,9 +458,11 @@ template <MoqtActionType ActionT>
 
 /**
  * @brief DPoP proof validator
+ * @note Thread-safe: JTI tracking is protected by mutex
  */
 class DpopProofValidator {
  private:
+  mutable std::mutex jti_mutex_;  ///< Mutex for thread-safe JTI tracking
   std::unordered_map<std::string, std::chrono::system_clock::time_point>
       used_jtis_;
   CatDpopSettings settings_;
@@ -498,7 +508,7 @@ class DpopProofValidator {
   }
 
   /**
-   * @brief Clean up expired JTIs
+   * @brief Clean up expired JTIs (acquires lock)
    */
   void cleanup_expired_jtis();
 
@@ -515,6 +525,12 @@ class DpopProofValidator {
   void update_settings(CatDpopSettings new_settings) {
     settings_ = std::move(new_settings);
   }
+
+ private:
+  /**
+   * @brief Clean up expired JTIs (must be called with lock held)
+   */
+  void cleanup_expired_jtis_locked();
 };
 
 /**
