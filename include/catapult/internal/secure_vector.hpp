@@ -199,32 +199,48 @@ inline int constantTimeCompare(const void* a, const void* b,
  * @brief Constant-time comparison for vectors
  * @param a First vector
  * @param b Second vector
- * @return true if equal, false otherwise (timing independent)
+ * @return true if equal, false otherwise (timing independent for content)
+ * @note Size comparison is constant-time to prevent length oracle attacks
  */
 template <typename T>
 inline bool constantTimeEqual(const std::vector<T>& a,
                               const std::vector<T>& b) noexcept {
-  if (a.size() != b.size()) {
-    return false;
-  }
+  // Constant-time size comparison to prevent length oracle
+  volatile size_t size_a = a.size();
+  volatile size_t size_b = b.size();
+  volatile bool sizes_equal = (size_a == size_b);
 
-  return constantTimeCompare(a.data(), b.data(), a.size() * sizeof(T)) == 0;
+  // Compare up to the smaller size, then factor in size equality
+  size_t min_size = (a.size() < b.size()) ? a.size() : b.size();
+  unsigned char content_equal =
+      (min_size == 0) ? 0 : constantTimeCompare(a.data(), b.data(),
+                                                 min_size * sizeof(T));
+
+  return sizes_equal && (content_equal == 0);
 }
 
 /**
  * @brief Constant-time comparison for spans
  * @param a First span
  * @param b Second span
- * @return true if equal, false otherwise (timing independent)
+ * @return true if equal, false otherwise (timing independent for content)
+ * @note Size comparison is constant-time to prevent length oracle attacks
  */
 template <typename T>
 inline bool constantTimeEqual(std::span<const T> a,
                               std::span<const T> b) noexcept {
-  if (a.size() != b.size()) {
-    return false;
-  }
+  // Constant-time size comparison to prevent length oracle
+  volatile size_t size_a = a.size();
+  volatile size_t size_b = b.size();
+  volatile bool sizes_equal = (size_a == size_b);
 
-  return constantTimeCompare(a.data(), b.data(), a.size() * sizeof(T)) == 0;
+  // Compare up to the smaller size, then factor in size equality
+  size_t min_size = (a.size() < b.size()) ? a.size() : b.size();
+  unsigned char content_equal =
+      (min_size == 0) ? 0 : constantTimeCompare(a.data(), b.data(),
+                                                 min_size * sizeof(T));
+
+  return sizes_equal && (content_equal == 0);
 }
 /**
  * @brief Convert SecureVector to regular vector (for API compatibility)
