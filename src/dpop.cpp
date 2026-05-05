@@ -39,10 +39,12 @@ namespace {
 /**
  * @brief Helper to safely add a CBOR map pair with proper cleanup on failure
  */
-bool safeCborMapAdd(cbor_item_t* map, cbor_item_t* key, cbor_item_t* value) {
+bool safeCborMapAdd(cbor_item_t *map, cbor_item_t *key, cbor_item_t *value) {
   if (!key || !value) {
-    if (key) cbor_decref(&key);
-    if (value) cbor_decref(&value);
+    if (key)
+      cbor_decref(&key);
+    if (value)
+      cbor_decref(&value);
     return false;
   }
   struct cbor_pair pair = {key, value};
@@ -58,9 +60,9 @@ bool safeCborMapAdd(cbor_item_t* map, cbor_item_t* key, cbor_item_t* value) {
  * @brief Create COSE_Key from DER-encoded public key
  */
 std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
-                                          const std::vector<uint8_t>& der_key) {
-  const uint8_t* data = der_key.data();
-  EVP_PKEY* pkey =
+                                          const std::vector<uint8_t> &der_key) {
+  const uint8_t *data = der_key.data();
+  EVP_PKEY *pkey =
       d2i_PUBKEY(nullptr, &data, static_cast<long>(der_key.size()));
   if (!pkey) {
     throw CryptoError("Failed to parse DER public key for COSE_Key");
@@ -69,7 +71,7 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
   // Use RAII wrapper for EVP_PKEY
   auto pkey_guard = EvpKeyPtr(pkey);
 
-  cbor_item_t* raw_cose_key = cbor_new_definite_map(5);
+  cbor_item_t *raw_cose_key = cbor_new_definite_map(5);
   if (!raw_cose_key) {
     throw CryptoError("Failed to create COSE_Key map");
   }
@@ -77,13 +79,15 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
   CborItemPtr cose_key(raw_cose_key);
 
   if (alg_id == ALG_ES256) {
-    BIGNUM* x = nullptr;
-    BIGNUM* y = nullptr;
+    BIGNUM *x = nullptr;
+    BIGNUM *y = nullptr;
 
     if (!EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_EC_PUB_X, &x) ||
         !EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_EC_PUB_Y, &y)) {
-      if (x) BN_free(x);
-      if (y) BN_free(y);
+      if (x)
+        BN_free(x);
+      if (y)
+        BN_free(y);
       throw CryptoError("Failed to extract EC coordinates");
     }
 
@@ -109,13 +113,15 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
       throw CryptoError("Failed to build EC COSE_Key");
     }
   } else if (alg_id == ALG_PS256) {
-    BIGNUM* n = nullptr;
-    BIGNUM* e = nullptr;
+    BIGNUM *n = nullptr;
+    BIGNUM *e = nullptr;
 
     if (!EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_N, &n) ||
         !EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_E, &e)) {
-      if (n) BN_free(n);
-      if (e) BN_free(e);
+      if (n)
+        BN_free(n);
+      if (e)
+        BN_free(e);
       throw CryptoError("Failed to extract RSA parameters");
     }
 
@@ -145,7 +151,7 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
                       std::to_string(alg_id));
   }
 
-  unsigned char* buffer = nullptr;
+  unsigned char *buffer = nullptr;
   size_t buffer_size = 0;
   size_t length = cbor_serialize_alloc(cose_key.get(), &buffer, &buffer_size);
 
@@ -161,7 +167,7 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
 /**
  * @brief Calculate thumbprint from COSE_Key bytes
  */
-std::string calculateCoseKeyThumbprint(const std::vector<uint8_t>& cose_key) {
+std::string calculateCoseKeyThumbprint(const std::vector<uint8_t> &cose_key) {
   auto hash = hashSha256(cose_key);
   return base64UrlEncode(hash);
 }
@@ -170,12 +176,17 @@ std::string calculateCoseKeyThumbprint(const std::vector<uint8_t>& cose_key) {
 /**
  * @brief Create algorithm instance from JWK and algorithm ID
  */
-std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
-    const std::string& alg_name, const std::string& jwk_json) {
+std::unique_ptr<CryptographicAlgorithm>
+createAlgorithmFromJWK(const std::string &alg_name,
+                       const std::string &jwk_json) {
   // Prevent DoS from oversized JSON input
-  constexpr size_t MAX_JWK_SIZE = 8192;  // 8KB reasonable limit for JWK
+  constexpr size_t MAX_JWK_SIZE = 8192; // 8KB reasonable limit for JWK
+  constexpr size_t MIN_JWK_SIZE = 30;   // Minimum valid JWK is larger
   if (jwk_json.size() > MAX_JWK_SIZE) {
     throw CryptoError("JWK exceeds maximum allowed size");
+  }
+  if (jwk_json.size() < MIN_JWK_SIZE) {
+    throw CryptoError("JWK too small to be valid");
   }
   json jwk = json::parse(jwk_json);
 
@@ -191,19 +202,21 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
       throw CryptoError("Invalid EC coordinates size for P-256");
     }
 
-    EVP_PKEY* pkey = nullptr;
-    OSSL_PARAM_BLD* param_bld = OSSL_PARAM_BLD_new();
+    EVP_PKEY *pkey = nullptr;
+    OSSL_PARAM_BLD *param_bld = OSSL_PARAM_BLD_new();
     if (!param_bld) {
       throw CryptoError("Failed to create parameter builder");
     }
 
-    BIGNUM* x_bn = BN_bin2bn(x_bytes.data(), x_bytes.size(), nullptr);
-    BIGNUM* y_bn = BN_bin2bn(y_bytes.data(), y_bytes.size(), nullptr);
+    BIGNUM *x_bn = BN_bin2bn(x_bytes.data(), x_bytes.size(), nullptr);
+    BIGNUM *y_bn = BN_bin2bn(y_bytes.data(), y_bytes.size(), nullptr);
 
     if (!x_bn || !y_bn) {
       OSSL_PARAM_BLD_free(param_bld);
-      if (x_bn) BN_free(x_bn);
-      if (y_bn) BN_free(y_bn);
+      if (x_bn)
+        BN_free(x_bn);
+      if (y_bn)
+        BN_free(y_bn);
       throw CryptoError("Failed to create BIGNUM from coordinates");
     }
 
@@ -212,8 +225,8 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
     OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_EC_PUB_X, x_bn);
     OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_EC_PUB_Y, y_bn);
 
-    OSSL_PARAM* params = OSSL_PARAM_BLD_to_param(param_bld);
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(nullptr, "EC", nullptr);
+    OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(param_bld);
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(nullptr, "EC", nullptr);
 
     bool success =
         ctx && EVP_PKEY_fromdata_init(ctx) > 0 &&
@@ -221,12 +234,14 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
 
     OSSL_PARAM_BLD_free(param_bld);
     OSSL_PARAM_free(params);
-    if (ctx) EVP_PKEY_CTX_free(ctx);
+    if (ctx)
+      EVP_PKEY_CTX_free(ctx);
     BN_free(x_bn);
     BN_free(y_bn);
 
     if (!success) {
-      if (pkey) EVP_PKEY_free(pkey);
+      if (pkey)
+        EVP_PKEY_free(pkey);
       throw CryptoError("Failed to create EC public key from JWK");
     }
 
@@ -237,7 +252,7 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
     }
 
     std::vector<uint8_t> der_bytes(der_len);
-    uint8_t* der_ptr = der_bytes.data();
+    uint8_t *der_ptr = der_bytes.data();
     i2d_PUBKEY(pkey, &der_ptr);
     EVP_PKEY_free(pkey);
 
@@ -251,27 +266,29 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
     auto n_bytes = base64UrlDecode(jwk["n"].get<std::string>());
     auto e_bytes = base64UrlDecode(jwk["e"].get<std::string>());
 
-    EVP_PKEY* pkey = nullptr;
-    OSSL_PARAM_BLD* param_bld = OSSL_PARAM_BLD_new();
+    EVP_PKEY *pkey = nullptr;
+    OSSL_PARAM_BLD *param_bld = OSSL_PARAM_BLD_new();
     if (!param_bld) {
       throw CryptoError("Failed to create parameter builder");
     }
 
-    BIGNUM* n_bn = BN_bin2bn(n_bytes.data(), n_bytes.size(), nullptr);
-    BIGNUM* e_bn = BN_bin2bn(e_bytes.data(), e_bytes.size(), nullptr);
+    BIGNUM *n_bn = BN_bin2bn(n_bytes.data(), n_bytes.size(), nullptr);
+    BIGNUM *e_bn = BN_bin2bn(e_bytes.data(), e_bytes.size(), nullptr);
 
     if (!n_bn || !e_bn) {
       OSSL_PARAM_BLD_free(param_bld);
-      if (n_bn) BN_free(n_bn);
-      if (e_bn) BN_free(e_bn);
+      if (n_bn)
+        BN_free(n_bn);
+      if (e_bn)
+        BN_free(e_bn);
       throw CryptoError("Failed to create BIGNUM from RSA parameters");
     }
 
     OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_RSA_N, n_bn);
     OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_RSA_E, e_bn);
 
-    OSSL_PARAM* params = OSSL_PARAM_BLD_to_param(param_bld);
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(nullptr, "RSA", nullptr);
+    OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(param_bld);
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(nullptr, "RSA", nullptr);
 
     bool success =
         ctx && EVP_PKEY_fromdata_init(ctx) > 0 &&
@@ -279,12 +296,14 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
 
     OSSL_PARAM_BLD_free(param_bld);
     OSSL_PARAM_free(params);
-    if (ctx) EVP_PKEY_CTX_free(ctx);
+    if (ctx)
+      EVP_PKEY_CTX_free(ctx);
     BN_free(n_bn);
     BN_free(e_bn);
 
     if (!success) {
-      if (pkey) EVP_PKEY_free(pkey);
+      if (pkey)
+        EVP_PKEY_free(pkey);
       throw CryptoError("Failed to create RSA public key from JWK");
     }
 
@@ -295,7 +314,7 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
     }
 
     std::vector<uint8_t> der_bytes(der_len);
-    uint8_t* der_ptr = der_bytes.data();
+    uint8_t *der_ptr = der_bytes.data();
     i2d_PUBKEY(pkey, &der_ptr);
     EVP_PKEY_free(pkey);
 
@@ -306,7 +325,7 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
 }
 #endif
 
-}  // anonymous namespace
+} // anonymous namespace
 
 std::vector<uint8_t> DpopProof::create_signing_input() const {
   // Use CWT implementation for creating DPoP signing input
@@ -315,14 +334,14 @@ std::vector<uint8_t> DpopProof::create_signing_input() const {
 }
 
 bool DpopProof::verify_signature(
-    const CryptographicAlgorithm& algorithm) const {
+    const CryptographicAlgorithm &algorithm) const {
   try {
     // Create the signing input using the same method as when the proof was
     // created
     auto signing_input = create_signing_input();
     // Verify the signature using the provided algorithm
     return algorithm.verify(signing_input, signature_);
-  } catch (const std::exception&) {
+  } catch (const std::exception &) {
     // If any exception occurs during verification, the signature is invalid
     return false;
   }
@@ -344,7 +363,7 @@ bool DpopProof::verify_signature() const {
     // For CWT format, we need the algorithm to be provided externally
     // as COSE_Key doesn't include the private key needed to create algorithm
     return false;
-  } catch (const std::exception&) {
+  } catch (const std::exception &) {
     return false;
   }
 }
@@ -382,7 +401,7 @@ std::string DpopProof::serialize_cwt() const {
                                               header_.cose_key.size())});
   }
 
-  unsigned char* prot_buf = nullptr;
+  unsigned char *prot_buf = nullptr;
   size_t prot_size = 0;
   cbor_serialize_alloc(protected_map, &prot_buf, &prot_size);
   cbor_decref(&protected_map);
@@ -403,7 +422,7 @@ std::string DpopProof::serialize_cwt() const {
   (void)cbor_array_push(
       cose_array, cbor_build_bytestring(signature_.data(), signature_.size()));
 
-  unsigned char* buffer = nullptr;
+  unsigned char *buffer = nullptr;
   size_t buffer_size = 0;
   size_t length = cbor_serialize_alloc(cose_array, &buffer, &buffer_size);
   cbor_decref(&cose_array);
@@ -470,12 +489,13 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   auto cose_bytes = base64UrlDecode(std::string(cwt_data));
 
   cbor_load_result result;
-  cbor_item_t* cose_array =
+  cbor_item_t *cose_array =
       cbor_load(cose_bytes.data(), cose_bytes.size(), &result);
 
   if (!cose_array || !cbor_isa_array(cose_array) ||
       cbor_array_size(cose_array) != 4) {
-    if (cose_array) cbor_decref(&cose_array);
+    if (cose_array)
+      cbor_decref(&cose_array);
     throw InvalidTokenFormatError{};
   }
 
@@ -486,7 +506,7 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   header.set_encoding(DpopEncoding::CWT);
 
   // Parse protected header
-  cbor_item_t* protected_bstr = cbor_array_get(cose_array, 0);
+  cbor_item_t *protected_bstr = cbor_array_get(cose_array, 0);
   if (!protected_bstr) {
     throw InvalidTokenFormatError{};
   }
@@ -494,12 +514,12 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
     size_t prot_len = cbor_bytestring_length(protected_bstr);
     if (prot_len > 0) {
       cbor_load_result prot_result;
-      cbor_item_t* prot_map_raw = cbor_load(
+      cbor_item_t *prot_map_raw = cbor_load(
           cbor_bytestring_handle(protected_bstr), prot_len, &prot_result);
       if (prot_map_raw && cbor_isa_map(prot_map_raw)) {
         CborItemPtr prot_map(prot_map_raw);
         size_t map_size = cbor_map_size(prot_map.get());
-        cbor_pair* pairs = cbor_map_handle(prot_map.get());
+        cbor_pair *pairs = cbor_map_handle(prot_map.get());
         if (!pairs) {
           throw InvalidTokenFormatError{};
         }
@@ -513,9 +533,9 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
             } else if (key == dpop_labels::COSE_KEY && pairs[i].value &&
                        cbor_isa_bytestring(pairs[i].value)) {
               size_t ck_len = cbor_bytestring_length(pairs[i].value);
-              header.cose_key.assign(
-                  cbor_bytestring_handle(pairs[i].value),
-                  cbor_bytestring_handle(pairs[i].value) + ck_len);
+              header.cose_key.assign(cbor_bytestring_handle(pairs[i].value),
+                                     cbor_bytestring_handle(pairs[i].value) +
+                                         ck_len);
             }
           }
         }
@@ -526,7 +546,7 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   }
 
   // Parse payload
-  cbor_item_t* payload_bstr = cbor_array_get(cose_array, 2);
+  cbor_item_t *payload_bstr = cbor_array_get(cose_array, 2);
   DpopPayload payload(0, "", "");
 
   if (!payload_bstr) {
@@ -535,46 +555,49 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   if (cbor_isa_bytestring(payload_bstr)) {
     size_t pay_len = cbor_bytestring_length(payload_bstr);
     cbor_load_result pay_result;
-    cbor_item_t* pay_map_raw =
+    cbor_item_t *pay_map_raw =
         cbor_load(cbor_bytestring_handle(payload_bstr), pay_len, &pay_result);
     if (pay_map_raw && cbor_isa_map(pay_map_raw)) {
       CborItemPtr pay_map(pay_map_raw);
       size_t map_size = cbor_map_size(pay_map.get());
-      cbor_pair* pairs = cbor_map_handle(pay_map.get());
+      cbor_pair *pairs = cbor_map_handle(pay_map.get());
       if (!pairs) {
         throw InvalidTokenFormatError{};
       }
       for (size_t i = 0; i < map_size; ++i) {
-        if (!pairs[i].key || !pairs[i].value) continue;
+        if (!pairs[i].key || !pairs[i].value)
+          continue;
         std::string key_str;
         if (cbor_isa_string(pairs[i].key)) {
           key_str = std::string(
-              reinterpret_cast<const char*>(cbor_string_handle(pairs[i].key)),
+              reinterpret_cast<const char *>(cbor_string_handle(pairs[i].key)),
               cbor_string_length(pairs[i].key));
         }
 
         if (key_str == "iat" && cbor_isa_uint(pairs[i].value)) {
           payload.iat = static_cast<int64_t>(cbor_get_uint64(pairs[i].value));
         } else if (key_str == "jti" && cbor_isa_string(pairs[i].value)) {
-          payload.jti = std::string(
-              reinterpret_cast<const char*>(cbor_string_handle(pairs[i].value)),
-              cbor_string_length(pairs[i].value));
+          payload.jti = std::string(reinterpret_cast<const char *>(
+                                        cbor_string_handle(pairs[i].value)),
+                                    cbor_string_length(pairs[i].value));
         } else if (key_str == "actx" && cbor_isa_map(pairs[i].value)) {
-          cbor_item_t* actx_map = pairs[i].value;
+          cbor_item_t *actx_map = pairs[i].value;
           size_t actx_size = cbor_map_size(actx_map);
-          cbor_pair* actx_pairs = cbor_map_handle(actx_map);
-          if (!actx_pairs) continue;
+          cbor_pair *actx_pairs = cbor_map_handle(actx_map);
+          if (!actx_pairs)
+            continue;
           for (size_t j = 0; j < actx_size; ++j) {
-            if (!actx_pairs[j].key || !actx_pairs[j].value) continue;
+            if (!actx_pairs[j].key || !actx_pairs[j].value)
+              continue;
             std::string actx_key;
             if (cbor_isa_string(actx_pairs[j].key)) {
-              actx_key = std::string(reinterpret_cast<const char*>(
+              actx_key = std::string(reinterpret_cast<const char *>(
                                          cbor_string_handle(actx_pairs[j].key)),
                                      cbor_string_length(actx_pairs[j].key));
             }
             if (actx_key == "type" && cbor_isa_string(actx_pairs[j].value)) {
               payload.actx.type =
-                  std::string(reinterpret_cast<const char*>(
+                  std::string(reinterpret_cast<const char *>(
                                   cbor_string_handle(actx_pairs[j].value)),
                               cbor_string_length(actx_pairs[j].value));
             } else if (actx_key == "action" &&
@@ -584,19 +607,19 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
             } else if (actx_key == "tns" &&
                        cbor_isa_string(actx_pairs[j].value)) {
               payload.actx.tns =
-                  std::string(reinterpret_cast<const char*>(
+                  std::string(reinterpret_cast<const char *>(
                                   cbor_string_handle(actx_pairs[j].value)),
                               cbor_string_length(actx_pairs[j].value));
             } else if (actx_key == "tn" &&
                        cbor_isa_string(actx_pairs[j].value)) {
               payload.actx.tn =
-                  std::string(reinterpret_cast<const char*>(
+                  std::string(reinterpret_cast<const char *>(
                                   cbor_string_handle(actx_pairs[j].value)),
                               cbor_string_length(actx_pairs[j].value));
             } else if (actx_key == "resource" &&
                        cbor_isa_string(actx_pairs[j].value)) {
               payload.actx.resource_uri =
-                  std::string(reinterpret_cast<const char*>(
+                  std::string(reinterpret_cast<const char *>(
                                   cbor_string_handle(actx_pairs[j].value)),
                               cbor_string_length(actx_pairs[j].value));
             }
@@ -609,7 +632,7 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   }
 
   // Get signature
-  cbor_item_t* sig_bstr = cbor_array_get(cose_array, 3);
+  cbor_item_t *sig_bstr = cbor_array_get(cose_array, 3);
   std::vector<uint8_t> signature;
   if (!sig_bstr) {
     throw InvalidTokenFormatError{};
@@ -627,14 +650,14 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
 #ifdef CATAPULT_ENABLE_JSON
 DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
   // Prevent DoS from oversized JWT input
-  constexpr size_t MAX_JWT_SIZE = 16384;  // 16KB reasonable limit
+  constexpr size_t MAX_JWT_SIZE = 16384; // 16KB reasonable limit
   if (jwt_data.size() > MAX_JWT_SIZE) {
     throw InvalidTokenFormatError{};
   }
 
   std::vector<std::string> parts;
   std::string current;
-  current.reserve(jwt_data.size() / 3);  // Reasonable estimate
+  current.reserve(jwt_data.size() / 3); // Reasonable estimate
 
   for (char c : jwt_data) {
     if (c == '.') {
@@ -662,7 +685,7 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
         json::parse(std::string(header_bytes.begin(), header_bytes.end()));
     payload_json =
         json::parse(std::string(payload_bytes.begin(), payload_bytes.end()));
-  } catch (const json::parse_error&) {
+  } catch (const json::parse_error &) {
     throw InvalidTokenFormatError{};
   }
 
@@ -710,13 +733,13 @@ std::string generate_jti() {
   return base64UrlEncode(bytes);
 }
 
-}  // namespace moqt_dpop
+} // namespace moqt_dpop
 
 // DpopProofValidator implementation
 
 bool DpopProofValidator::validate_proof(
-    const DpopProof& proof, int expected_action, std::string_view expected_uri,
-    const std::string& expected_public_key_thumbprint) {
+    const DpopProof &proof, int expected_action, std::string_view expected_uri,
+    const std::string &expected_public_key_thumbprint) {
   // Basic structure validation
   if (!proof.is_valid(settings_)) {
     return false;
@@ -735,7 +758,7 @@ bool DpopProofValidator::validate_proof(
 
   // Check JTI if enabled and present (thread-safe)
   if (settings_.get_jti_processing() && proof.get_payload().jti.has_value()) {
-    const auto& jti = proof.get_payload().jti.value();
+    const auto &jti = proof.get_payload().jti.value();
     auto now = std::chrono::system_clock::now();
 
     std::lock_guard<std::mutex> lock(jti_mutex_);
@@ -746,7 +769,7 @@ bool DpopProofValidator::validate_proof(
       // JTI already exists - check if within replay window
       auto diff = now - it->second;
       if (diff < settings_.get_effective_window()) {
-        return false;  // Replay attack detected
+        return false; // Replay attack detected
       }
       // Update timestamp for expired entry being reused
       it->second = now;
@@ -781,7 +804,7 @@ bool DpopProofValidator::validate_proof(
       if (actual_thumbprint != expected_public_key_thumbprint) {
         return false;
       }
-    } catch (const std::exception&) {
+    } catch (const std::exception &) {
       return false;
     }
   }
@@ -815,13 +838,13 @@ DpopKeyPair::DpopKeyPair(std::unique_ptr<CryptographicAlgorithm> alg)
   int64_t alg_id = algorithm_->algorithmId();
 
   if (alg_id == ALG_ES256) {
-    auto* es256_alg = dynamic_cast<Es256Algorithm*>(algorithm_.get());
+    auto *es256_alg = dynamic_cast<Es256Algorithm *>(algorithm_.get());
     if (!es256_alg) {
       throw CryptoError("Invalid ES256 algorithm instance");
     }
     public_key_der_ = es256_alg->getPublicKey();
   } else if (alg_id == ALG_PS256) {
-    auto* ps256_alg = dynamic_cast<Ps256Algorithm*>(algorithm_.get());
+    auto *ps256_alg = dynamic_cast<Ps256Algorithm *>(algorithm_.get());
     if (!ps256_alg) {
       throw CryptoError("Invalid PS256 algorithm instance");
     }
@@ -845,15 +868,15 @@ std::string DpopKeyPair::get_algorithm_name() const {
   int64_t alg_id = algorithm_->algorithmId();
 
   switch (alg_id) {
-    case ALG_ES256:
-      return "ES256";
-    case ALG_PS256:
-      return "PS256";
-    case ALG_HMAC256_256:
-      return "HS256";
-    default:
-      return "Unknown";
+  case ALG_ES256:
+    return "ES256";
+  case ALG_PS256:
+    return "PS256";
+  case ALG_HMAC256_256:
+    return "HS256";
+  default:
+    return "Unknown";
   }
 }
 
-}  // namespace catapult
+} // namespace catapult

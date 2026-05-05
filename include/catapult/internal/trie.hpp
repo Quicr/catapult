@@ -18,14 +18,13 @@
 namespace catapult {
 
 // Forward declarations for the pool types
-template <typename T, size_t PoolSize>
-class LockFreeMemoryPool;
+template <typename T, size_t PoolSize> class LockFreeMemoryPool;
 
 /**
  * @brief Pool-aware deleter for TrieNode unique_ptr
  */
 struct TrieNodePoolDeleter {
-  void operator()(struct TrieNode* ptr) const;
+  void operator()(struct TrieNode *ptr) const;
 };
 
 /**
@@ -41,8 +40,8 @@ struct TrieNode {
   // Use TrieNodePtr for internal storage to preserve custom deleter
   std::array<TrieNodePtr, BYTE_SIZE> children;
 
-  bool isTerminal = false;  ///< Terminal node flag
-  std::string value;        ///< Stored value
+  bool isTerminal = false; ///< Terminal node flag
+  std::string value;       ///< Stored value
 
   /**
    * @brief Get child node for character
@@ -52,7 +51,7 @@ struct TrieNode {
    * node. The returned pointer is only valid as long as this node exists and
    *         the child is not removed.
    */
-  TrieNode* getChild(char c) const noexcept {
+  TrieNode *getChild(char c) const noexcept {
     return children[static_cast<unsigned char>(c)].get();
   }
 
@@ -70,8 +69,9 @@ struct TrieNode {
    * @brief Check if node has any children (optimized for full byte array)
    */
   bool hasChildren() const noexcept {
-    for (const auto& child : children) {
-      if (child) return true;
+    for (const auto &child : children) {
+      if (child)
+        return true;
     }
     return false;
   }
@@ -81,7 +81,7 @@ struct TrieNode {
    */
   std::vector<char> getChildChars() const {
     std::vector<char> chars;
-    chars.reserve(32);  // Reserve space for common case
+    chars.reserve(32); // Reserve space for common case
 
     for (size_t i = 0; i < BYTE_SIZE; ++i) {
       if (children[i]) {
@@ -103,9 +103,9 @@ using TrieNodePtr = TrieNode::TrieNodePtr;
 /**
  * @brief Get shared MemoryPool for TrieNode allocations
  */
-inline LockFreeMemoryPool<TrieNode, 1024>& getTrieNodePool() {
+inline LockFreeMemoryPool<TrieNode, 1024> &getTrieNodePool() {
   static LockFreeMemoryPool<TrieNode, 1024>
-      pool;  // RAII - properly destroyed at program exit
+      pool; // RAII - properly destroyed at program exit
   return pool;
 }
 
@@ -119,9 +119,9 @@ TrieNodePtr createTrieNode();
  */
 
 class PrefixTrie {
- public:
-  TrieNodePtr root;  ///< Root node
-  size_t size = 0;   ///< Number of patterns stored
+public:
+  TrieNodePtr root; ///< Root node
+  size_t size = 0;  ///< Number of patterns stored
 
   /**
    * @brief Construct an empty prefix trie with optional capacity hint
@@ -139,17 +139,17 @@ class PrefixTrie {
    * @brief Batch insert multiple patterns for better performance
    * @param patterns Vector of pattern-value pairs
    */
-  void insertBatch(
-      const std::vector<std::pair<std::string_view, std::string_view>>&
-          patterns);
+  void
+  insertBatch(const std::vector<std::pair<std::string_view, std::string_view>>
+                  &patterns);
 
   /**
    * @brief Optimized batch search for multiple text strings
    * @param texts Vector of texts to search against
    * @return Vector of results, each containing matches for corresponding text
    */
-  std::vector<std::vector<std::string>> searchPrefixBatch(
-      const std::vector<std::string_view>& texts) const;
+  std::vector<std::vector<std::string>>
+  searchPrefixBatch(const std::vector<std::string_view> &texts) const;
 
   /**
    * @brief Search for patterns that are prefixes of the given text
@@ -183,7 +183,7 @@ class PrefixTrie {
    * @param patterns Vector of patterns to remove
    * @return Number of patterns successfully removed
    */
-  size_t removeBatch(const std::vector<std::string_view>& patterns);
+  size_t removeBatch(const std::vector<std::string_view> &patterns);
 
   /**
    * @brief Get memory usage statistics
@@ -195,26 +195,26 @@ class PrefixTrie {
    */
   void clear() noexcept;
 
- protected:
+protected:
   virtual TrieNodePtr createNode() const;
 
- private:
+private:
   size_t expected_capacity_;
 
-  void collectPatterns(const TrieNode* node, const std::string& prefix,
-                       std::vector<std::string>& patterns) const;
-  bool removeRecursive(TrieNode* node, const std::string& pattern,
+  void collectPatterns(const TrieNode *node, const std::string &prefix,
+                       std::vector<std::string> &patterns) const;
+  bool removeRecursive(TrieNode *node, const std::string &pattern,
                        size_t index);
-  size_t calculateNodeMemory(const TrieNode* node) const noexcept;
+  size_t calculateNodeMemory(const TrieNode *node) const noexcept;
 };
 
 /**
  * @brief Trie for efficient suffix matching
  */
 class SuffixTrie {
- public:
-  TrieNodePtr root;  ///< Root node
-  size_t size = 0;   ///< Number of patterns stored
+public:
+  TrieNodePtr root; ///< Root node
+  size_t size = 0;  ///< Number of patterns stored
 
   /**
    * @brief Construct an empty suffix trie with optional capacity hint
@@ -232,9 +232,9 @@ class SuffixTrie {
    * @brief Batch insert multiple patterns for better performance
    * @param patterns Vector of pattern-value pairs
    */
-  void insertBatch(
-      const std::vector<std::pair<std::string_view, std::string_view>>&
-          patterns);
+  void
+  insertBatch(const std::vector<std::pair<std::string_view, std::string_view>>
+                  &patterns);
 
   /**
    * @brief Search for patterns that are suffixes of the given text
@@ -248,8 +248,8 @@ class SuffixTrie {
    * @param texts Vector of texts to search against
    * @return Vector of results, each containing matches for corresponding text
    */
-  std::vector<std::vector<std::string>> searchSuffixBatch(
-      const std::vector<std::string_view>& texts) const;
+  std::vector<std::vector<std::string>>
+  searchSuffixBatch(const std::vector<std::string_view> &texts) const;
 
   /**
    * @brief Check if any stored pattern is a suffix of the given text
@@ -271,16 +271,16 @@ class SuffixTrie {
    */
   bool remove(std::string_view pattern);
 
- private:
+private:
   size_t expected_capacity_;
 
   TrieNodePtr createNode() const;
 
   std::string reverse(std::string_view str) const;
-  void collectPatterns(const TrieNode* node, const std::string& prefix,
-                       std::vector<std::string>& patterns) const;
-  bool removeRecursive(TrieNode* node, const std::string& pattern,
+  void collectPatterns(const TrieNode *node, const std::string &prefix,
+                       std::vector<std::string> &patterns) const;
+  bool removeRecursive(TrieNode *node, const std::string &pattern,
                        size_t index);
 };
 
-}  // namespace catapult
+} // namespace catapult

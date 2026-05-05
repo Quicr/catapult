@@ -49,52 +49,52 @@ enum class CatErrorCode : uint32_t {
  */
 constexpr std::string_view errorCodeToString(CatErrorCode code) noexcept {
   switch (code) {
-    case CatErrorCode::SUCCESS:
-      return "Success";
-    case CatErrorCode::INVALID_TOKEN_FORMAT:
-      return "Invalid token format";
-    case CatErrorCode::INVALID_CBOR:
-      return "Invalid CBOR encoding";
-    case CatErrorCode::INVALID_BASE64:
-      return "Invalid base64 encoding";
-    case CatErrorCode::SIGNATURE_VERIFICATION_FAILED:
-      return "Signature verification failed";
-    case CatErrorCode::TOKEN_EXPIRED:
-      return "Token has expired";
-    case CatErrorCode::TOKEN_NOT_YET_VALID:
-      return "Token is not yet valid";
-    case CatErrorCode::INVALID_AUDIENCE:
-      return "Invalid audience";
-    case CatErrorCode::INVALID_ISSUER:
-      return "Invalid issuer";
-    case CatErrorCode::MISSING_REQUIRED_CLAIM:
-      return "Missing required claim";
-    case CatErrorCode::INVALID_CLAIM_VALUE:
-      return "Invalid claim value";
-    case CatErrorCode::UNSUPPORTED_ALGORITHM:
-      return "Unsupported algorithm";
-    case CatErrorCode::CRYPTO_OPERATION_FAILED:
-      return "Cryptographic operation failed";
-    case CatErrorCode::GEOGRAPHIC_VALIDATION_FAILED:
-      return "Geographic validation failed";
-    case CatErrorCode::REPLAY_ATTACK_DETECTED:
-      return "Replay attack detected";
-    case CatErrorCode::USAGE_LIMIT_EXCEEDED:
-      return "Usage limit exceeded";
-    case CatErrorCode::OS_ERROR:
-      return "Operating system error";
-    case CatErrorCode::MEMORY_ERROR:
-      return "Memory allocation error";
-    case CatErrorCode::IO_ERROR:
-      return "Input/output error";
-    case CatErrorCode::PERMISSION_ERROR:
-      return "Permission denied";
-    case CatErrorCode::RESOURCE_EXHAUSTED:
-      return "System resource exhausted";
-    case CatErrorCode::SYSTEM_CALL_FAILED:
-      return "System call failed";
-    default:
-      return "Unknown error";
+  case CatErrorCode::SUCCESS:
+    return "Success";
+  case CatErrorCode::INVALID_TOKEN_FORMAT:
+    return "Invalid token format";
+  case CatErrorCode::INVALID_CBOR:
+    return "Invalid CBOR encoding";
+  case CatErrorCode::INVALID_BASE64:
+    return "Invalid base64 encoding";
+  case CatErrorCode::SIGNATURE_VERIFICATION_FAILED:
+    return "Signature verification failed";
+  case CatErrorCode::TOKEN_EXPIRED:
+    return "Token has expired";
+  case CatErrorCode::TOKEN_NOT_YET_VALID:
+    return "Token is not yet valid";
+  case CatErrorCode::INVALID_AUDIENCE:
+    return "Invalid audience";
+  case CatErrorCode::INVALID_ISSUER:
+    return "Invalid issuer";
+  case CatErrorCode::MISSING_REQUIRED_CLAIM:
+    return "Missing required claim";
+  case CatErrorCode::INVALID_CLAIM_VALUE:
+    return "Invalid claim value";
+  case CatErrorCode::UNSUPPORTED_ALGORITHM:
+    return "Unsupported algorithm";
+  case CatErrorCode::CRYPTO_OPERATION_FAILED:
+    return "Cryptographic operation failed";
+  case CatErrorCode::GEOGRAPHIC_VALIDATION_FAILED:
+    return "Geographic validation failed";
+  case CatErrorCode::REPLAY_ATTACK_DETECTED:
+    return "Replay attack detected";
+  case CatErrorCode::USAGE_LIMIT_EXCEEDED:
+    return "Usage limit exceeded";
+  case CatErrorCode::OS_ERROR:
+    return "Operating system error";
+  case CatErrorCode::MEMORY_ERROR:
+    return "Memory allocation error";
+  case CatErrorCode::IO_ERROR:
+    return "Input/output error";
+  case CatErrorCode::PERMISSION_ERROR:
+    return "Permission denied";
+  case CatErrorCode::RESOURCE_EXHAUSTED:
+    return "System resource exhausted";
+  case CatErrorCode::SYSTEM_CALL_FAILED:
+    return "System call failed";
+  default:
+    return "Unknown error";
   }
 }
 
@@ -102,7 +102,7 @@ constexpr std::string_view errorCodeToString(CatErrorCode code) noexcept {
  * @brief Base exception class for all CAT-related errors
  */
 class CatError : public std::runtime_error {
- public:
+public:
   /**
    * @brief Construct a CAT error with message and error code
    * @param code Error code
@@ -120,7 +120,7 @@ class CatError : public std::runtime_error {
    */
   [[nodiscard]] CatErrorCode errorCode() const noexcept { return error_code_; }
 
- private:
+private:
   CatErrorCode error_code_;
 };
 
@@ -128,31 +128,31 @@ class CatError : public std::runtime_error {
  * @brief Exception for invalid token format
  */
 class InvalidTokenFormatError : public CatError {
- public:
+public:
   InvalidTokenFormatError() : CatError(CatErrorCode::INVALID_TOKEN_FORMAT) {}
 };
 
 class InvalidCborError : public CatError {
- public:
+public:
   explicit InvalidCborError(std::string_view details)
-      : CatError(
-            CatErrorCode::INVALID_CBOR,
-            std::string("Invalid CBOR encoding: ") + std::string(details)) {}
+      : CatError(CatErrorCode::INVALID_CBOR,
+                 std::string("Invalid CBOR encoding: ") +
+                     std::string(details)) {}
 };
 
 class InvalidBase64Error : public CatError {
- public:
+public:
   explicit InvalidBase64Error(std::string_view details)
-      : CatError(
-            CatErrorCode::INVALID_BASE64,
-            std::string("Invalid base64 encoding: ") + std::string(details)) {}
+      : CatError(CatErrorCode::INVALID_BASE64,
+                 std::string("Invalid base64 encoding: ") +
+                     std::string(details)) {}
 };
 
 /**
  * @brief Exception for signature verification failures
  */
 class SignatureVerificationError : public CatError {
- public:
+public:
   SignatureVerificationError()
       : CatError(CatErrorCode::SIGNATURE_VERIFICATION_FAILED) {}
 };
@@ -161,27 +161,27 @@ class SignatureVerificationError : public CatError {
  * @brief Exception for expired tokens
  */
 class TokenExpiredError : public CatError {
- public:
+public:
   TokenExpiredError() : CatError(CatErrorCode::TOKEN_EXPIRED) {}
 };
 
 class TokenNotYetValidError : public CatError {
- public:
+public:
   TokenNotYetValidError() : CatError(CatErrorCode::TOKEN_NOT_YET_VALID) {}
 };
 
 class InvalidAudienceError : public CatError {
- public:
+public:
   InvalidAudienceError() : CatError(CatErrorCode::INVALID_AUDIENCE) {}
 };
 
 class InvalidIssuerError : public CatError {
- public:
+public:
   InvalidIssuerError() : CatError(CatErrorCode::INVALID_ISSUER) {}
 };
 
 class MissingRequiredClaimError : public CatError {
- public:
+public:
   explicit MissingRequiredClaimError(std::string_view claim)
       : CatError(CatErrorCode::MISSING_REQUIRED_CLAIM,
                  std::string("Missing required claim: ") + std::string(claim)) {
@@ -189,25 +189,25 @@ class MissingRequiredClaimError : public CatError {
 };
 
 class InvalidClaimValueError : public CatError {
- public:
+public:
   explicit InvalidClaimValueError(std::string_view details)
       : CatError(CatErrorCode::INVALID_CLAIM_VALUE,
                  std::string("Invalid claim value: ") + std::string(details)) {}
 };
 
 class UnsupportedAlgorithmError : public CatError {
- public:
+public:
   explicit UnsupportedAlgorithmError(std::string_view algorithm)
-      : CatError(
-            CatErrorCode::UNSUPPORTED_ALGORITHM,
-            std::string("Unsupported algorithm: ") + std::string(algorithm)) {}
+      : CatError(CatErrorCode::UNSUPPORTED_ALGORITHM,
+                 std::string("Unsupported algorithm: ") +
+                     std::string(algorithm)) {}
 };
 
 /**
  * @brief Exception for cryptographic operation failures
  */
 class CryptoError : public CatError {
- public:
+public:
   explicit CryptoError(std::string_view details)
       : CatError(CatErrorCode::CRYPTO_OPERATION_FAILED,
                  std::string("Cryptographic operation failed: ") +
@@ -215,7 +215,7 @@ class CryptoError : public CatError {
 };
 
 class GeographicValidationError : public CatError {
- public:
+public:
   explicit GeographicValidationError(std::string_view details)
       : CatError(CatErrorCode::GEOGRAPHIC_VALIDATION_FAILED,
                  std::string("Geographic validation failed: ") +
@@ -223,12 +223,12 @@ class GeographicValidationError : public CatError {
 };
 
 class ReplayAttackError : public CatError {
- public:
+public:
   ReplayAttackError() : CatError(CatErrorCode::REPLAY_ATTACK_DETECTED) {}
 };
 
 class UsageLimitExceededError : public CatError {
- public:
+public:
   UsageLimitExceededError() : CatError(CatErrorCode::USAGE_LIMIT_EXCEEDED) {}
 };
 
@@ -236,29 +236,29 @@ class UsageLimitExceededError : public CatError {
  * @brief Exception for OS-related errors
  */
 class OsError : public CatError {
- public:
+public:
   explicit OsError(std::string_view details)
-      : CatError(
-            CatErrorCode::OS_ERROR,
-            std::string("Operating system error: ") + std::string(details)) {}
+      : CatError(CatErrorCode::OS_ERROR,
+                 std::string("Operating system error: ") +
+                     std::string(details)) {}
 };
 
 /**
  * @brief Exception for memory allocation errors
  */
 class MemoryError : public CatError {
- public:
+public:
   explicit MemoryError(std::string_view details)
-      : CatError(
-            CatErrorCode::MEMORY_ERROR,
-            std::string("Memory allocation error: ") + std::string(details)) {}
+      : CatError(CatErrorCode::MEMORY_ERROR,
+                 std::string("Memory allocation error: ") +
+                     std::string(details)) {}
 };
 
 /**
  * @brief Exception for I/O errors
  */
 class IoError : public CatError {
- public:
+public:
   explicit IoError(std::string_view details)
       : CatError(CatErrorCode::IO_ERROR,
                  std::string("Input/output error: ") + std::string(details)) {}
@@ -268,7 +268,7 @@ class IoError : public CatError {
  * @brief Exception for permission errors
  */
 class PermissionError : public CatError {
- public:
+public:
   explicit PermissionError(std::string_view details)
       : CatError(CatErrorCode::PERMISSION_ERROR,
                  std::string("Permission denied: ") + std::string(details)) {}
@@ -278,7 +278,7 @@ class PermissionError : public CatError {
  * @brief Exception for resource exhaustion
  */
 class ResourceExhaustedError : public CatError {
- public:
+public:
   explicit ResourceExhaustedError(std::string_view details)
       : CatError(CatErrorCode::RESOURCE_EXHAUSTED,
                  std::string("System resource exhausted: ") +
@@ -289,7 +289,7 @@ class ResourceExhaustedError : public CatError {
  * @brief Exception for system call failures
  */
 class SystemCallError : public CatError {
- public:
+public:
   explicit SystemCallError(std::string_view details)
       : CatError(CatErrorCode::SYSTEM_CALL_FAILED,
                  std::string("System call failed: ") + std::string(details)) {}
@@ -299,14 +299,13 @@ class SystemCallError : public CatError {
  * @brief Result type for better error handling without exceptions
  * Inspired by Rust's Result and C++23's std::expected
  */
-template <typename T, typename E = CatError>
-class Result {
- public:
+template <typename T, typename E = CatError> class Result {
+public:
   // Constructors
-  Result(const T& value) : data_(value) {}
-  Result(T&& value) : data_(std::move(value)) {}
-  Result(const E& error) : data_(error) {}
-  Result(E&& error) : data_(std::move(error)) {}
+  Result(const T &value) : data_(value) {}
+  Result(T &&value) : data_(std::move(value)) {}
+  Result(const E &error) : data_(error) {}
+  Result(E &&error) : data_(std::move(error)) {}
 
   // Static factory methods
   static Result success(T value) { return Result(std::move(value)); }
@@ -318,21 +317,21 @@ class Result {
   explicit operator bool() const noexcept { return isSuccess(); }
 
   // Value access (throws if error)
-  const T& value() const& {
+  const T &value() const & {
     if (isError()) {
       throw std::get<E>(data_);
     }
     return std::get<T>(data_);
   }
 
-  T& value() & {
+  T &value() & {
     if (isError()) {
       throw std::get<E>(data_);
     }
     return std::get<T>(data_);
   }
 
-  T&& value() && {
+  T &&value() && {
     if (isError()) {
       throw std::get<E>(data_);
     }
@@ -340,17 +339,17 @@ class Result {
   }
 
   // Safe value access
-  const T& valueOr(const T& defaultValue) const& noexcept {
+  const T &valueOr(const T &defaultValue) const & noexcept {
     return isSuccess() ? std::get<T>(data_) : defaultValue;
   }
 
-  T valueOr(T&& defaultValue) && noexcept {
+  T valueOr(T &&defaultValue) && noexcept {
     return isSuccess() ? std::move(std::get<T>(data_))
                        : std::move(defaultValue);
   }
 
   // Error access
-  const E& error() const& {
+  const E &error() const & {
     if (isSuccess()) {
       throw std::logic_error("Accessing error on successful result");
     }
@@ -359,7 +358,7 @@ class Result {
 
   // Transform operations
   template <typename F>
-  auto map(F&& func) -> Result<decltype(func(std::declval<T>())), E> {
+  auto map(F &&func) -> Result<decltype(func(std::declval<T>())), E> {
     if (isSuccess()) {
       return Result<decltype(func(std::declval<T>())), E>::success(
           func(std::get<T>(data_)));
@@ -369,22 +368,21 @@ class Result {
   }
 
   template <typename F>
-  auto flatMap(F&& func) -> decltype(func(std::declval<T>())) {
+  auto flatMap(F &&func) -> decltype(func(std::declval<T>())) {
     if (isSuccess()) {
       return func(std::get<T>(data_));
     }
     return decltype(func(std::declval<T>()))::error(std::get<E>(data_));
   }
 
- private:
+private:
   std::variant<T, E> data_;
 };
 
 /**
  * @brief Convenience type aliases for common Result patterns
  */
-template <typename T>
-using CatResult = Result<T, CatError>;
+template <typename T> using CatResult = Result<T, CatError>;
 
 using VoidResult = CatResult<std::monostate>;
 
@@ -396,7 +394,7 @@ inline VoidResult success() { return VoidResult::success(std::monostate{}); }
 /**
  * @brief Helper function to throw appropriate OS exception based on errno
  */
-inline void throwOsError(const std::string& operation, int error_code = errno) {
+inline void throwOsError(const std::string &operation, int error_code = errno) {
 #ifdef _WIN32
   std::string error_msg;
   char buffer[256];
@@ -410,32 +408,32 @@ inline void throwOsError(const std::string& operation, int error_code = errno) {
 #endif
 
   switch (error_code) {
-    case EACCES:
+  case EACCES:
 #ifndef _WIN32
-    case EPERM:
+  case EPERM:
 #endif
-      throw PermissionError(operation + ": " + error_msg);
-    case ENOMEM:
-      throw MemoryError(operation + ": " + error_msg);
-    case EMFILE:
+    throw PermissionError(operation + ": " + error_msg);
+  case ENOMEM:
+    throw MemoryError(operation + ": " + error_msg);
+  case EMFILE:
 #ifndef _WIN32
-    case ENFILE:
+  case ENFILE:
 #endif
-    case ENOSPC:
+  case ENOSPC:
 #ifdef EDQUOT
-    case EDQUOT:
+  case EDQUOT:
 #endif
-      throw ResourceExhaustedError(operation + ": " + error_msg);
-    case EIO:
-    case ENOENT:
+    throw ResourceExhaustedError(operation + ": " + error_msg);
+  case EIO:
+  case ENOENT:
 #ifndef _WIN32
-    case EISDIR:
-    case ENOTDIR:
+  case EISDIR:
+  case ENOTDIR:
 #endif
-      throw IoError(operation + ": " + error_msg);
-    default:
-      throw SystemCallError(operation + ": " + error_msg);
+    throw IoError(operation + ": " + error_msg);
+  default:
+    throw SystemCallError(operation + ": " + error_msg);
   }
 }
 
-}  // namespace catapult
+} // namespace catapult

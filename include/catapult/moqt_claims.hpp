@@ -30,9 +30,9 @@ namespace catapult {
  * @brief MOQT claim identifiers according to the specification
  * Using high numbers (65000+) to avoid conflicts with existing CBOR tags
  */
-constexpr int64_t CLAIM_MOQT = 65000;  ///< MOQT claim (was TBD_MOQT in spec)
+constexpr int64_t CLAIM_MOQT = 65000; ///< MOQT claim (was TBD_MOQT in spec)
 constexpr int64_t CLAIM_MOQT_REVAL =
-    65001;  ///< MOQT revalidation claim (was TBD_MOQT_REVAL in spec)
+    65001; ///< MOQT revalidation claim (was TBD_MOQT_REVAL in spec)
 
 /**
  * @brief MOQT action identifiers per draft-ietf-moq-c4m
@@ -40,12 +40,12 @@ constexpr int64_t CLAIM_MOQT_REVAL =
 namespace moqt_actions {
 constexpr int CLIENT_SETUP = 0;
 constexpr int SERVER_SETUP = 1;
-constexpr int PUBLISH_NAMESPACE = 2;  ///< Per spec naming
-constexpr int ANNOUNCE = 2;           ///< Alias for backward compatibility
+constexpr int PUBLISH_NAMESPACE = 2; ///< Per spec naming
+constexpr int ANNOUNCE = 2;          ///< Alias for backward compatibility
 constexpr int SUBSCRIBE_NAMESPACE = 3;
 constexpr int SUBSCRIBE = 4;
-constexpr int REQUEST_UPDATE = 5;    ///< Per spec naming
-constexpr int SUBSCRIBE_UPDATE = 5;  ///< Alias for backward compatibility
+constexpr int REQUEST_UPDATE = 5;   ///< Per spec naming
+constexpr int SUBSCRIBE_UPDATE = 5; ///< Alias for backward compatibility
 constexpr int PUBLISH = 6;
 constexpr int FETCH = 7;
 constexpr int TRACK_STATUS = 8;
@@ -56,29 +56,29 @@ constexpr bool is_valid_action(int action) noexcept {
 
 constexpr std::string_view action_name(int action) noexcept {
   switch (action) {
-    case CLIENT_SETUP:
-      return "CLIENT_SETUP";
-    case SERVER_SETUP:
-      return "SERVER_SETUP";
-    case PUBLISH_NAMESPACE:
-      return "PUBLISH_NAMESPACE";
-    case SUBSCRIBE_NAMESPACE:
-      return "SUBSCRIBE_NAMESPACE";
-    case SUBSCRIBE:
-      return "SUBSCRIBE";
-    case REQUEST_UPDATE:
-      return "REQUEST_UPDATE";
-    case PUBLISH:
-      return "PUBLISH";
-    case FETCH:
-      return "FETCH";
-    case TRACK_STATUS:
-      return "TRACK_STATUS";
-    default:
-      return "UNKNOWN";
+  case CLIENT_SETUP:
+    return "CLIENT_SETUP";
+  case SERVER_SETUP:
+    return "SERVER_SETUP";
+  case PUBLISH_NAMESPACE:
+    return "PUBLISH_NAMESPACE";
+  case SUBSCRIBE_NAMESPACE:
+    return "SUBSCRIBE_NAMESPACE";
+  case SUBSCRIBE:
+    return "SUBSCRIBE";
+  case REQUEST_UPDATE:
+    return "REQUEST_UPDATE";
+  case PUBLISH:
+    return "PUBLISH";
+  case FETCH:
+    return "FETCH";
+  case TRACK_STATUS:
+    return "TRACK_STATUS";
+  default:
+    return "UNKNOWN";
   }
 }
-}  // namespace moqt_actions
+} // namespace moqt_actions
 
 /**
  * @brief MOQT action type concept for compile-time validation
@@ -94,17 +94,17 @@ concept MoqtActionType = std::integral<T> && requires(T action) {
  * @brief Binary match types according to CTA-5007-B 4.6.1
  */
 enum class BinaryMatchType : int {
-  EXACT = 0,    ///< Exact match
-  PREFIX = 1,   ///< Prefix match
-  SUFFIX = 2,   ///< Suffix match
-  CONTAINS = 3  ///< Contains match
+  EXACT = 0,   ///< Exact match
+  PREFIX = 1,  ///< Prefix match
+  SUFFIX = 2,  ///< Suffix match
+  CONTAINS = 3 ///< Contains match
 };
 
 /**
  * @brief Binary match object for namespace and track matching
  */
 class MoqtBinaryMatch {
- public:
+public:
   BinaryMatchType match_type;
   std::vector<uint8_t> pattern;
 
@@ -129,7 +129,7 @@ class MoqtBinaryMatch {
     return MoqtBinaryMatch{BinaryMatchType::CONTAINS, pattern};
   }
 
- private:
+private:
   /**
    * @brief Default constructor for empty match (matches all)
    */
@@ -151,7 +151,7 @@ class MoqtBinaryMatch {
                            [](char c) { return static_cast<uint8_t>(c); });
   }
 
- public:
+public:
   /**
    * @brief Test if this match applies to the given binary data
    */
@@ -183,7 +183,7 @@ class MoqtBinaryMatch {
                            [](uint8_t b) { return static_cast<char>(b); });
     return result;
   }
-};  // class MoqtBinaryMatch
+}; // class MoqtBinaryMatch
 
 /**
  * @brief MOQT action scope representing one scope entry in the moqt claim
@@ -191,7 +191,7 @@ class MoqtBinaryMatch {
 class MoqtActionScope {
   friend class MoqtClaims;
 
- private:
+private:
   /**
    * @brief Default constructor
    */
@@ -202,14 +202,14 @@ class MoqtActionScope {
    */
   template <std::ranges::range ActionRange>
     requires MoqtActionType<std::ranges::range_value_t<ActionRange>>
-  MoqtActionScope(const ActionRange& action_list, MoqtBinaryMatch ns_match,
+  MoqtActionScope(const ActionRange &action_list, MoqtBinaryMatch ns_match,
                   MoqtBinaryMatch tr_match)
       : namespace_match(std::move(ns_match)), track_match(std::move(tr_match)) {
     auto action_copy = action_list;
     if constexpr (std::ranges::sized_range<ActionRange>) {
       actions.reserve(std::ranges::size(action_copy));
     }
-    for (const auto& action : action_copy) {
+    for (const auto &action : action_copy) {
       if (!moqt_actions::is_valid_action(action)) {
         throw InvalidClaimValueError("Invalid MOQT action: " +
                                      std::to_string(action));
@@ -218,10 +218,10 @@ class MoqtActionScope {
     }
   }
 
- public:
-  std::vector<int> actions;         ///< Allowed MOQT actions
-  MoqtBinaryMatch namespace_match;  ///< Namespace match pattern
-  MoqtBinaryMatch track_match;      ///< Track match pattern
+public:
+  std::vector<int> actions;        ///< Allowed MOQT actions
+  MoqtBinaryMatch namespace_match; ///< Namespace match pattern
+  MoqtBinaryMatch track_match;     ///< Track match pattern
 
   /**
    * @brief Factory method for creating validated scope
@@ -229,7 +229,7 @@ class MoqtActionScope {
   template <std::ranges::range ActionRange>
     requires std::ranges::range<ActionRange> &&
              MoqtActionType<std::ranges::range_value_t<ActionRange>>
-  static MoqtActionScope create(const ActionRange& action_list,
+  static MoqtActionScope create(const ActionRange &action_list,
                                 MoqtBinaryMatch ns_match,
                                 MoqtBinaryMatch tr_match) {
     return MoqtActionScope(action_list, std::move(ns_match),
@@ -280,19 +280,17 @@ class MoqtActionScope {
 /**
  * @brief Compile-time action set for high-performance authorization
  */
-template <int... Actions>
-class CompileTimeActionSet {
+template <int... Actions> class CompileTimeActionSet {
   static constexpr std::array actions{Actions...};
 
   static_assert((moqt_actions::is_valid_action(Actions) && ...),
                 "All actions must be valid MOQT actions");
 
- public:
+public:
   /**
    * @brief Check if the set contains the given action at compile time
    */
-  template <int Action>
-  static consteval bool contains() noexcept {
+  template <int Action> static consteval bool contains() noexcept {
     return ((Action == Actions) || ...);
   }
 
@@ -339,13 +337,13 @@ constexpr auto full_access = CompileTimeActionSet<
 constexpr auto read_only =
     CompileTimeActionSet<moqt_actions::SUBSCRIBE, moqt_actions::FETCH,
                          moqt_actions::SUBSCRIBE_NAMESPACE>{};
-}  // namespace role_actions
+} // namespace role_actions
 
 /**
  * @brief Template utility functions for compile-time role validation
  */
 template <typename ActionSet>
-constexpr bool validates_role(const ActionSet& role, int action) noexcept {
+constexpr bool validates_role(const ActionSet &role, int action) noexcept {
   return role.contains(action);
 }
 
@@ -359,11 +357,11 @@ constexpr bool is_action_allowed(int action) noexcept {
  * @brief Main MOQT claims structure
  */
 class MoqtClaims {
- private:
+private:
   std::vector<MoqtActionScope> scopes;
   std::optional<std::chrono::seconds> revalidation_interval;
 
- public:
+public:
   /**
    * @brief Default constructor
    */
@@ -388,7 +386,7 @@ class MoqtClaims {
    */
   template <std::ranges::range ActionRange>
     requires MoqtActionType<std::ranges::range_value_t<ActionRange>>
-  void addScope(const ActionRange& actions, MoqtBinaryMatch namespace_match,
+  void addScope(const ActionRange &actions, MoqtBinaryMatch namespace_match,
                 MoqtBinaryMatch track_match) {
     scopes.emplace_back(MoqtActionScope::create(
         actions, std::move(namespace_match), std::move(track_match)));
@@ -422,7 +420,7 @@ class MoqtClaims {
   [[nodiscard]] bool isAuthorized(ActionT action,
                                   std::string_view namespace_name,
                                   std::string_view track_name) const noexcept {
-    return std::any_of(scopes.begin(), scopes.end(), [=](const auto& scope) {
+    return std::any_of(scopes.begin(), scopes.end(), [=](const auto &scope) {
       return scope.authorizes(action, namespace_name, track_name);
     });
   }
@@ -435,7 +433,7 @@ class MoqtClaims {
   /**
    * @brief Get read-only access to scopes
    */
-  [[nodiscard]] const std::vector<MoqtActionScope>& getScopes() const noexcept {
+  [[nodiscard]] const std::vector<MoqtActionScope> &getScopes() const noexcept {
     return scopes;
   }
 
@@ -452,16 +450,16 @@ class MoqtClaims {
   /**
    * @brief Get revalidation interval
    */
-  [[nodiscard]] std::optional<std::chrono::seconds> getRevalidationInterval()
-      const noexcept {
+  [[nodiscard]] std::optional<std::chrono::seconds>
+  getRevalidationInterval() const noexcept {
     return revalidation_interval;
   }
 
   /**
    * @brief Get revalidation interval in seconds (for compatibility)
    */
-  [[nodiscard]] std::optional<int64_t> getRevalidationIntervalSeconds()
-      const noexcept {
+  [[nodiscard]] std::optional<int64_t>
+  getRevalidationIntervalSeconds() const noexcept {
     if (revalidation_interval.has_value()) {
       return revalidation_interval->count();
     }
@@ -483,7 +481,7 @@ class MoqtClaims {
    */
   [[nodiscard]] size_t getTotalActionCount() const noexcept {
     size_t total = 0;
-    for (const auto& scope : scopes) {
+    for (const auto &scope : scopes) {
       total += scope.action_count();
     }
     return total;
@@ -492,7 +490,7 @@ class MoqtClaims {
 
 template <size_t N>
 consteval std::array<uint8_t, N - 1> string_to_binary(const char (&str)[N]) {
-  std::array<uint8_t, N - 1> result{};  // -1 to exclude null terminator
+  std::array<uint8_t, N - 1> result{}; // -1 to exclude null terminator
   for (size_t i = 0; i < N - 1; ++i) {
     result[i] = static_cast<uint8_t>(str[i]);
   }
@@ -506,12 +504,12 @@ struct EnhancedDpopClaims;
  * @brief Extended CAT claims structure including MOQT claims
  */
 struct ExtendedCatClaims {
-  std::optional<MoqtClaims> moqt;  ///< MOQT claims
+  std::optional<MoqtClaims> moqt; ///< MOQT claims
   ExtendedCatClaims() = default;
-  ExtendedCatClaims(const ExtendedCatClaims& other) = default;
-  ExtendedCatClaims(ExtendedCatClaims&&) noexcept = default;
-  ExtendedCatClaims& operator=(const ExtendedCatClaims& other) = default;
-  ExtendedCatClaims& operator=(ExtendedCatClaims&&) noexcept = default;
+  ExtendedCatClaims(const ExtendedCatClaims &other) = default;
+  ExtendedCatClaims(ExtendedCatClaims &&) noexcept = default;
+  ExtendedCatClaims &operator=(const ExtendedCatClaims &other) = default;
+  ExtendedCatClaims &operator=(ExtendedCatClaims &&) noexcept = default;
 
   /**
    * @brief Set MOQT claims
@@ -521,14 +519,14 @@ struct ExtendedCatClaims {
   /**
    * @brief Get read-only access to MOQT claims
    */
-  [[nodiscard]] const MoqtClaims* getMoqtClaimsReadOnly() const noexcept {
+  [[nodiscard]] const MoqtClaims *getMoqtClaimsReadOnly() const noexcept {
     return moqt.has_value() ? &moqt.value() : nullptr;
   }
 
   /**
    * @brief Get mutable access to MOQT claims (creates if doesn't exist)
    */
-  [[nodiscard]] MoqtClaims& getMoqtClaims() {
+  [[nodiscard]] MoqtClaims &getMoqtClaims() {
     if (!moqt.has_value()) {
       moqt = MoqtClaims{};
     }
@@ -541,4 +539,4 @@ struct ExtendedCatClaims {
   [[nodiscard]] bool hasMoqtClaims() const noexcept { return moqt.has_value(); }
 };
 
-}  // namespace catapult
+} // namespace catapult

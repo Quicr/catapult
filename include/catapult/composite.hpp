@@ -28,13 +28,12 @@ class CatTokenValidator;
  * @brief Composite claim logical operators
  */
 enum class CompositeOperator : uint8_t {
-  OR,   ///< At least one claim set must be acceptable
-  NOR,  ///< No claim sets can be acceptable
-  AND   ///< All claim sets must be acceptable
+  OR,  ///< At least one claim set must be acceptable
+  NOR, ///< No claim sets can be acceptable
+  AND  ///< All claim sets must be acceptable
 };
 
-template <CompositeOperator Op>
-constexpr bool is_valid_operator() {
+template <CompositeOperator Op> constexpr bool is_valid_operator() {
   return Op == CompositeOperator::OR || Op == CompositeOperator::NOR ||
          Op == CompositeOperator::AND;
 }
@@ -51,7 +50,7 @@ using NorClaim = TypedCompositeClaim<CompositeOperator::NOR>;
  * @brief  composite claim token validator
  */
 template <typename T>
-concept TokenValidator = requires(T validator, const CatToken& token) {
+concept TokenValidator = requires(T validator, const CatToken &token) {
   { validator.validate(token) } -> std::same_as<void>;
 };
 
@@ -77,15 +76,15 @@ struct ClaimSet {
   std::unique_ptr<NorClaim> norComposite;
 
   ClaimSet() = default;
-  ClaimSet(const CatToken& t);
+  ClaimSet(const CatToken &t);
   ClaimSet(std::unique_ptr<CatToken> t) : token(std::move(t)) {}
   ClaimSet(std::unique_ptr<OrClaim> c) : orComposite(std::move(c)) {}
   ClaimSet(std::unique_ptr<AndClaim> c) : andComposite(std::move(c)) {}
   ClaimSet(std::unique_ptr<NorClaim> c) : norComposite(std::move(c)) {}
 
-  ClaimSet(const ClaimSet& other);
-  ClaimSet(ClaimSet&& other) noexcept = default;
-  ClaimSet& operator=(ClaimSet other) noexcept;
+  ClaimSet(const ClaimSet &other);
+  ClaimSet(ClaimSet &&other) noexcept = default;
+  ClaimSet &operator=(ClaimSet other) noexcept;
 
   // Explicit destructor to control destruction order
   ~ClaimSet() {
@@ -96,7 +95,7 @@ struct ClaimSet {
     token.reset();
   }
 
-  void swap(ClaimSet& other) noexcept;
+  void swap(ClaimSet &other) noexcept;
 
   bool hasToken() const { return token != nullptr; }
   bool hasComposite() const {
@@ -117,7 +116,7 @@ struct ClaimSet {
  *
  * @return Reference to the thread-local ClaimSet memory pool
  */
-inline ThreadLocalMemoryPool<ClaimSet, 512>& getClaimSetPool() {
+inline ThreadLocalMemoryPool<ClaimSet, 512> &getClaimSetPool() {
   static thread_local ThreadLocalMemoryPool<ClaimSet, 512> pool;
   return pool;
 }
@@ -136,7 +135,7 @@ inline ThreadLocalMemoryPool<ClaimSet, 512>& getClaimSetPool() {
  * @return Reference to the thread-local composite claim memory pool
  */
 template <CompositeOperator Op>
-inline ThreadLocalMemoryPool<TypedCompositeClaim<Op>, 256>&
+inline ThreadLocalMemoryPool<TypedCompositeClaim<Op>, 256> &
 getCompositeClaimPool() {
   static thread_local ThreadLocalMemoryPool<TypedCompositeClaim<Op>, 256> pool;
   return pool;
@@ -162,8 +161,7 @@ consteval bool is_valid_claim_id(int64_t claim_id) noexcept {
  * @brief Validation of COSE algorithm
  */
 consteval bool is_valid_cose_algorithm(int64_t alg_id) noexcept {
-  return alg_id == -4 || alg_id == -7 ||
-         alg_id == -37;  // HMAC256, ES256, PS256
+  return alg_id == -4 || alg_id == -7 || alg_id == -37; // HMAC256, ES256, PS256
 }
 
 /**
@@ -187,7 +185,7 @@ consteval bool is_valid_usage_limit(uint32_t limit) noexcept {
 
 template <size_t N>
 consteval bool is_valid_string_length(const char (&str)[N]) noexcept {
-  return N > 1 && N <= 1024;  // Reasonable bounds
+  return N > 1 && N <= 1024; // Reasonable bounds
 }
 
 consteval bool is_valid_string_length(size_t len) noexcept {
@@ -197,7 +195,7 @@ consteval bool is_valid_string_length(size_t len) noexcept {
 consteval bool is_valid_composite_size(size_t size) noexcept {
   return size > 0 && size <= MAX_CLAIM_SETS_PER_COMPOSITE;
 }
-}  // namespace composite_constants
+} // namespace composite_constants
 
 /**
  * @brief Compile-time composite claim creation with optional memory pool
@@ -212,7 +210,7 @@ consteval bool is_valid_composite_size(size_t size) noexcept {
 template <CompositeOperator Op>
   requires(is_valid_operator<Op>())
 class TypedCompositeClaim {
- public:
+public:
   static constexpr CompositeOperator operation = Op;
   std::vector<ClaimSet> claims;
 
@@ -224,20 +222,20 @@ class TypedCompositeClaim {
   /**
    * @brief Copy constructor (atomic cache is not copied, will be recalculated)
    */
-  TypedCompositeClaim(const TypedCompositeClaim& other)
+  TypedCompositeClaim(const TypedCompositeClaim &other)
       : claims(other.claims), cached_depth_(0) {}
 
   /**
    * @brief Move constructor
    */
-  TypedCompositeClaim(TypedCompositeClaim&& other) noexcept
+  TypedCompositeClaim(TypedCompositeClaim &&other) noexcept
       : claims(std::move(other.claims)),
         cached_depth_(other.cached_depth_.load(std::memory_order_relaxed)) {}
 
   /**
    * @brief Copy assignment
    */
-  TypedCompositeClaim& operator=(const TypedCompositeClaim& other) {
+  TypedCompositeClaim &operator=(const TypedCompositeClaim &other) {
     if (this != &other) {
       claims = other.claims;
       cached_depth_.store(0, std::memory_order_relaxed);
@@ -248,7 +246,7 @@ class TypedCompositeClaim {
   /**
    * @brief Move assignment
    */
-  TypedCompositeClaim& operator=(TypedCompositeClaim&& other) noexcept {
+  TypedCompositeClaim &operator=(TypedCompositeClaim &&other) noexcept {
     if (this != &other) {
       claims = std::move(other.claims);
       cached_depth_.store(other.cached_depth_.load(std::memory_order_relaxed),
@@ -268,8 +266,8 @@ class TypedCompositeClaim {
    * @brief Compile-time evaluation
    */
   template <TokenValidator Validator>
-  bool evaluate(const Validator& validator) const {
-    auto evaluator = [this, &validator](const ClaimSet& claimSet) -> bool {
+  bool evaluate(const Validator &validator) const {
+    auto evaluator = [this, &validator](const ClaimSet &claimSet) -> bool {
       return evaluateClaimSet(claimSet, validator);
     };
 
@@ -301,12 +299,12 @@ class TypedCompositeClaim {
     cached_depth_.store(0, std::memory_order_relaxed);
   }
 
- private:
-  mutable std::atomic<size_t> cached_depth_{0};  ///< Cached depth value
+private:
+  mutable std::atomic<size_t> cached_depth_{0}; ///< Cached depth value
 
   size_t calculateDepthRecursive() const noexcept {
     size_t maxDepth = 1;
-    for (const auto& claimSet : claims) {
+    for (const auto &claimSet : claims) {
       if (claimSet.hasComposite()) {
         size_t childDepth = 0;
         if (claimSet.orComposite) {
@@ -316,13 +314,17 @@ class TypedCompositeClaim {
         } else if (claimSet.norComposite) {
           childDepth = claimSet.norComposite->getDepth();
         }
+        // Cap child depth to prevent overflow from circular references
+        if (childDepth > composite_constants::MAX_NESTING_DEPTH) {
+          childDepth = composite_constants::MAX_NESTING_DEPTH;
+        }
         maxDepth = std::max(maxDepth, childDepth + 1);
       }
     }
     return maxDepth;
   }
 
- public:
+public:
   /**
    * @brief Compile-time depth validation
    */
@@ -341,7 +343,7 @@ class TypedCompositeClaim {
    * Pool optimization is applied to the composite claim allocation itself,
    * not to individual ClaimSet objects which are stored directly in the vector.
    */
-  void addClaimSet(const ClaimSet& claimSet) {
+  void addClaimSet(const ClaimSet &claimSet) {
     if (claims.size() >= composite_constants::MAX_CLAIM_SETS_PER_COMPOSITE) {
       throw InvalidClaimValueError("Too many claim sets in composite");
     }
@@ -356,7 +358,7 @@ class TypedCompositeClaim {
    * Pool optimization is applied to the composite claim allocation itself,
    * not to individual ClaimSet objects which are stored directly in the vector.
    */
-  void addToken(const CatToken& token) {
+  void addToken(const CatToken &token) {
     if (claims.size() >= composite_constants::MAX_CLAIM_SETS_PER_COMPOSITE) {
       throw InvalidClaimValueError("Too many claim sets in composite");
     }
@@ -364,27 +366,27 @@ class TypedCompositeClaim {
     invalidateDepthCache();
   }
 
- private:
+private:
   template <typename Validator>
-  bool evaluateClaimSet(const ClaimSet& claimSet,
-                        const Validator& validator) const;
+  bool evaluateClaimSet(const ClaimSet &claimSet,
+                        const Validator &validator) const;
 };
 
 /**
  * @brief Composite claims container structure using TypedCompositeClaim
  */
 struct CompositeClaims {
-  std::optional<std::unique_ptr<OrClaim>> orClaim;    ///< OR composite claim
-  std::optional<std::unique_ptr<NorClaim>> norClaim;  ///< NOR composite claim
-  std::optional<std::unique_ptr<AndClaim>> andClaim;  ///< AND composite claim
+  std::optional<std::unique_ptr<OrClaim>> orClaim;   ///< OR composite claim
+  std::optional<std::unique_ptr<NorClaim>> norClaim; ///< NOR composite claim
+  std::optional<std::unique_ptr<AndClaim>> andClaim; ///< AND composite claim
 
   CompositeClaims() = default;
 
   // Copy and move constructors for proper unique_ptr handling
-  CompositeClaims(const CompositeClaims& other);
-  CompositeClaims(CompositeClaims&& other) noexcept = default;
-  CompositeClaims& operator=(const CompositeClaims& other);
-  CompositeClaims& operator=(CompositeClaims&& other) noexcept = default;
+  CompositeClaims(const CompositeClaims &other);
+  CompositeClaims(CompositeClaims &&other) noexcept = default;
+  CompositeClaims &operator=(const CompositeClaims &other);
+  CompositeClaims &operator=(CompositeClaims &&other) noexcept = default;
 
   /**
    * @brief Check if any composite claims are present
@@ -398,7 +400,7 @@ struct CompositeClaims {
    * @return true if all composite claims are satisfied
    */
   template <TokenValidator Validator>
-  bool validateAll(const Validator& validator) const;
+  bool validateAll(const Validator &validator) const;
 };
 
 /**
@@ -412,7 +414,7 @@ namespace composite_utils {
 template <CompositeOperator Op, typename... ClaimSets>
   requires(is_valid_operator<Op>()) &&
           (std::constructible_from<ClaimSet, ClaimSets> && ...)
-constexpr auto createTypedComposite(ClaimSets&&... claimSets) {
+constexpr auto createTypedComposite(ClaimSets &&...claimSets) {
   return TypedCompositeClaim<Op>{std::forward<ClaimSets>(claimSets)...};
 }
 
@@ -420,7 +422,7 @@ constexpr auto createTypedComposite(ClaimSets&&... claimSets) {
  * @brief Compile-time OR composite creation
  */
 template <typename... ClaimSets>
-constexpr auto createOrCompositeTyped(ClaimSets&&... claimSets) {
+constexpr auto createOrCompositeTyped(ClaimSets &&...claimSets) {
   return createTypedComposite<CompositeOperator::OR>(
       std::forward<ClaimSets>(claimSets)...);
 }
@@ -429,7 +431,7 @@ constexpr auto createOrCompositeTyped(ClaimSets&&... claimSets) {
  * @brief Compile-time AND composite creation
  */
 template <typename... ClaimSets>
-constexpr auto createAndCompositeTyped(ClaimSets&&... claimSets) {
+constexpr auto createAndCompositeTyped(ClaimSets &&...claimSets) {
   return createTypedComposite<CompositeOperator::AND>(
       std::forward<ClaimSets>(claimSets)...);
 }
@@ -438,7 +440,7 @@ constexpr auto createAndCompositeTyped(ClaimSets&&... claimSets) {
  * @brief Compile-time NOR composite creation
  */
 template <typename... ClaimSets>
-constexpr auto createNorCompositeTyped(ClaimSets&&... claimSets) {
+constexpr auto createNorCompositeTyped(ClaimSets &&...claimSets) {
   return createTypedComposite<CompositeOperator::NOR>(
       std::forward<ClaimSets>(claimSets)...);
 }
@@ -447,7 +449,7 @@ constexpr auto createNorCompositeTyped(ClaimSets&&... claimSets) {
  * @brief Constexpr validation of composite depth
  */
 template <CompositeClaimType T>
-constexpr bool validateDepth(const T& claim) noexcept {
+constexpr bool validateDepth(const T &claim) noexcept {
   return claim.getDepth() <= composite_constants::MAX_NESTING_DEPTH &&
          claim.getDepth() >= 1;
 }
@@ -473,8 +475,8 @@ constexpr bool validateDepth(const T& claim) noexcept {
  * @param usePool Whether to use memory pool for allocations (default: false)
  * @return Unique pointer to the created OR composite claim
  */
-[[nodiscard]] std::unique_ptr<OrClaim> createOrComposite(
-    const std::vector<ClaimSet>& claimSets, bool usePool = false);
+[[nodiscard]] std::unique_ptr<OrClaim>
+createOrComposite(const std::vector<ClaimSet> &claimSets, bool usePool = false);
 
 /**
  * @brief Create a NOR composite claim from claim sets
@@ -482,8 +484,9 @@ constexpr bool validateDepth(const T& claim) noexcept {
  * @param usePool Whether to use memory pool for allocations (default: false)
  * @return Unique pointer to the created NOR composite claim
  */
-[[nodiscard]] std::unique_ptr<NorClaim> createNorComposite(
-    const std::vector<ClaimSet>& claimSets, bool usePool = false);
+[[nodiscard]] std::unique_ptr<NorClaim>
+createNorComposite(const std::vector<ClaimSet> &claimSets,
+                   bool usePool = false);
 
 /**
  * @brief Create an AND composite claim from claim sets
@@ -491,8 +494,9 @@ constexpr bool validateDepth(const T& claim) noexcept {
  * @param usePool Whether to use memory pool for allocations (default: false)
  * @return Unique pointer to the created AND composite claim
  */
-[[nodiscard]] std::unique_ptr<AndClaim> createAndComposite(
-    const std::vector<ClaimSet>& claimSets, bool usePool = false);
+[[nodiscard]] std::unique_ptr<AndClaim>
+createAndComposite(const std::vector<ClaimSet> &claimSets,
+                   bool usePool = false);
 
 /**
  * @brief Create an OR composite claim from tokens
@@ -500,8 +504,8 @@ constexpr bool validateDepth(const T& claim) noexcept {
  * @param usePool Whether to use memory pool for allocations (default: false)
  * @return Unique pointer to the created OR composite claim
  */
-[[nodiscard]] std::unique_ptr<OrClaim> createOrFromTokens(
-    const std::vector<CatToken>& tokens, bool usePool = false);
+[[nodiscard]] std::unique_ptr<OrClaim>
+createOrFromTokens(const std::vector<CatToken> &tokens, bool usePool = false);
 
 /**
  * @brief Create a NOR composite claim from tokens
@@ -509,8 +513,8 @@ constexpr bool validateDepth(const T& claim) noexcept {
  * @param usePool Whether to use memory pool for allocations (default: false)
  * @return Unique pointer to the created NOR composite claim
  */
-[[nodiscard]] std::unique_ptr<NorClaim> createNorFromTokens(
-    const std::vector<CatToken>& tokens, bool usePool = false);
+[[nodiscard]] std::unique_ptr<NorClaim>
+createNorFromTokens(const std::vector<CatToken> &tokens, bool usePool = false);
 
 /**
  * @brief Create an AND composite claim from tokens
@@ -518,8 +522,8 @@ constexpr bool validateDepth(const T& claim) noexcept {
  * @param usePool Whether to use memory pool for allocations (default: false)
  * @return Unique pointer to the created AND composite claim
  */
-[[nodiscard]] std::unique_ptr<AndClaim> createAndFromTokens(
-    const std::vector<CatToken>& tokens, bool usePool = false);
+[[nodiscard]] std::unique_ptr<AndClaim>
+createAndFromTokens(const std::vector<CatToken> &tokens, bool usePool = false);
 
 /**
  * @brief Constexpr composite claim factory with enhanced type safety
@@ -529,10 +533,10 @@ template <CompositeOperator Op>
 struct CompositeFactory {
   template <std::ranges::range R>
     requires std::convertible_to<std::ranges::range_value_t<R>, ClaimSet>
-  static constexpr auto create(R&& claimSets) {
+  static constexpr auto create(R &&claimSets) {
     TypedCompositeClaim<Op> composite;
 
-    std::ranges::for_each(claimSets, [&composite](auto&& claimSet) {
+    std::ranges::for_each(claimSets, [&composite](auto &&claimSet) {
       composite.addClaimSet(std::forward<decltype(claimSet)>(claimSet));
     });
 
@@ -545,7 +549,7 @@ struct CompositeFactory {
 
   template <typename... ClaimSets>
     requires(std::convertible_to<ClaimSets, ClaimSet> && ...)
-  static constexpr auto create(ClaimSets&&... claimSets) {
+  static constexpr auto create(ClaimSets &&...claimSets) {
     auto composite =
         TypedCompositeClaim<Op>{std::forward<ClaimSets>(claimSets)...};
 
@@ -570,14 +574,14 @@ using NorFactory = CompositeFactory<CompositeOperator::NOR>;
  * @brief Compile-time helper for creating validated composites
  */
 template <CompositeOperator Op, typename... ClaimSets>
-constexpr auto make_validated_composite(ClaimSets&&... claimSets)
+constexpr auto make_validated_composite(ClaimSets &&...claimSets)
   requires(is_valid_operator<Op>() &&
            (std::convertible_to<ClaimSets, ClaimSet> && ...))
 {
   return CompositeFactory<Op>::create(std::forward<ClaimSets>(claimSets)...);
 }
 
-}  // namespace composite_utils
+} // namespace composite_utils
 
 /**
  * @brief Usage Examples for Memory Pool Optimization with TypedCompositeClaim
@@ -625,4 +629,4 @@ constexpr auto make_validated_composite(ClaimSets&&... claimSets)
 // Template method implementations that need full CatToken definition
 // These will be explicitly instantiated in the implementation files
 
-}  // namespace catapult
+} // namespace catapult

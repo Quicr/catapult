@@ -21,17 +21,17 @@ using json = nlohmann::json;
 namespace catapult {
 namespace jwk {
 
-std::string createES256JWK(const std::vector<uint8_t>& public_key_der) {
+std::string createES256JWK(const std::vector<uint8_t> &public_key_der) {
   // Parse DER-encoded public key using modern OpenSSL 3.0 API
-  const uint8_t* data = public_key_der.data();
-  EVP_PKEY* pkey = d2i_PUBKEY(nullptr, &data, public_key_der.size());
+  const uint8_t *data = public_key_der.data();
+  EVP_PKEY *pkey = d2i_PUBKEY(nullptr, &data, public_key_der.size());
   if (!pkey) {
     throw CryptoError("Failed to parse public key DER");
   }
 
   // Extract EC parameters using OpenSSL 3.0 API
-  BIGNUM* x = BN_new();
-  BIGNUM* y = BN_new();
+  BIGNUM *x = BN_new();
+  BIGNUM *y = BN_new();
 
   size_t x_len = 0, y_len = 0;
 
@@ -69,22 +69,24 @@ std::string createES256JWK(const std::vector<uint8_t>& public_key_der) {
   return jwk.dump();
 }
 
-std::string createPS256JWK(const std::vector<uint8_t>& public_key_der) {
+std::string createPS256JWK(const std::vector<uint8_t> &public_key_der) {
   // Parse DER-encoded public key using modern OpenSSL 3.0 API
-  const uint8_t* data = public_key_der.data();
-  EVP_PKEY* pkey = d2i_PUBKEY(nullptr, &data, public_key_der.size());
+  const uint8_t *data = public_key_der.data();
+  EVP_PKEY *pkey = d2i_PUBKEY(nullptr, &data, public_key_der.size());
   if (!pkey) {
     throw CryptoError("Failed to parse public key DER");
   }
 
   // Extract RSA parameters using OpenSSL 3.0 API
-  BIGNUM* n = nullptr;
-  BIGNUM* e = nullptr;
+  BIGNUM *n = nullptr;
+  BIGNUM *e = nullptr;
 
   if (!EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_N, &n) ||
       !EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_E, &e)) {
-    if (n) BN_free(n);
-    if (e) BN_free(e);
+    if (n)
+      BN_free(n);
+    if (e)
+      BN_free(e);
     EVP_PKEY_free(pkey);
     throw CryptoError("Failed to extract RSA parameters");
   }
@@ -111,7 +113,7 @@ std::string createPS256JWK(const std::vector<uint8_t>& public_key_der) {
   return jwk.dump();
 }
 
-std::string calculateJWKThumbprint(const std::string& jwk_json) {
+std::string calculateJWKThumbprint(const std::string &jwk_json) {
   // Prevent DoS from oversized JSON input
   constexpr size_t MAX_JWK_SIZE = 8192;
   if (jwk_json.size() > MAX_JWK_SIZE) {
@@ -162,17 +164,17 @@ std::string calculateJWKThumbprint(const std::string& jwk_json) {
 }
 
 std::string createJWKFromAlgorithm(int64_t algorithm_id,
-                                   const std::vector<uint8_t>& public_key_der) {
+                                   const std::vector<uint8_t> &public_key_der) {
   switch (algorithm_id) {
-    case ALG_ES256:
-      return createES256JWK(public_key_der);
-    case ALG_PS256:
-      return createPS256JWK(public_key_der);
-    default:
-      throw CryptoError("Unsupported algorithm for JWK creation: " +
-                        std::to_string(algorithm_id));
+  case ALG_ES256:
+    return createES256JWK(public_key_der);
+  case ALG_PS256:
+    return createPS256JWK(public_key_der);
+  default:
+    throw CryptoError("Unsupported algorithm for JWK creation: " +
+                      std::to_string(algorithm_id));
   }
 }
 
-}  // namespace jwk
-}  // namespace catapult
+} // namespace jwk
+} // namespace catapult

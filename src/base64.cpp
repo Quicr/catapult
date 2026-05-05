@@ -41,7 +41,8 @@ std::vector<uint8_t> base64UrlDecode(std::string_view encoded) {
   static const std::array<int8_t, 256> decode_table = []() {
     std::array<int8_t, 256> table{};
     // Initialize all to -1 (invalid)
-    for (size_t i = 0; i < 256; ++i) table[i] = -1;
+    for (size_t i = 0; i < 256; ++i)
+      table[i] = -1;
 
     // Set valid base64url characters
     for (size_t i = 0; i < base64_chars_url.size(); ++i) {
@@ -51,12 +52,28 @@ std::vector<uint8_t> base64UrlDecode(std::string_view encoded) {
     return table;
   }();
 
+  // Validate padding position and count
+  size_t padding_pos = encoded.find('=');
+  if (padding_pos != std::string_view::npos) {
+    // Padding must be at the end (last 1 or 2 characters only)
+    if (padding_pos < encoded.size() - 2) {
+      throw InvalidBase64Error("Invalid padding position in base64 string");
+    }
+    // Check for invalid characters after first padding
+    for (size_t i = padding_pos; i < encoded.size(); ++i) {
+      if (encoded[i] != '=') {
+        throw InvalidBase64Error("Invalid character after padding");
+      }
+    }
+  }
+
   std::vector<uint8_t> result;
-  result.reserve((encoded.size() * 3) / 4);  // Reserve estimated size
+  result.reserve((encoded.size() * 3) / 4); // Reserve estimated size
 
   int val = 0, valb = -8;
   for (char c : encoded) {
-    if (c == '=') break;
+    if (c == '=')
+      break;
 
     // Use lookup table for O(1) character validation and conversion
     int8_t decoded = decode_table[static_cast<unsigned char>(c)];
@@ -74,4 +91,4 @@ std::vector<uint8_t> base64UrlDecode(std::string_view encoded) {
   return result;
 }
 
-}  // namespace catapult
+} // namespace catapult
