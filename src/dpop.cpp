@@ -37,6 +37,24 @@ namespace catapult {
 namespace {
 
 /**
+ * @brief Helper to safely add a CBOR map pair with proper cleanup on failure
+ */
+bool safeCborMapAdd(cbor_item_t* map, cbor_item_t* key, cbor_item_t* value) {
+  if (!key || !value) {
+    if (key) cbor_decref(&key);
+    if (value) cbor_decref(&value);
+    return false;
+  }
+  struct cbor_pair pair = {key, value};
+  if (!cbor_map_add(map, pair)) {
+    cbor_decref(&pair.key);
+    cbor_decref(&pair.value);
+    return false;
+  }
+  return true;
+}
+
+/**
  * @brief Create COSE_Key from DER-encoded public key
  */
 std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
@@ -48,11 +66,15 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
     throw CryptoError("Failed to parse DER public key for COSE_Key");
   }
 
-  cbor_item_t* cose_key = cbor_new_definite_map(5);
-  if (!cose_key) {
-    EVP_PKEY_free(pkey);
+  // Use RAII wrapper for EVP_PKEY
+  auto pkey_guard = EvpKeyPtr(pkey);
+
+  cbor_item_t* raw_cose_key = cbor_new_definite_map(5);
+  if (!raw_cose_key) {
     throw CryptoError("Failed to create COSE_Key map");
   }
+  // Use RAII wrapper for CBOR item
+  CborItemPtr cose_key(raw_cose_key);
 
   if (alg_id == ALG_ES256) {
     BIGNUM* x = nullptr;
@@ -60,8 +82,8 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
 
     if (!EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_EC_PUB_X, &x) ||
         !EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_EC_PUB_Y, &y)) {
-      EVP_PKEY_free(pkey);
-      cbor_decref(&cose_key);
+      if (x) BN_free(x);
+      if (y) BN_free(y);
       throw CryptoError("Failed to extract EC coordinates");
     }
 
@@ -72,23 +94,28 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
     BN_free(y);
 
     // kty: EC (2), alg: ES256 (-7), crv: P-256 (1), x, y
-    (void)cbor_map_add(cose_key, {cbor_build_uint8(1), cbor_build_uint8(2)});
-    (void)cbor_map_add(cose_key, {cbor_build_uint8(3), cbor_build_negint8(6)});
-    (void)cbor_map_add(cose_key, {cbor_build_negint8(0), cbor_build_uint8(1)});
-    (void)cbor_map_add(cose_key,
-                       {cbor_build_negint8(1),
-                        cbor_build_bytestring(x_bytes.data(), x_bytes.size())});
-    (void)cbor_map_add(cose_key,
-                       {cbor_build_negint8(2),
-                        cbor_build_bytestring(y_bytes.data(), y_bytes.size())});
+    if (!safeCborMapAdd(cose_key.get(), cbor_build_uint8(1),
+                        cbor_build_uint8(2)) ||
+        !safeCborMapAdd(cose_key.get(), cbor_build_uint8(3),
+                        cbor_build_negint8(6)) ||
+        !safeCborMapAdd(cose_key.get(), cbor_build_negint8(0),
+                        cbor_build_uint8(1)) ||
+        !safeCborMapAdd(
+            cose_key.get(), cbor_build_negint8(1),
+            cbor_build_bytestring(x_bytes.data(), x_bytes.size())) ||
+        !safeCborMapAdd(
+            cose_key.get(), cbor_build_negint8(2),
+            cbor_build_bytestring(y_bytes.data(), y_bytes.size()))) {
+      throw CryptoError("Failed to build EC COSE_Key");
+    }
   } else if (alg_id == ALG_PS256) {
     BIGNUM* n = nullptr;
     BIGNUM* e = nullptr;
 
     if (!EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_N, &n) ||
         !EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_E, &e)) {
-      EVP_PKEY_free(pkey);
-      cbor_decref(&cose_key);
+      if (n) BN_free(n);
+      if (e) BN_free(e);
       throw CryptoError("Failed to extract RSA parameters");
     }
 
@@ -101,27 +128,26 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
     BN_free(e);
 
     // kty: RSA (3), alg: PS256 (-37), n, e
-    (void)cbor_map_add(cose_key, {cbor_build_uint8(1), cbor_build_uint8(3)});
-    (void)cbor_map_add(cose_key, {cbor_build_uint8(3), cbor_build_negint8(36)});
-    (void)cbor_map_add(cose_key,
-                       {cbor_build_negint8(0),
-                        cbor_build_bytestring(n_bytes.data(), n_bytes.size())});
-    (void)cbor_map_add(cose_key,
-                       {cbor_build_negint8(1),
-                        cbor_build_bytestring(e_bytes.data(), e_bytes.size())});
+    if (!safeCborMapAdd(cose_key.get(), cbor_build_uint8(1),
+                        cbor_build_uint8(3)) ||
+        !safeCborMapAdd(cose_key.get(), cbor_build_uint8(3),
+                        cbor_build_negint8(36)) ||
+        !safeCborMapAdd(
+            cose_key.get(), cbor_build_negint8(0),
+            cbor_build_bytestring(n_bytes.data(), n_bytes.size())) ||
+        !safeCborMapAdd(
+            cose_key.get(), cbor_build_negint8(1),
+            cbor_build_bytestring(e_bytes.data(), e_bytes.size()))) {
+      throw CryptoError("Failed to build RSA COSE_Key");
+    }
   } else {
-    EVP_PKEY_free(pkey);
-    cbor_decref(&cose_key);
     throw CryptoError("Unsupported algorithm for COSE_Key: " +
                       std::to_string(alg_id));
   }
 
-  EVP_PKEY_free(pkey);
-
   unsigned char* buffer = nullptr;
   size_t buffer_size = 0;
-  size_t length = cbor_serialize_alloc(cose_key, &buffer, &buffer_size);
-  cbor_decref(&cose_key);
+  size_t length = cbor_serialize_alloc(cose_key.get(), &buffer, &buffer_size);
 
   if (length == 0) {
     throw CryptoError("Failed to serialize COSE_Key");
@@ -146,6 +172,11 @@ std::string calculateCoseKeyThumbprint(const std::vector<uint8_t>& cose_key) {
  */
 std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
     const std::string& alg_name, const std::string& jwk_json) {
+  // Prevent DoS from oversized JSON input
+  constexpr size_t MAX_JWK_SIZE = 8192;  // 8KB reasonable limit for JWK
+  if (jwk_json.size() > MAX_JWK_SIZE) {
+    throw CryptoError("JWK exceeds maximum allowed size");
+  }
   json jwk = json::parse(jwk_json);
 
   if (alg_name == "ES256") {
@@ -581,18 +612,26 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
 
 #ifdef CATAPULT_ENABLE_JSON
 DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
+  // Prevent DoS from oversized JWT input
+  constexpr size_t MAX_JWT_SIZE = 16384;  // 16KB reasonable limit
+  if (jwt_data.size() > MAX_JWT_SIZE) {
+    throw InvalidTokenFormatError{};
+  }
+
   std::vector<std::string> parts;
   std::string current;
+  current.reserve(jwt_data.size() / 3);  // Reasonable estimate
 
   for (char c : jwt_data) {
     if (c == '.') {
-      parts.push_back(current);
+      parts.push_back(std::move(current));
       current.clear();
+      current.reserve(jwt_data.size() / 3);
     } else {
       current += c;
     }
   }
-  parts.push_back(current);
+  parts.push_back(std::move(current));
 
   if (parts.size() != 3) {
     throw InvalidTokenFormatError{};
@@ -602,10 +641,16 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
   auto payload_bytes = base64UrlDecode(parts[1]);
   auto signature = base64UrlDecode(parts[2]);
 
-  auto header_json =
-      json::parse(std::string(header_bytes.begin(), header_bytes.end()));
-  auto payload_json =
-      json::parse(std::string(payload_bytes.begin(), payload_bytes.end()));
+  json header_json;
+  json payload_json;
+  try {
+    header_json =
+        json::parse(std::string(header_bytes.begin(), header_bytes.end()));
+    payload_json =
+        json::parse(std::string(payload_bytes.begin(), payload_bytes.end()));
+  } catch (const json::parse_error&) {
+    throw InvalidTokenFormatError{};
+  }
 
   DpopHeader header;
   header.set_encoding(DpopEncoding::JWT);
@@ -674,33 +719,36 @@ bool DpopProofValidator::validate_proof(
     return false;
   }
 
-  // Check JTI if enabled and present
+  // Check JTI if enabled and present (thread-safe)
   if (settings_.get_jti_processing() && proof.get_payload().jti.has_value()) {
     const auto& jti = proof.get_payload().jti.value();
+    auto now = std::chrono::system_clock::now();
 
-    // Check if JTI was already used
-    auto it = used_jtis_.find(jti);
-    if (it != used_jtis_.end()) {
-      // Check if it's still within the window
-      auto now = std::chrono::system_clock::now();
+    std::lock_guard<std::mutex> lock(jti_mutex_);
+
+    // Atomic check-and-insert to prevent TOCTOU race
+    auto [it, inserted] = used_jtis_.try_emplace(jti, now);
+    if (!inserted) {
+      // JTI already exists - check if within replay window
       auto diff = now - it->second;
       if (diff < settings_.get_effective_window()) {
         return false;  // Replay attack detected
       }
+      // Update timestamp for expired entry being reused
+      it->second = now;
     }
 
-    // Automatic cleanup when map grows too large to prevent memory exhaustion
+    // Periodic cleanup to prevent unbounded memory growth
     constexpr size_t MAX_JTI_ENTRIES = 100000;
-    if (used_jtis_.size() >= MAX_JTI_ENTRIES) {
-      cleanup_expired_jtis();
+    constexpr size_t CLEANUP_INTERVAL = 1000;
+    if (used_jtis_.size() >= MAX_JTI_ENTRIES ||
+        (used_jtis_.size() > 0 && used_jtis_.size() % CLEANUP_INTERVAL == 0)) {
+      cleanup_expired_jtis_locked();
       // If still too large after cleanup, reject to prevent DoS
       if (used_jtis_.size() >= MAX_JTI_ENTRIES) {
         return false;
       }
     }
-
-    // Record this JTI
-    used_jtis_[jti] = std::chrono::system_clock::now();
   }
 
   // Public key thumbprint matching validation
@@ -728,6 +776,11 @@ bool DpopProofValidator::validate_proof(
 }
 
 void DpopProofValidator::cleanup_expired_jtis() {
+  std::lock_guard<std::mutex> lock(jti_mutex_);
+  cleanup_expired_jtis_locked();
+}
+
+void DpopProofValidator::cleanup_expired_jtis_locked() {
   auto now = std::chrono::system_clock::now();
   auto window = settings_.get_effective_window();
 
