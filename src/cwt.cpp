@@ -721,8 +721,8 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
                     // Use uint64 to handle all possible CBOR uint values
                     uint64_t action_u64 = cbor_get_uint64(act);
                     // Validate action is within valid range for int
-                    if (action_u64 <=
-                        static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+                    if (action_u64 <= static_cast<uint64_t>(
+                                          std::numeric_limits<int>::max())) {
                       int action_val = static_cast<int>(action_u64);
                       // Validate action is within valid MOQT action range
                       if (moqt_actions::is_valid_action(action_val)) {

@@ -118,8 +118,8 @@ inline bool isValidAudience(std::string_view audience) noexcept {
  * @brief Geographic coordinate representation with enhanced validation
  */
 struct GeoCoordinate {
-  double lat;                      ///< Latitude
-  double lon;                      ///< Longitude
+  double lat = 0.0;                ///< Latitude (default 0.0 for safety)
+  double lon = 0.0;                ///< Longitude (default 0.0 for safety)
   std::optional<double> accuracy;  ///< Optional accuracy in meters
 
   /**
