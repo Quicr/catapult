@@ -457,6 +457,12 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
     throw InvalidCborError("Empty CBOR data");
   }
 
+  // Maximum CBOR payload size to prevent memory exhaustion
+  constexpr size_t MAX_CBOR_SIZE = 1024 * 1024;  // 1MB
+  if (cborData.size() > MAX_CBOR_SIZE) {
+    throw InvalidCborError("CBOR data exceeds maximum size");
+  }
+
   struct cbor_load_result result;
   cbor_item_t* raw_item = cbor_load(cborData.data(), cborData.size(), &result);
 
@@ -671,8 +677,15 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
               reinterpret_cast<const unsigned char*>(moqt_data.data()),
               moqt_data.size(), &moqt_result);
           if (moqt_array && cbor_isa_array(moqt_array)) {
-            auto moqt_claims = MoqtClaims::create(cbor_array_size(moqt_array));
-            for (size_t si = 0; si < cbor_array_size(moqt_array); ++si) {
+            // Limit MOQT scopes to prevent resource exhaustion
+            constexpr size_t MAX_MOQT_SCOPES = 100;
+            size_t moqt_scope_count = cbor_array_size(moqt_array);
+            if (moqt_scope_count > MAX_MOQT_SCOPES) {
+              cbor_decref(&moqt_array);
+              throw InvalidClaimValueError("Too many MOQT scopes");
+            }
+            auto moqt_claims = MoqtClaims::create(moqt_scope_count);
+            for (size_t si = 0; si < moqt_scope_count; ++si) {
               cbor_item_t* scope_arr = cbor_array_get(moqt_array, si);
               if (!scope_arr || !cbor_isa_array(scope_arr)) continue;
               size_t scope_len = cbor_array_size(scope_arr);
@@ -681,7 +694,11 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
               std::vector<int> actions;
               cbor_item_t* actions_arr = cbor_array_get(scope_arr, 0);
               if (actions_arr && cbor_isa_array(actions_arr)) {
-                for (size_t ai = 0; ai < cbor_array_size(actions_arr); ++ai) {
+                // Limit actions per scope
+                constexpr size_t MAX_ACTIONS = 50;
+                size_t action_count = cbor_array_size(actions_arr);
+                if (action_count > MAX_ACTIONS) continue;
+                for (size_t ai = 0; ai < action_count; ++ai) {
                   cbor_item_t* act = cbor_array_get(actions_arr, ai);
                   if (act && cbor_isa_uint(act)) {
                     actions.push_back(static_cast<int>(cbor_get_uint8(act)));
@@ -1278,6 +1295,10 @@ Cwt Cwt::validateMultiSignedCwt(
     }
 
     cbor_item_t** coseArray = cbor_array_handle(coseItem);
+    if (!coseArray) {
+      cbor_decref(&coseItem);
+      throw InvalidTokenFormatError();
+    }
 
     // Get common fields
     // Protected header (bytestring)
@@ -1310,6 +1331,18 @@ Cwt Cwt::validateMultiSignedCwt(
     cbor_item_t** signaturesArray = cbor_array_handle(coseArray[3]);
     size_t signaturesCount = cbor_array_size(coseArray[3]);
 
+    if (!signaturesArray) {
+      cbor_decref(&coseItem);
+      throw InvalidTokenFormatError();
+    }
+
+    // Limit signatures count to prevent resource exhaustion
+    constexpr size_t MAX_SIGNATURES = 100;
+    if (signaturesCount > MAX_SIGNATURES) {
+      cbor_decref(&coseItem);
+      throw InvalidClaimValueError("Too many signatures");
+    }
+
     for (size_t i = 0; i < signaturesCount; i++) {
       if (!cbor_isa_array(signaturesArray[i]) ||
           cbor_array_size(signaturesArray[i]) != 3) {
@@ -1318,6 +1351,10 @@ Cwt Cwt::validateMultiSignedCwt(
       }
 
       cbor_item_t** signatureStructure = cbor_array_handle(signaturesArray[i]);
+      if (!signatureStructure) {
+        cbor_decref(&coseItem);
+        throw InvalidTokenFormatError();
+      }
 
       // Extract signature protected header
       if (!cbor_isa_bytestring(signatureStructure[0])) {
@@ -1352,6 +1389,12 @@ Cwt Cwt::validateMultiSignedCwt(
             cbor_isa_map(sigHeaderItem)) {
           struct cbor_pair* pairs = cbor_map_handle(sigHeaderItem);
           size_t mapSize = cbor_map_size(sigHeaderItem);
+
+          if (!pairs) {
+            cbor_decref(&sigHeaderItem);
+            cbor_decref(&coseItem);
+            throw InvalidTokenFormatError();
+          }
 
           for (size_t j = 0; j < mapSize; j++) {
             if (cbor_isa_uint(pairs[j].key) &&

@@ -462,6 +462,11 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
       if (prot_map && cbor_isa_map(prot_map)) {
         size_t map_size = cbor_map_size(prot_map);
         cbor_pair* pairs = cbor_map_handle(prot_map);
+        if (!pairs) {
+          cbor_decref(&prot_map);
+          cbor_decref(&cose_array);
+          throw InvalidTokenFormatError{};
+        }
         for (size_t i = 0; i < map_size; ++i) {
           if (cbor_isa_uint(pairs[i].key)) {
             uint8_t key = cbor_get_uint8(pairs[i].key);
@@ -494,6 +499,11 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
     if (pay_map && cbor_isa_map(pay_map)) {
       size_t map_size = cbor_map_size(pay_map);
       cbor_pair* pairs = cbor_map_handle(pay_map);
+      if (!pairs) {
+        cbor_decref(&pay_map);
+        cbor_decref(&cose_array);
+        throw InvalidTokenFormatError{};
+      }
       for (size_t i = 0; i < map_size; ++i) {
         std::string key_str;
         if (cbor_isa_string(pairs[i].key)) {
@@ -512,6 +522,7 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
           cbor_item_t* actx_map = pairs[i].value;
           size_t actx_size = cbor_map_size(actx_map);
           cbor_pair* actx_pairs = cbor_map_handle(actx_map);
+          if (!actx_pairs) continue;
           for (size_t j = 0; j < actx_size; ++j) {
             std::string actx_key;
             if (cbor_isa_string(actx_pairs[j].key)) {
@@ -675,6 +686,16 @@ bool DpopProofValidator::validate_proof(
       auto diff = now - it->second;
       if (diff < settings_.get_effective_window()) {
         return false;  // Replay attack detected
+      }
+    }
+
+    // Automatic cleanup when map grows too large to prevent memory exhaustion
+    constexpr size_t MAX_JTI_ENTRIES = 100000;
+    if (used_jtis_.size() >= MAX_JTI_ENTRIES) {
+      cleanup_expired_jtis();
+      // If still too large after cleanup, reject to prevent DoS
+      if (used_jtis_.size() >= MAX_JTI_ENTRIES) {
+        return false;
       }
     }
 
