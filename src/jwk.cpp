@@ -112,17 +112,36 @@ std::string createPS256JWK(const std::vector<uint8_t>& public_key_der) {
 }
 
 std::string calculateJWKThumbprint(const std::string& jwk_json) {
+  // Prevent DoS from oversized JSON input
+  constexpr size_t MAX_JWK_SIZE = 8192;
+  if (jwk_json.size() > MAX_JWK_SIZE) {
+    throw CryptoError("JWK exceeds maximum allowed size");
+  }
+
   json jwk = json::parse(jwk_json);
+
+  // Validate required fields exist
+  if (!jwk.contains("kty")) {
+    throw CryptoError("JWK missing required 'kty' field");
+  }
 
   // Create canonical JWK for thumbprint calculation per RFC 7638
   json canonical;
 
   if (jwk["kty"] == "EC") {
+    // Validate EC-specific required fields
+    if (!jwk.contains("crv") || !jwk.contains("x") || !jwk.contains("y")) {
+      throw CryptoError("EC JWK missing required fields (crv, x, y)");
+    }
     canonical = {{"crv", jwk["crv"]},
                  {"kty", jwk["kty"]},
                  {"x", jwk["x"]},
                  {"y", jwk["y"]}};
   } else if (jwk["kty"] == "RSA") {
+    // Validate RSA-specific required fields
+    if (!jwk.contains("n") || !jwk.contains("e")) {
+      throw CryptoError("RSA JWK missing required fields (n, e)");
+    }
     canonical = {{"e", jwk["e"]}, {"kty", jwk["kty"]}, {"n", jwk["n"]}};
   } else {
     throw CryptoError("Unsupported key type for thumbprint: " +

@@ -280,6 +280,7 @@ class Es256Algorithm : public CryptographicAlgorithm {
   Es256Algorithm(const Es256Algorithm&) = delete;
   Es256Algorithm& operator=(const Es256Algorithm&) = delete;
 
+  [[deprecated("Use generateSecureKeyPair() for enhanced security")]]
   static std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
   generateKeyPair();
 
@@ -331,6 +332,7 @@ class Ps256Algorithm : public CryptographicAlgorithm {
   Ps256Algorithm(const Ps256Algorithm&) = delete;
   Ps256Algorithm& operator=(const Ps256Algorithm&) = delete;
 
+  [[deprecated("Use generateSecureKeyPair() for enhanced security")]]
   static std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
   generateKeyPair();
 

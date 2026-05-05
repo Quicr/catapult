@@ -177,7 +177,8 @@ struct DpopPayload {
    */
   [[nodiscard]] bool is_fresh(
       std::chrono::seconds window = std::chrono::seconds{300},
-      std::chrono::seconds future_tolerance = std::chrono::seconds{60}) const noexcept {
+      std::chrono::seconds future_tolerance = std::chrono::seconds{
+          60}) const noexcept {
     auto now =
         std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     // Reject timestamps too far in the future (prevents pre-generated proofs)
@@ -197,7 +198,8 @@ struct CatDpopSettings {
   std::optional<std::chrono::seconds>
       window;                     ///< Time window for proof validity
   std::optional<bool> honor_jti;  ///< Whether to honor JTI claims
-  std::optional<size_t> max_jti_entries;     ///< Max JTI cache size for replay protection
+  std::optional<size_t>
+      max_jti_entries;  ///< Max JTI cache size for replay protection
   std::optional<size_t> jti_cleanup_interval;  ///< How often to run JTI cleanup
   std::vector<int>
       critical_settings;  ///< Critical settings that must be understood
@@ -227,13 +229,17 @@ struct CatDpopSettings {
    * @brief Set maximum JTI cache entries for replay protection
    * @param max_entries Maximum number of JTIs to track (default 1M)
    */
-  void set_max_jti_entries(size_t max_entries) { max_jti_entries = max_entries; }
+  void set_max_jti_entries(size_t max_entries) {
+    max_jti_entries = max_entries;
+  }
 
   /**
    * @brief Set JTI cleanup interval
    * @param interval Run cleanup every N insertions (default 10000)
    */
-  void set_jti_cleanup_interval(size_t interval) { jti_cleanup_interval = interval; }
+  void set_jti_cleanup_interval(size_t interval) {
+    jti_cleanup_interval = interval;
+  }
 
   /**
    * @brief Add critical setting
