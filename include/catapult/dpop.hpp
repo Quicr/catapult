@@ -197,6 +197,8 @@ struct CatDpopSettings {
   std::optional<std::chrono::seconds>
       window;                     ///< Time window for proof validity
   std::optional<bool> honor_jti;  ///< Whether to honor JTI claims
+  std::optional<size_t> max_jti_entries;     ///< Max JTI cache size for replay protection
+  std::optional<size_t> jti_cleanup_interval;  ///< How often to run JTI cleanup
   std::vector<int>
       critical_settings;  ///< Critical settings that must be understood
 
@@ -222,6 +224,18 @@ struct CatDpopSettings {
   void set_jti_processing(bool honor) { honor_jti = honor; }
 
   /**
+   * @brief Set maximum JTI cache entries for replay protection
+   * @param max_entries Maximum number of JTIs to track (default 1M)
+   */
+  void set_max_jti_entries(size_t max_entries) { max_jti_entries = max_entries; }
+
+  /**
+   * @brief Set JTI cleanup interval
+   * @param interval Run cleanup every N insertions (default 10000)
+   */
+  void set_jti_cleanup_interval(size_t interval) { jti_cleanup_interval = interval; }
+
+  /**
    * @brief Add critical setting
    */
   void add_critical_setting(int setting_key) {
@@ -240,6 +254,20 @@ struct CatDpopSettings {
    */
   [[nodiscard]] bool get_jti_processing() const noexcept {
     return honor_jti.value_or(true);
+  }
+
+  /**
+   * @brief Get max JTI entries (default 1M for large-scale deployments)
+   */
+  [[nodiscard]] size_t get_max_jti_entries() const noexcept {
+    return max_jti_entries.value_or(1000000);
+  }
+
+  /**
+   * @brief Get JTI cleanup interval (default 10000)
+   */
+  [[nodiscard]] size_t get_jti_cleanup_interval() const noexcept {
+    return jti_cleanup_interval.value_or(10000);
   }
 };
 
