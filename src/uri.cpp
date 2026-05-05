@@ -20,25 +20,89 @@ bool isRegexPatternSafe(const std::string& pattern) {
   if (pattern.length() > MAX_REGEX_PATTERN_LENGTH) {
     return false;
   }
-  // Reject patterns with nested quantifiers that can cause catastrophic
-  // backtracking
-  int nesting_depth = 0;
-  bool in_quantifier = false;
+
+  // Track groups and whether they contain quantifiers
+  std::vector<bool> group_has_quantifier;
+  int depth = 0;
+
   for (size_t i = 0; i < pattern.length(); ++i) {
     char c = pattern[i];
-    if (c == '(') {
-      ++nesting_depth;
-    } else if (c == ')') {
-      --nesting_depth;
-    } else if (c == '+' || c == '*' || c == '?') {
-      if (in_quantifier && nesting_depth > 0) {
-        return false;  // Nested quantifier detected
+
+    // Skip escaped characters
+    if (c == '\\' && i + 1 < pattern.length()) {
+      ++i;
+      continue;
+    }
+
+    // Skip character classes
+    if (c == '[') {
+      while (i + 1 < pattern.length() && pattern[i + 1] != ']') {
+        if (pattern[i + 1] == '\\' && i + 2 < pattern.length()) {
+          i += 2;
+        } else {
+          ++i;
+        }
       }
-      in_quantifier = true;
-    } else if (c != '{') {
-      in_quantifier = false;
+      ++i;  // Skip closing ]
+      continue;
+    }
+
+    if (c == '(') {
+      // Check for non-capturing group (?:...) or other special groups
+      bool is_group = true;
+      if (i + 1 < pattern.length() && pattern[i + 1] == '?') {
+        // Skip special constructs like (?=...), (?!...), (?<=...), (?<!...)
+        if (i + 2 < pattern.length()) {
+          char next = pattern[i + 2];
+          if (next == '=' || next == '!' || next == '<') {
+            is_group = false;
+          }
+        }
+      }
+      if (is_group) {
+        group_has_quantifier.push_back(false);
+        ++depth;
+      }
+    } else if (c == ')') {
+      if (depth > 0 && !group_has_quantifier.empty()) {
+        bool inner_quantified = group_has_quantifier.back();
+        group_has_quantifier.pop_back();
+        --depth;
+        // Check if next char quantifies this group
+        if (i + 1 < pattern.length()) {
+          char next = pattern[i + 1];
+          if (next == '+' || next == '*' || next == '?' || next == '{') {
+            // Group is being quantified - if it contained quantifiers, reject
+            if (inner_quantified) {
+              return false;  // Nested quantifier: (a+)+ or similar
+            }
+            // Mark parent group as containing a quantifier
+            if (!group_has_quantifier.empty()) {
+              group_has_quantifier.back() = true;
+            }
+          }
+        }
+      }
+    } else if (c == '+' || c == '*' || c == '?') {
+      // Mark current group as containing a quantifier
+      if (!group_has_quantifier.empty()) {
+        group_has_quantifier.back() = true;
+      }
+    } else if (c == '{') {
+      // Skip {n,m} style quantifiers
+      while (i + 1 < pattern.length() && pattern[i + 1] != '}') {
+        ++i;
+      }
+      if (!group_has_quantifier.empty()) {
+        group_has_quantifier.back() = true;
+      }
+    } else if (c == '|') {
+      // Alternation inside a quantified group can cause backtracking
+      // (a|b+)+ is dangerous, but (a|b)+ is usually safe
+      // We already track quantifiers in groups, so this is handled
     }
   }
+
   return true;
 }
 }  // namespace
@@ -77,6 +141,11 @@ void UriMatcher::addPattern(const UriPattern& pattern) {
 }
 
 bool UriMatcher::matches(const std::string& uri) const {
+  // Reject oversized URIs to prevent DoS
+  if (uri.length() > MAX_URI_LENGTH) {
+    return false;
+  }
+
   // Check exact match
   if (exactPatterns.find(uri) != exactPatterns.end()) {
     return true;
@@ -113,6 +182,11 @@ bool UriMatcher::matches(const std::string& uri) const {
 std::vector<std::string> UriMatcher::getMatchingPatterns(
     const std::string& uri) const {
   std::vector<std::string> matches;
+
+  // Reject oversized URIs to prevent DoS
+  if (uri.length() > MAX_URI_LENGTH) {
+    return matches;
+  }
 
   // Check exact match
   auto exactIt = exactPatterns.find(uri);

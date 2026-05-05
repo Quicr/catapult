@@ -445,13 +445,55 @@ Es256Algorithm::generateKeyPair() {
 
 std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>
 Es256Algorithm::generateSecureKeyPair() {
-  auto keyPair = generateKeyPair();
+  CAT_LOG_DEBUG("Generating secure ES256 key pair");
+  auto pctx = EvpPkeyCtxWrapper(EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr));
+  if (!pctx.get()) {
+    CAT_LOG_ERROR("Failed to create EC key context for ES256");
+    throw CryptoError("Failed to create EC key context");
+  }
 
-  // Convert private key to secure memory, keep public key in regular memory
-  SecureVector<uint8_t> securePrivateKey(keyPair.first.begin(),
-                                         keyPair.first.end());
+  if (EVP_PKEY_keygen_init(pctx.get()) <= 0) {
+    throw CryptoError("Failed to initialize EC key generation");
+  }
 
-  return std::make_pair(std::move(securePrivateKey), std::move(keyPair.second));
+  if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(pctx.get(),
+                                             NID_X9_62_prime256v1) <= 0) {
+    throw CryptoError("Failed to set EC curve");
+  }
+
+  EVP_PKEY* pkey = nullptr;
+  if (EVP_PKEY_keygen(pctx.get(), &pkey) <= 0) {
+    throw CryptoError("Failed to generate EC key pair");
+  }
+
+  auto pkey_wrapper = EvpKeyPtr(pkey);
+
+  // Extract private key directly into secure memory
+  auto priv_bio = BioPtr(BIO_new(BIO_s_mem()));
+  if (!priv_bio.get()) {
+    throw CryptoError("Failed to create BIO for private key");
+  }
+  if (!i2d_PrivateKey_bio(priv_bio.get(), pkey)) {
+    throw CryptoError("Failed to serialize private key");
+  }
+  char* priv_data;
+  long priv_len = BIO_get_mem_data(priv_bio.get(), &priv_data);
+  SecureVector<uint8_t> securePrivateKey(priv_data, priv_data + priv_len);
+
+  // Extract public key into regular memory
+  auto pub_bio = BioPtr(BIO_new(BIO_s_mem()));
+  if (!pub_bio.get()) {
+    throw CryptoError("Failed to create BIO for public key");
+  }
+  if (!i2d_PUBKEY_bio(pub_bio.get(), pkey)) {
+    throw CryptoError("Failed to serialize public key");
+  }
+  char* pub_data;
+  long pub_len = BIO_get_mem_data(pub_bio.get(), &pub_data);
+  std::vector<uint8_t> publicKey(pub_data, pub_data + pub_len);
+
+  CAT_LOG_DEBUG("Successfully generated secure ES256 key pair");
+  return std::make_pair(std::move(securePrivateKey), std::move(publicKey));
 }
 
 std::vector<uint8_t> Es256Algorithm::getPublicKey() const {
@@ -654,13 +696,53 @@ Ps256Algorithm::generateKeyPair() {
 
 std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>
 Ps256Algorithm::generateSecureKeyPair() {
-  auto keyPair = generateKeyPair();
+  CAT_LOG_DEBUG("Generating secure PS256 key pair");
+  auto pctx = EvpPkeyCtxWrapper(EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr));
+  if (!pctx.get()) {
+    throw CryptoError("Failed to create RSA key context");
+  }
 
-  // Convert private key to secure memory, keep public key in regular memory
-  SecureVector<uint8_t> securePrivateKey(keyPair.first.begin(),
-                                         keyPair.first.end());
+  if (EVP_PKEY_keygen_init(pctx.get()) <= 0) {
+    throw CryptoError("Failed to initialize RSA key generation");
+  }
 
-  return std::make_pair(std::move(securePrivateKey), std::move(keyPair.second));
+  if (EVP_PKEY_CTX_set_rsa_keygen_bits(pctx.get(), 2048) <= 0) {
+    throw CryptoError("Failed to set RSA key size");
+  }
+
+  EVP_PKEY* pkey = nullptr;
+  if (EVP_PKEY_keygen(pctx.get(), &pkey) <= 0) {
+    throw CryptoError("Failed to generate RSA key pair");
+  }
+
+  auto pkey_wrapper = EvpKeyPtr(pkey);
+
+  // Extract private key directly into secure memory
+  auto priv_bio = BioPtr(BIO_new(BIO_s_mem()));
+  if (!priv_bio.get()) {
+    throw CryptoError("Failed to create BIO for private key");
+  }
+  if (!i2d_PrivateKey_bio(priv_bio.get(), pkey)) {
+    throw CryptoError("Failed to serialize private key");
+  }
+  char* priv_data;
+  long priv_len = BIO_get_mem_data(priv_bio.get(), &priv_data);
+  SecureVector<uint8_t> securePrivateKey(priv_data, priv_data + priv_len);
+
+  // Extract public key into regular memory
+  auto pub_bio = BioPtr(BIO_new(BIO_s_mem()));
+  if (!pub_bio.get()) {
+    throw CryptoError("Failed to create BIO for public key");
+  }
+  if (!i2d_PUBKEY_bio(pub_bio.get(), pkey)) {
+    throw CryptoError("Failed to serialize public key");
+  }
+  char* pub_data;
+  long pub_len = BIO_get_mem_data(pub_bio.get(), &pub_data);
+  std::vector<uint8_t> publicKey(pub_data, pub_data + pub_len);
+
+  CAT_LOG_DEBUG("Successfully generated secure PS256 key pair");
+  return std::make_pair(std::move(securePrivateKey), std::move(publicKey));
 }
 
 std::vector<uint8_t> Ps256Algorithm::getPublicKey() const {
@@ -946,6 +1028,8 @@ std::vector<uint8_t> AesGcmAlgorithm::decryptImpl(
   const uint8_t* tag = encryptedData.data() + ciphertext_len;
 
   // Set authentication tag
+  // Note: const_cast is safe here - OpenSSL's EVP_CTRL_GCM_SET_TAG only reads
+  // the tag data, never modifies it. The non-const API is a legacy artifact.
   if (EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_TAG,
                           crypto_constants::GCM_TAG_SIZE,
                           const_cast<uint8_t*>(tag)) != 1) {
@@ -1113,6 +1197,8 @@ std::vector<uint8_t> ChaCha20Poly1305Algorithm::decryptImpl(
   const uint8_t* tag = encryptedData.data() + ciphertext_len;
 
   // Set authentication tag
+  // Note: const_cast is safe here - OpenSSL's EVP_CTRL_AEAD_SET_TAG only reads
+  // the tag data, never modifies it. The non-const API is a legacy artifact.
   if (EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_AEAD_SET_TAG,
                           crypto_constants::ChaCha20_TAG_SIZE,
                           const_cast<uint8_t*>(tag)) != 1) {
