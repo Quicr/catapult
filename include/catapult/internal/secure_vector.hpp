@@ -213,8 +213,9 @@ inline bool constantTimeEqual(const std::vector<T>& a,
   // Compare up to the smaller size, then factor in size equality
   size_t min_size = (a.size() < b.size()) ? a.size() : b.size();
   unsigned char content_equal =
-      (min_size == 0) ? 0 : constantTimeCompare(a.data(), b.data(),
-                                                 min_size * sizeof(T));
+      (min_size == 0)
+          ? 0
+          : constantTimeCompare(a.data(), b.data(), min_size * sizeof(T));
 
   return sizes_equal && (content_equal == 0);
 }
@@ -237,8 +238,9 @@ inline bool constantTimeEqual(std::span<const T> a,
   // Compare up to the smaller size, then factor in size equality
   size_t min_size = (a.size() < b.size()) ? a.size() : b.size();
   unsigned char content_equal =
-      (min_size == 0) ? 0 : constantTimeCompare(a.data(), b.data(),
-                                                 min_size * sizeof(T));
+      (min_size == 0)
+          ? 0
+          : constantTimeCompare(a.data(), b.data(), min_size * sizeof(T));
 
   return sizes_equal && (content_equal == 0);
 }
