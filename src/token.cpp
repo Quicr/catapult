@@ -1,5 +1,6 @@
 #include "catapult/token.hpp"
 
+#include <cctype>
 #include <chrono>
 #include <sstream>
 
@@ -134,7 +135,14 @@ void CatTokenValidator::validateGeographicRestrictions(
   if (token.cat.geohash) {
     const auto& geohash = *token.cat.geohash;
     if (geohash.empty() || geohash.length() > 12) {
-      throw GeographicValidationError("Invalid geohash");
+      throw GeographicValidationError("Invalid geohash length");
+    }
+    // Validate geohash characters (base32: 0-9, b-h, j-n, p-z)
+    static constexpr std::string_view valid_chars = "0123456789bcdefghjkmnpqrstuvwxyz";
+    for (char c : geohash) {
+      if (valid_chars.find(static_cast<char>(std::tolower(static_cast<unsigned char>(c)))) == std::string_view::npos) {
+        throw GeographicValidationError("Invalid geohash character");
+      }
     }
   }
 }
