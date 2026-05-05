@@ -11,11 +11,11 @@
 #include <cbor.h>
 #include <openssl/core_names.h>
 #include <openssl/param_build.h>
+#include <openssl/rand.h>
 #include <openssl/x509.h>
 
 #include <algorithm>
 #include <iomanip>
-#include <random>
 #include <sstream>
 
 #ifdef CATAPULT_ENABLE_JSON
@@ -633,13 +633,11 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
 namespace moqt_dpop {
 
 std::string generate_jti() {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<uint32_t> dis;
-
-  std::ostringstream oss;
-  oss << std::hex << dis(gen) << dis(gen);
-  return oss.str();
+  std::vector<uint8_t> bytes(16);
+  if (RAND_bytes(bytes.data(), static_cast<int>(bytes.size())) != 1) {
+    throw CryptoError("Failed to generate random JTI");
+  }
+  return base64UrlEncode(bytes);
 }
 
 }  // namespace moqt_dpop
