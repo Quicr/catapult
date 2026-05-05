@@ -29,6 +29,9 @@ CatTokenValidator& CatTokenValidator::withExpectedAudiences(
 
 CatTokenValidator& CatTokenValidator::withClockSkewTolerance(
     int64_t toleranceSeconds) {
+  if (toleranceSeconds < 0) {
+    throw InvalidClaimValueError("Clock skew tolerance must be non-negative");
+  }
   clockSkewTolerance_ = toleranceSeconds;
   return *this;
 }
