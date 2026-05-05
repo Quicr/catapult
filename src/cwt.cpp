@@ -1079,6 +1079,10 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       isEncrypted = true;
 
       cbor_item_t** coseArray = cbor_array_handle(coseItem);
+      if (!coseArray) {
+        cbor_decref(&coseItem);
+        throw InvalidTokenFormatError();
+      }
 
       // Protected header (bytestring)
       if (!cbor_isa_bytestring(coseArray[0])) {
@@ -1133,6 +1137,10 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
 
     } else if (arraySize == 4) {
       cbor_item_t** coseArray = cbor_array_handle(coseItem);
+      if (!coseArray) {
+        cbor_decref(&coseItem);
+        throw InvalidTokenFormatError();
+      }
 
       // Check if this is COSE_Sign1 or COSE_Sign
       // COSE_Sign1: [protected_header, unprotected_header, payload, signature]
