@@ -11,7 +11,7 @@
 namespace catapult {
 namespace json_serialization {
 
-void to_json(nlohmann::json &j, const CoreClaims &claims) {
+void to_json(nlohmann::json& j, const CoreClaims& claims) {
   j = nlohmann::json::object();
 
   if (claims.iss.has_value()) {
@@ -31,7 +31,7 @@ void to_json(nlohmann::json &j, const CoreClaims &claims) {
   }
 }
 
-void to_json(nlohmann::json &j, const GeoCoordinate &coord) {
+void to_json(nlohmann::json& j, const GeoCoordinate& coord) {
   j = nlohmann::json::object();
   j["lat"] = coord.lat;
   j["lon"] = coord.lon;
@@ -40,7 +40,7 @@ void to_json(nlohmann::json &j, const GeoCoordinate &coord) {
   }
 }
 
-void to_json(nlohmann::json &j, const CatClaims &claims) {
+void to_json(nlohmann::json& j, const CatClaims& claims) {
   j = nlohmann::json::object();
 
   if (claims.catv.has_value()) {
@@ -84,7 +84,7 @@ void to_json(nlohmann::json &j, const CatClaims &claims) {
   }
 }
 
-void to_json(nlohmann::json &j, const InformationalClaims &claims) {
+void to_json(nlohmann::json& j, const InformationalClaims& claims) {
   j = nlohmann::json::object();
 
   if (claims.sub.has_value()) {
@@ -98,7 +98,7 @@ void to_json(nlohmann::json &j, const InformationalClaims &claims) {
   }
 }
 
-void to_json(nlohmann::json &j, const DpopClaims &claims) {
+void to_json(nlohmann::json& j, const DpopClaims& claims) {
   j = nlohmann::json::object();
 
   if (claims.cnf.has_value()) {
@@ -109,7 +109,7 @@ void to_json(nlohmann::json &j, const DpopClaims &claims) {
   }
 }
 
-void to_json(nlohmann::json &j, const RequestClaims &claims) {
+void to_json(nlohmann::json& j, const RequestClaims& claims) {
   j = nlohmann::json::object();
 
   if (claims.catif.has_value()) {
@@ -120,7 +120,7 @@ void to_json(nlohmann::json &j, const RequestClaims &claims) {
   }
 }
 
-void to_json(nlohmann::json &j, const MoqtBinaryMatch &match) {
+void to_json(nlohmann::json& j, const MoqtBinaryMatch& match) {
   j = nlohmann::json::object();
   j["type"] = static_cast<int>(match.match_type);
 
@@ -133,19 +133,19 @@ void to_json(nlohmann::json &j, const MoqtBinaryMatch &match) {
   j["pattern"] = pattern_str;
 }
 
-void to_json(nlohmann::json &j, const MoqtActionScope &scope) {
+void to_json(nlohmann::json& j, const MoqtActionScope& scope) {
   j = nlohmann::json::object();
   j["actions"] = scope.actions;
   to_json(j["namespace_match"], scope.namespace_match);
   to_json(j["track_match"], scope.track_match);
 }
 
-void to_json(nlohmann::json &j, const MoqtClaims &claims) {
+void to_json(nlohmann::json& j, const MoqtClaims& claims) {
   j = nlohmann::json::object();
 
   auto scopes = nlohmann::json::array();
-  const auto &scope_list = claims.getScopes();
-  for (const auto &scope : scope_list) {
+  const auto& scope_list = claims.getScopes();
+  for (const auto& scope : scope_list) {
     nlohmann::json scope_json;
     to_json(scope_json, scope);
     scopes.push_back(scope_json);
@@ -158,16 +158,16 @@ void to_json(nlohmann::json &j, const MoqtClaims &claims) {
   }
 }
 
-void to_json(nlohmann::json &j, const ExtendedCatClaims &claims) {
+void to_json(nlohmann::json& j, const ExtendedCatClaims& claims) {
   j = nlohmann::json::object();
 
   if (claims.hasMoqtClaims()) {
-    const auto *moqt_claims = claims.getMoqtClaimsReadOnly();
+    const auto* moqt_claims = claims.getMoqtClaimsReadOnly();
     to_json(j["moqt"], *moqt_claims);
   }
 }
 
-void to_json(nlohmann::json &j, const ClaimSet &claimSet) {
+void to_json(nlohmann::json& j, const ClaimSet& claimSet) {
   j = nlohmann::json::object();
 
   if (claimSet.hasToken()) {
@@ -188,13 +188,13 @@ void to_json(nlohmann::json &j, const ClaimSet &claimSet) {
   }
 }
 
-void to_json(nlohmann::json &j, const OrClaim &orClaim) {
+void to_json(nlohmann::json& j, const OrClaim& orClaim) {
   j = nlohmann::json::object();
   j["operator"] = "OR";
   j["depth"] = orClaim.getDepth();
 
   auto claims_array = nlohmann::json::array();
-  for (const auto &claim : orClaim.claims) {
+  for (const auto& claim : orClaim.claims) {
     nlohmann::json claim_json;
     to_json(claim_json, claim);
     claims_array.push_back(claim_json);
@@ -202,13 +202,13 @@ void to_json(nlohmann::json &j, const OrClaim &orClaim) {
   j["claims"] = claims_array;
 }
 
-void to_json(nlohmann::json &j, const AndClaim &andClaim) {
+void to_json(nlohmann::json& j, const AndClaim& andClaim) {
   j = nlohmann::json::object();
   j["operator"] = "AND";
   j["depth"] = andClaim.getDepth();
 
   auto claims_array = nlohmann::json::array();
-  for (const auto &claim : andClaim.claims) {
+  for (const auto& claim : andClaim.claims) {
     nlohmann::json claim_json;
     to_json(claim_json, claim);
     claims_array.push_back(claim_json);
@@ -216,13 +216,13 @@ void to_json(nlohmann::json &j, const AndClaim &andClaim) {
   j["claims"] = claims_array;
 }
 
-void to_json(nlohmann::json &j, const NorClaim &norClaim) {
+void to_json(nlohmann::json& j, const NorClaim& norClaim) {
   j = nlohmann::json::object();
   j["operator"] = "NOR";
   j["depth"] = norClaim.getDepth();
 
   auto claims_array = nlohmann::json::array();
-  for (const auto &claim : norClaim.claims) {
+  for (const auto& claim : norClaim.claims) {
     nlohmann::json claim_json;
     to_json(claim_json, claim);
     claims_array.push_back(claim_json);
@@ -230,7 +230,7 @@ void to_json(nlohmann::json &j, const NorClaim &norClaim) {
   j["claims"] = claims_array;
 }
 
-void to_json(nlohmann::json &j, const CompositeClaims &claims) {
+void to_json(nlohmann::json& j, const CompositeClaims& claims) {
   j = nlohmann::json::object();
 
   if (claims.orClaim.has_value() && claims.orClaim.value()) {
@@ -246,7 +246,7 @@ void to_json(nlohmann::json &j, const CompositeClaims &claims) {
   }
 }
 
-void to_json(nlohmann::json &j, const CatToken &token) {
+void to_json(nlohmann::json& j, const CatToken& token) {
   j = nlohmann::json::object();
 
   // Add core claims if they have any values
@@ -304,25 +304,25 @@ void to_json(nlohmann::json &j, const CatToken &token) {
   }
 }
 
-std::string to_pretty_json(const CatToken &token, int indent) {
+std::string to_pretty_json(const CatToken& token, int indent) {
   nlohmann::json j;
   to_json(j, token);
   return j.dump(indent);
 }
 
-std::string to_compact_json(const CatToken &token) {
+std::string to_compact_json(const CatToken& token) {
   nlohmann::json j;
   to_json(j, token);
   return j.dump();
 }
 
-void from_json(const nlohmann::json &j, CatToken &token) {
+void from_json(const nlohmann::json& j, CatToken& token) {
   // Clear the token first
   token = CatToken{};
 
   // Parse core claims
   if (j.contains("core") && j["core"].is_object()) {
-    const auto &core_json = j["core"];
+    const auto& core_json = j["core"];
     if (core_json.contains("iss") && core_json["iss"].is_string()) {
       token.core.iss = core_json["iss"];
     }
@@ -342,7 +342,7 @@ void from_json(const nlohmann::json &j, CatToken &token) {
 
   // Parse CAT claims
   if (j.contains("cat") && j["cat"].is_object()) {
-    const auto &cat_json = j["cat"];
+    const auto& cat_json = j["cat"];
     if (cat_json.contains("catv") && cat_json["catv"].is_string()) {
       token.cat.catv = cat_json["catv"];
     }
@@ -357,7 +357,7 @@ void from_json(const nlohmann::json &j, CatToken &token) {
     }
     if (cat_json.contains("catgeocoord") &&
         cat_json["catgeocoord"].is_object()) {
-      const auto &coord_json = cat_json["catgeocoord"];
+      const auto& coord_json = cat_json["catgeocoord"];
       if (coord_json.contains("lat") && coord_json.contains("lon")) {
         double lat = coord_json["lat"];
         double lon = coord_json["lon"];
@@ -400,7 +400,7 @@ void from_json(const nlohmann::json &j, CatToken &token) {
 
   // Parse informational claims
   if (j.contains("informational") && j["informational"].is_object()) {
-    const auto &info_json = j["informational"];
+    const auto& info_json = j["informational"];
     if (info_json.contains("sub") && info_json["sub"].is_string()) {
       token.informational.sub = info_json["sub"];
     }
@@ -414,7 +414,7 @@ void from_json(const nlohmann::json &j, CatToken &token) {
 
   // Parse DPoP claims
   if (j.contains("dpop") && j["dpop"].is_object()) {
-    const auto &dpop_json = j["dpop"];
+    const auto& dpop_json = j["dpop"];
     if (dpop_json.contains("cnf") && dpop_json["cnf"].is_string()) {
       token.dpop.cnf = dpop_json["cnf"];
     }
@@ -425,7 +425,7 @@ void from_json(const nlohmann::json &j, CatToken &token) {
 
   // Parse request claims
   if (j.contains("request") && j["request"].is_object()) {
-    const auto &request_json = j["request"];
+    const auto& request_json = j["request"];
     if (request_json.contains("catif") && request_json["catif"].is_string()) {
       token.request.catif = request_json["catif"];
     }
@@ -436,7 +436,7 @@ void from_json(const nlohmann::json &j, CatToken &token) {
 
   // Parse custom claims
   if (j.contains("custom") && j["custom"].is_array()) {
-    for (const auto &custom_pair : j["custom"]) {
+    for (const auto& custom_pair : j["custom"]) {
       if (custom_pair.is_array() && custom_pair.size() == 2) {
         int64_t key = custom_pair[0];
         std::string value = custom_pair[1];
@@ -450,13 +450,13 @@ void from_json(const nlohmann::json &j, CatToken &token) {
   // In a production implementation, you'd want full bidirectional parsing
 }
 
-std::string to_base64_json(const CatToken &token, bool pretty, int indent) {
+std::string to_base64_json(const CatToken& token, bool pretty, int indent) {
   std::string json_str =
       pretty ? to_pretty_json(token, indent) : to_compact_json(token);
   return base64_utils::json_to_base64(json_str);
 }
 
-CatToken from_base64_json(const std::string &base64_json) {
+CatToken from_base64_json(const std::string& base64_json) {
   if (!base64_utils::is_valid_base64(base64_json)) {
     throw std::invalid_argument("Invalid base64 format");
   }
@@ -472,25 +472,25 @@ CatToken from_base64_json(const std::string &base64_json) {
 
 namespace base64_utils {
 
-std::string json_to_base64(const std::string &json_string) {
+std::string json_to_base64(const std::string& json_string) {
   // Convert string to vector<uint8_t> for base64 encoding
   std::vector<uint8_t> data(json_string.begin(), json_string.end());
   return base64UrlEncode(data);
 }
 
-std::string base64_to_json(const std::string &base64_string) {
+std::string base64_to_json(const std::string& base64_string) {
   try {
     // Decode base64 to vector<uint8_t>
     std::vector<uint8_t> decoded_data = base64UrlDecode(base64_string);
     // Convert back to string
     return std::string(decoded_data.begin(), decoded_data.end());
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     throw std::invalid_argument("Failed to decode base64: " +
                                 std::string(e.what()));
   }
 }
 
-bool is_valid_base64(const std::string &base64_string) {
+bool is_valid_base64(const std::string& base64_string) {
   if (base64_string.empty()) {
     return false;
   }
@@ -499,12 +499,12 @@ bool is_valid_base64(const std::string &base64_string) {
   try {
     base64UrlDecode(base64_string);
     return true;
-  } catch (const std::exception &) {
+  } catch (const std::exception&) {
     return false;
   }
 }
 
-} // namespace base64_utils
+}  // namespace base64_utils
 
-} // namespace json_serialization
-} // namespace catapult
+}  // namespace json_serialization
+}  // namespace catapult

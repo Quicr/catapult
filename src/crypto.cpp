@@ -23,59 +23,56 @@
 namespace catapult {
 
 // RAII deleter implementations
-void EvpKeyDeleter::operator()(EVP_PKEY *key) const noexcept {
-  if (key)
-    EVP_PKEY_free(key);
+void EvpKeyDeleter::operator()(EVP_PKEY* key) const noexcept {
+  if (key) EVP_PKEY_free(key);
 }
 
-void BioDeleter::operator()(BIO *bio) const noexcept {
-  if (bio)
-    BIO_free(bio);
+void BioDeleter::operator()(BIO* bio) const noexcept {
+  if (bio) BIO_free(bio);
 }
 
 /**
  * @brief RAII wrapper for OpenSSL contexts
  */
-template <typename T, void (*Deleter)(T *)> class OpenSSLWrapper {
-public:
-  explicit OpenSSLWrapper(T *ptr) : ptr_(ptr) {}
+template <typename T, void (*Deleter)(T*)>
+class OpenSSLWrapper {
+ public:
+  explicit OpenSSLWrapper(T* ptr) : ptr_(ptr) {}
   ~OpenSSLWrapper() {
-    if (ptr_)
-      Deleter(ptr_);
+    if (ptr_) Deleter(ptr_);
   }
 
   // Move-only semantics
-  OpenSSLWrapper(const OpenSSLWrapper &) = delete;
-  OpenSSLWrapper &operator=(const OpenSSLWrapper &) = delete;
-  OpenSSLWrapper(OpenSSLWrapper &&other) noexcept : ptr_(other.ptr_) {
+  OpenSSLWrapper(const OpenSSLWrapper&) = delete;
+  OpenSSLWrapper& operator=(const OpenSSLWrapper&) = delete;
+  OpenSSLWrapper(OpenSSLWrapper&& other) noexcept : ptr_(other.ptr_) {
     other.ptr_ = nullptr;
   }
-  OpenSSLWrapper &operator=(OpenSSLWrapper &&other) noexcept {
+  OpenSSLWrapper& operator=(OpenSSLWrapper&& other) noexcept {
     if (this != &other) {
-      if (ptr_)
-        Deleter(ptr_);
+      if (ptr_) Deleter(ptr_);
       ptr_ = other.ptr_;
       other.ptr_ = nullptr;
     }
     return *this;
   }
 
-  T *get() const noexcept { return ptr_; }
-  T *release() noexcept {
-    T *tmp = ptr_;
+  T* get() const noexcept { return ptr_; }
+  T* release() noexcept {
+    T* tmp = ptr_;
     ptr_ = nullptr;
     return tmp;
   }
 
-private:
-  T *ptr_;
+ private:
+  T* ptr_;
 };
 
 using EvpMdCtxWrapper = OpenSSLWrapper<EVP_MD_CTX, EVP_MD_CTX_free>;
 using EvpPkeyCtxWrapper = OpenSSLWrapper<EVP_PKEY_CTX, EVP_PKEY_CTX_free>;
 using EvpCipherCtxWrapper = OpenSSLWrapper<EVP_CIPHER_CTX, EVP_CIPHER_CTX_free>;
 
-std::vector<uint8_t> hashSha256(const std::vector<uint8_t> &data) {
+std::vector<uint8_t> hashSha256(const std::vector<uint8_t>& data) {
   std::vector<uint8_t> hash(SHA256_DIGEST_LENGTH);
   SHA256(data.data(), data.size(), hash.data());
   return hash;
@@ -83,7 +80,7 @@ std::vector<uint8_t> hashSha256(const std::vector<uint8_t> &data) {
 
 // Base structure builder - handles common CBOR operations
 class SigStructureBuilder {
-protected:
+ protected:
   CborItemPtr createArray(size_t size) {
     auto array = CborItemPtr(cbor_new_definite_array(size));
     if (!array) {
@@ -92,22 +89,22 @@ protected:
     return array;
   }
 
-  void addString(CborItemPtr &array, const std::string &value) {
+  void addString(CborItemPtr& array, const std::string& value) {
     auto item = CborItemPtr(cbor_build_string(value.c_str()));
     if (!item || !cbor_array_push(array.get(), item.release())) {
       throw InvalidCborError("Failed to add string to Sig_structure");
     }
   }
 
-  void addByteString(CborItemPtr &array, const std::vector<uint8_t> &data) {
+  void addByteString(CborItemPtr& array, const std::vector<uint8_t>& data) {
     auto item = CborItemPtr(cbor_build_bytestring(data.data(), data.size()));
     if (!item || !cbor_array_push(array.get(), item.release())) {
       throw InvalidCborError("Failed to add bytestring to Sig_structure");
     }
   }
 
-  std::vector<uint8_t> serialize(CborItemPtr &structure) {
-    unsigned char *raw_buffer;
+  std::vector<uint8_t> serialize(CborItemPtr& structure) {
+    unsigned char* raw_buffer;
     size_t buffer_size;
     size_t length =
         cbor_serialize_alloc(structure.get(), &raw_buffer, &buffer_size);
@@ -121,23 +118,24 @@ protected:
     return std::vector<uint8_t>(buffer.get(), buffer.get() + length);
   }
 
-public:
+ public:
   virtual ~SigStructureBuilder() = default;
   virtual std::vector<uint8_t> build() = 0;
 };
 
 // Single signature implementation
 class SingleSignatureStructureBuilder : public SigStructureBuilder {
-private:
+ private:
   std::vector<uint8_t> protectedHeader_;
   std::vector<uint8_t> externalAAD_;
   std::vector<uint8_t> payload_;
 
-public:
-  SingleSignatureStructureBuilder(const std::vector<uint8_t> &protectedHeader,
-                                  const std::vector<uint8_t> &externalAAD,
-                                  const std::vector<uint8_t> &payload)
-      : protectedHeader_(protectedHeader), externalAAD_(externalAAD),
+ public:
+  SingleSignatureStructureBuilder(const std::vector<uint8_t>& protectedHeader,
+                                  const std::vector<uint8_t>& externalAAD,
+                                  const std::vector<uint8_t>& payload)
+      : protectedHeader_(protectedHeader),
+        externalAAD_(externalAAD),
         payload_(payload) {}
 
   std::vector<uint8_t> build() override {
@@ -159,7 +157,7 @@ public:
 
       return serialize(sigStructure);
 
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       CAT_LOG_ERROR("Failed to create COSE_Sign1 Sig_structure: {}", e.what());
       throw InvalidCborError(
           std::string("COSE_Sign1 Sig_structure creation failed: ") + e.what());
@@ -169,21 +167,22 @@ public:
 
 // Multi-signature implementation
 class MultiSignatureStructureBuilder : public SigStructureBuilder {
-private:
+ private:
   std::vector<uint8_t> bodyProtectedHeader_;
   std::vector<uint8_t> signatureProtectedHeader_;
   std::vector<uint8_t> externalAAD_;
   std::vector<uint8_t> payload_;
 
-public:
+ public:
   MultiSignatureStructureBuilder(
-      const std::vector<uint8_t> &bodyProtectedHeader,
-      const std::vector<uint8_t> &signatureProtectedHeader,
-      const std::vector<uint8_t> &externalAAD,
-      const std::vector<uint8_t> &payload)
+      const std::vector<uint8_t>& bodyProtectedHeader,
+      const std::vector<uint8_t>& signatureProtectedHeader,
+      const std::vector<uint8_t>& externalAAD,
+      const std::vector<uint8_t>& payload)
       : bodyProtectedHeader_(bodyProtectedHeader),
         signatureProtectedHeader_(signatureProtectedHeader),
-        externalAAD_(externalAAD), payload_(payload) {}
+        externalAAD_(externalAAD),
+        payload_(payload) {}
 
   std::vector<uint8_t> build() override {
     try {
@@ -207,7 +206,7 @@ public:
 
       return serialize(sigStructure);
 
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       CAT_LOG_ERROR("Failed to create COSE_Sign Sig_structure: {}", e.what());
       throw InvalidCborError(
           std::string("COSE_Sign Sig_structure creation failed: ") + e.what());
@@ -215,28 +214,27 @@ public:
   }
 };
 
-std::vector<uint8_t>
-createCoseSign1Input(const std::vector<uint8_t> &protectedHeader,
-                     const std::vector<uint8_t> &payload,
-                     const std::vector<uint8_t> &externalAAD) {
+std::vector<uint8_t> createCoseSign1Input(
+    const std::vector<uint8_t>& protectedHeader,
+    const std::vector<uint8_t>& payload,
+    const std::vector<uint8_t>& externalAAD) {
   SingleSignatureStructureBuilder builder(protectedHeader, externalAAD,
                                           payload);
   return builder.build();
 }
 
-std::vector<uint8_t>
-createCoseSignInput(const std::vector<uint8_t> &bodyProtectedHeader,
-                    const std::vector<uint8_t> &signatureProtectedHeader,
-                    const std::vector<uint8_t> &externalAAD,
-                    const std::vector<uint8_t> &payload) {
+std::vector<uint8_t> createCoseSignInput(
+    const std::vector<uint8_t>& bodyProtectedHeader,
+    const std::vector<uint8_t>& signatureProtectedHeader,
+    const std::vector<uint8_t>& externalAAD,
+    const std::vector<uint8_t>& payload) {
   MultiSignatureStructureBuilder builder(
       bodyProtectedHeader, signatureProtectedHeader, externalAAD, payload);
   return builder.build();
 }
 
-std::vector<uint8_t>
-createJwtSigningInput(const std::vector<uint8_t> &header,
-                      const std::vector<uint8_t> &payload) {
+std::vector<uint8_t> createJwtSigningInput(
+    const std::vector<uint8_t>& header, const std::vector<uint8_t>& payload) {
   // Legacy JWT-style signing input for testing purposes.
   std::string headerB64 = base64UrlEncode(header);
   std::string payloadB64 = base64UrlEncode(payload);
@@ -280,8 +278,8 @@ std::vector<uint8_t> HmacSha256Algorithm::generateKey() {
   return key;
 }
 
-std::vector<uint8_t>
-HmacSha256Algorithm::signImpl(std::span<const uint8_t> data) const {
+std::vector<uint8_t> HmacSha256Algorithm::signImpl(
+    std::span<const uint8_t> data) const {
   // Use secure memory for intermediate computation to protect against memory
   // analysis
   SecureVector<uint8_t> secure_result(EVP_MAX_MD_SIZE);
@@ -304,7 +302,7 @@ bool HmacSha256Algorithm::verifyImpl(std::span<const uint8_t> data,
     // Use constant-time comparison to prevent timing attacks
     return secure_utils::constantTimeEqual(
         std::span<const uint8_t>(computedSignature), signature);
-  } catch (const CryptoError &) {
+  } catch (const CryptoError&) {
     return false;
   }
 }
@@ -313,15 +311,13 @@ int64_t HmacSha256Algorithm::algorithmId() const { return ALG_HMAC256_256; }
 
 // Default implementation for base class - throws error for non-encryption
 // algorithms
-std::vector<uint8_t>
-CryptographicAlgorithm::encryptImpl(std::span<const uint8_t>,
-                                    std::span<const uint8_t>) const {
+std::vector<uint8_t> CryptographicAlgorithm::encryptImpl(
+    std::span<const uint8_t>, std::span<const uint8_t>) const {
   throw CryptoError("Algorithm does not support encryption");
 }
 
-std::vector<uint8_t>
-CryptographicAlgorithm::decryptImpl(std::span<const uint8_t>,
-                                    std::span<const uint8_t>) const {
+std::vector<uint8_t> CryptographicAlgorithm::decryptImpl(
+    std::span<const uint8_t>, std::span<const uint8_t>) const {
   throw CryptoError("Algorithm does not support decryption");
 }
 
@@ -338,12 +334,12 @@ struct Es256Algorithm::Impl {
 void Es256Algorithm::initializeImpl() {
   try {
     pImpl_ = std::make_unique<Impl>();
-  } catch (const std::bad_alloc &) {
+  } catch (const std::bad_alloc&) {
     throwOsError("Es256Algorithm constructor memory allocation");
   }
 }
 
-void Es256Algorithm::loadPrivateKey(const uint8_t *keyData, size_t keySize) {
+void Es256Algorithm::loadPrivateKey(const uint8_t* keyData, size_t keySize) {
   auto priv_bio = BioPtr(BIO_new_mem_buf(keyData, keySize));
   pImpl_->privateKey.reset(d2i_PrivateKey_bio(priv_bio.get(), nullptr));
 
@@ -352,7 +348,7 @@ void Es256Algorithm::loadPrivateKey(const uint8_t *keyData, size_t keySize) {
   }
 }
 
-void Es256Algorithm::loadPublicKey(const uint8_t *keyData, size_t keySize) {
+void Es256Algorithm::loadPublicKey(const uint8_t* keyData, size_t keySize) {
   auto pub_bio = BioPtr(BIO_new_mem_buf(keyData, keySize));
   pImpl_->publicKey.reset(d2i_PUBKEY_bio(pub_bio.get(), nullptr));
 
@@ -368,31 +364,31 @@ Es256Algorithm::Es256Algorithm() {
   loadPublicKey(keyPair.second.data(), keyPair.second.size());
 }
 
-Es256Algorithm::Es256Algorithm(const std::vector<uint8_t> &privateKey,
-                               const std::vector<uint8_t> &publicKey) {
+Es256Algorithm::Es256Algorithm(const std::vector<uint8_t>& privateKey,
+                               const std::vector<uint8_t>& publicKey) {
   initializeImpl();
   loadPrivateKey(privateKey.data(), privateKey.size());
   loadPublicKey(publicKey.data(), publicKey.size());
 }
 
-Es256Algorithm::Es256Algorithm(const SecureVector<uint8_t> &privateKey,
-                               const std::vector<uint8_t> &publicKey) {
+Es256Algorithm::Es256Algorithm(const SecureVector<uint8_t>& privateKey,
+                               const std::vector<uint8_t>& publicKey) {
   initializeImpl();
   loadPrivateKey(privateKey.data(), privateKey.size());
   loadPublicKey(publicKey.data(), publicKey.size());
 }
 
-Es256Algorithm::Es256Algorithm(const std::vector<uint8_t> &publicKey) {
+Es256Algorithm::Es256Algorithm(const std::vector<uint8_t>& publicKey) {
   initializeImpl();
   loadPublicKey(publicKey.data(), publicKey.size());
 }
 
 Es256Algorithm::~Es256Algorithm() = default;
 
-Es256Algorithm::Es256Algorithm(Es256Algorithm &&other) noexcept
+Es256Algorithm::Es256Algorithm(Es256Algorithm&& other) noexcept
     : pImpl_(std::move(other.pImpl_)) {}
 
-Es256Algorithm &Es256Algorithm::operator=(Es256Algorithm &&other) noexcept {
+Es256Algorithm& Es256Algorithm::operator=(Es256Algorithm&& other) noexcept {
   if (this != &other) {
     pImpl_ = std::move(other.pImpl_);
   }
@@ -417,7 +413,7 @@ Es256Algorithm::generateKeyPair() {
     throw CryptoError("Failed to set EC curve");
   }
 
-  EVP_PKEY *pkey = nullptr;
+  EVP_PKEY* pkey = nullptr;
   if (EVP_PKEY_keygen(pctx.get(), &pkey) <= 0) {
     throw CryptoError("Failed to generate EC key pair");
   }
@@ -425,7 +421,7 @@ Es256Algorithm::generateKeyPair() {
   // Extract private and public keys as DER using RAII wrappers
   auto priv_bio = BioPtr(BIO_new(BIO_s_mem()));
   auto pub_bio = BioPtr(BIO_new(BIO_s_mem()));
-  auto pkey_wrapper = EvpKeyPtr(pkey); // Wrap for automatic cleanup
+  auto pkey_wrapper = EvpKeyPtr(pkey);  // Wrap for automatic cleanup
 
   if (!priv_bio.get() || !pub_bio.get()) {
     throw CryptoError("Failed to create BIO objects");
@@ -436,8 +432,8 @@ Es256Algorithm::generateKeyPair() {
     throw CryptoError("Failed to serialize keys");
   }
 
-  char *priv_data;
-  char *pub_data;
+  char* priv_data;
+  char* pub_data;
   long priv_len = BIO_get_mem_data(priv_bio.get(), &priv_data);
   long pub_len = BIO_get_mem_data(pub_bio.get(), &pub_data);
 
@@ -445,7 +441,7 @@ Es256Algorithm::generateKeyPair() {
   std::vector<uint8_t> publicKey(pub_data, pub_data + pub_len);
 
   // Securely clear BIO buffer containing private key before it's freed
-  BUF_MEM *bm = nullptr;
+  BUF_MEM* bm = nullptr;
   BIO_get_mem_ptr(priv_bio.get(), &bm);
   if (bm && bm->data && bm->length > 0) {
     OPENSSL_cleanse(bm->data, bm->length);
@@ -472,7 +468,7 @@ Es256Algorithm::generateSecureKeyPair() {
     throw CryptoError("Failed to set EC curve");
   }
 
-  EVP_PKEY *pkey = nullptr;
+  EVP_PKEY* pkey = nullptr;
   if (EVP_PKEY_keygen(pctx.get(), &pkey) <= 0) {
     throw CryptoError("Failed to generate EC key pair");
   }
@@ -487,12 +483,12 @@ Es256Algorithm::generateSecureKeyPair() {
   if (!i2d_PrivateKey_bio(priv_bio.get(), pkey)) {
     throw CryptoError("Failed to serialize private key");
   }
-  char *priv_data;
+  char* priv_data;
   long priv_len = BIO_get_mem_data(priv_bio.get(), &priv_data);
   SecureVector<uint8_t> securePrivateKey(priv_data, priv_data + priv_len);
 
   // Securely clear BIO buffer containing private key before it's freed
-  BUF_MEM *bm = nullptr;
+  BUF_MEM* bm = nullptr;
   BIO_get_mem_ptr(priv_bio.get(), &bm);
   if (bm && bm->data && bm->length > 0) {
     OPENSSL_cleanse(bm->data, bm->length);
@@ -506,7 +502,7 @@ Es256Algorithm::generateSecureKeyPair() {
   if (!i2d_PUBKEY_bio(pub_bio.get(), pkey)) {
     throw CryptoError("Failed to serialize public key");
   }
-  char *pub_data;
+  char* pub_data;
   long pub_len = BIO_get_mem_data(pub_bio.get(), &pub_data);
   std::vector<uint8_t> publicKey(pub_data, pub_data + pub_len);
 
@@ -524,22 +520,21 @@ std::vector<uint8_t> Es256Algorithm::getPublicKey() const {
     return std::vector<uint8_t>();
   }
 
-  char *data;
+  char* data;
   long len = BIO_get_mem_data(bio.get(), &data);
   std::vector<uint8_t> result(data, data + len);
 
   return result;
 }
 
-std::vector<uint8_t>
-Es256Algorithm::signImpl(std::span<const uint8_t> data) const {
+std::vector<uint8_t> Es256Algorithm::signImpl(
+    std::span<const uint8_t> data) const {
   if (!pImpl_->privateKey) {
     throw CryptoError("No private key available for signing");
   }
 
   auto mdctx = EvpMdCtxWrapper(EVP_MD_CTX_new());
-  if (!mdctx.get())
-    throw CryptoError("Failed to create signing context");
+  if (!mdctx.get()) throw CryptoError("Failed to create signing context");
 
   if (EVP_DigestSignInit(mdctx.get(), nullptr, EVP_sha256(), nullptr,
                          pImpl_->privateKey.get()) <= 0) {
@@ -578,8 +573,7 @@ bool Es256Algorithm::verifyImpl(std::span<const uint8_t> data,
 
   // Use RAII wrapper for automatic cleanup
   auto mdctx = EvpMdCtxWrapper(EVP_MD_CTX_new());
-  if (!mdctx.get())
-    return false;
+  if (!mdctx.get()) return false;
 
   if (EVP_DigestVerifyInit(mdctx.get(), nullptr, EVP_sha256(), nullptr,
                            pImpl_->publicKey.get()) <= 0) {
@@ -611,12 +605,12 @@ struct Ps256Algorithm::Impl {
 void Ps256Algorithm::initializeImpl() {
   try {
     pImpl_ = std::make_unique<Impl>();
-  } catch (const std::bad_alloc &) {
+  } catch (const std::bad_alloc&) {
     throwOsError("Ps256Algorithm constructor memory allocation");
   }
 }
 
-void Ps256Algorithm::loadPrivateKey(const uint8_t *keyData, size_t keySize) {
+void Ps256Algorithm::loadPrivateKey(const uint8_t* keyData, size_t keySize) {
   auto priv_bio = BioPtr(BIO_new_mem_buf(keyData, keySize));
   if (!priv_bio) {
     throw CryptoError("Failed to create BIO for private key");
@@ -627,7 +621,7 @@ void Ps256Algorithm::loadPrivateKey(const uint8_t *keyData, size_t keySize) {
   }
 }
 
-void Ps256Algorithm::loadPublicKey(const uint8_t *keyData, size_t keySize) {
+void Ps256Algorithm::loadPublicKey(const uint8_t* keyData, size_t keySize) {
   auto pub_bio = BioPtr(BIO_new_mem_buf(keyData, keySize));
   if (!pub_bio) {
     throw CryptoError("Failed to create BIO for public key");
@@ -645,31 +639,31 @@ Ps256Algorithm::Ps256Algorithm() {
   loadPublicKey(keyPair.second.data(), keyPair.second.size());
 }
 
-Ps256Algorithm::Ps256Algorithm(const std::vector<uint8_t> &privateKey,
-                               const std::vector<uint8_t> &publicKey) {
+Ps256Algorithm::Ps256Algorithm(const std::vector<uint8_t>& privateKey,
+                               const std::vector<uint8_t>& publicKey) {
   initializeImpl();
   loadPrivateKey(privateKey.data(), privateKey.size());
   loadPublicKey(publicKey.data(), publicKey.size());
 }
 
-Ps256Algorithm::Ps256Algorithm(const SecureVector<uint8_t> &privateKey,
-                               const std::vector<uint8_t> &publicKey) {
+Ps256Algorithm::Ps256Algorithm(const SecureVector<uint8_t>& privateKey,
+                               const std::vector<uint8_t>& publicKey) {
   initializeImpl();
   loadPrivateKey(privateKey.data(), privateKey.size());
   loadPublicKey(publicKey.data(), publicKey.size());
 }
 
-Ps256Algorithm::Ps256Algorithm(const std::vector<uint8_t> &publicKey) {
+Ps256Algorithm::Ps256Algorithm(const std::vector<uint8_t>& publicKey) {
   initializeImpl();
   loadPublicKey(publicKey.data(), publicKey.size());
 }
 
 Ps256Algorithm::~Ps256Algorithm() = default;
 
-Ps256Algorithm::Ps256Algorithm(Ps256Algorithm &&other) noexcept
+Ps256Algorithm::Ps256Algorithm(Ps256Algorithm&& other) noexcept
     : pImpl_(std::move(other.pImpl_)) {}
 
-Ps256Algorithm &Ps256Algorithm::operator=(Ps256Algorithm &&other) noexcept {
+Ps256Algorithm& Ps256Algorithm::operator=(Ps256Algorithm&& other) noexcept {
   if (this != &other) {
     pImpl_ = std::move(other.pImpl_);
   }
@@ -680,8 +674,7 @@ std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
 Ps256Algorithm::generateKeyPair() {
   // Use RAII wrapper for automatic cleanup
   auto pctx = EvpPkeyCtxWrapper(EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr));
-  if (!pctx.get())
-    throw CryptoError("Failed to create RSA key context");
+  if (!pctx.get()) throw CryptoError("Failed to create RSA key context");
 
   if (EVP_PKEY_keygen_init(pctx.get()) <= 0) {
     throw CryptoError("Failed to initialize RSA key generation");
@@ -691,7 +684,7 @@ Ps256Algorithm::generateKeyPair() {
     throw CryptoError("Failed to set RSA key size");
   }
 
-  EVP_PKEY *pkey = nullptr;
+  EVP_PKEY* pkey = nullptr;
   if (EVP_PKEY_keygen(pctx.get(), &pkey) <= 0) {
     throw CryptoError("Failed to generate RSA key pair");
   }
@@ -699,7 +692,7 @@ Ps256Algorithm::generateKeyPair() {
   // Extract private and public keys as DER using RAII wrappers
   auto priv_bio = BioPtr(BIO_new(BIO_s_mem()));
   auto pub_bio = BioPtr(BIO_new(BIO_s_mem()));
-  auto pkey_wrapper = EvpKeyPtr(pkey); // Wrap for automatic cleanup
+  auto pkey_wrapper = EvpKeyPtr(pkey);  // Wrap for automatic cleanup
 
   if (!priv_bio.get() || !pub_bio.get()) {
     throw CryptoError("Failed to create BIO objects");
@@ -710,8 +703,8 @@ Ps256Algorithm::generateKeyPair() {
     throw CryptoError("Failed to serialize keys");
   }
 
-  char *priv_data;
-  char *pub_data;
+  char* priv_data;
+  char* pub_data;
   long priv_len = BIO_get_mem_data(priv_bio.get(), &priv_data);
   long pub_len = BIO_get_mem_data(pub_bio.get(), &pub_data);
 
@@ -719,7 +712,7 @@ Ps256Algorithm::generateKeyPair() {
   std::vector<uint8_t> publicKey(pub_data, pub_data + pub_len);
 
   // Securely clear BIO buffer containing private key before it's freed
-  BUF_MEM *bm = nullptr;
+  BUF_MEM* bm = nullptr;
   BIO_get_mem_ptr(priv_bio.get(), &bm);
   if (bm && bm->data && bm->length > 0) {
     OPENSSL_cleanse(bm->data, bm->length);
@@ -744,7 +737,7 @@ Ps256Algorithm::generateSecureKeyPair() {
     throw CryptoError("Failed to set RSA key size");
   }
 
-  EVP_PKEY *pkey = nullptr;
+  EVP_PKEY* pkey = nullptr;
   if (EVP_PKEY_keygen(pctx.get(), &pkey) <= 0) {
     throw CryptoError("Failed to generate RSA key pair");
   }
@@ -759,12 +752,12 @@ Ps256Algorithm::generateSecureKeyPair() {
   if (!i2d_PrivateKey_bio(priv_bio.get(), pkey)) {
     throw CryptoError("Failed to serialize private key");
   }
-  char *priv_data;
+  char* priv_data;
   long priv_len = BIO_get_mem_data(priv_bio.get(), &priv_data);
   SecureVector<uint8_t> securePrivateKey(priv_data, priv_data + priv_len);
 
   // Securely clear BIO buffer containing private key before it's freed
-  BUF_MEM *bm = nullptr;
+  BUF_MEM* bm = nullptr;
   BIO_get_mem_ptr(priv_bio.get(), &bm);
   if (bm && bm->data && bm->length > 0) {
     OPENSSL_cleanse(bm->data, bm->length);
@@ -778,7 +771,7 @@ Ps256Algorithm::generateSecureKeyPair() {
   if (!i2d_PUBKEY_bio(pub_bio.get(), pkey)) {
     throw CryptoError("Failed to serialize public key");
   }
-  char *pub_data;
+  char* pub_data;
   long pub_len = BIO_get_mem_data(pub_bio.get(), &pub_data);
   std::vector<uint8_t> publicKey(pub_data, pub_data + pub_len);
 
@@ -796,15 +789,15 @@ std::vector<uint8_t> Ps256Algorithm::getPublicKey() const {
     return std::vector<uint8_t>();
   }
 
-  char *data;
+  char* data;
   long len = BIO_get_mem_data(bio.get(), &data);
   std::vector<uint8_t> result(data, data + len);
 
   return result;
 }
 
-std::vector<uint8_t>
-Ps256Algorithm::signImpl(std::span<const uint8_t> data) const {
+std::vector<uint8_t> Ps256Algorithm::signImpl(
+    std::span<const uint8_t> data) const {
   if (!pImpl_->privateKey) {
     throw CryptoError("No private key available for signing");
   }
@@ -812,8 +805,7 @@ Ps256Algorithm::signImpl(std::span<const uint8_t> data) const {
   // Use RAII wrapper for automatic cleanup
   auto pctx =
       EvpPkeyCtxWrapper(EVP_PKEY_CTX_new(pImpl_->privateKey.get(), nullptr));
-  if (!pctx.get())
-    throw CryptoError("Failed to create signing context");
+  if (!pctx.get()) throw CryptoError("Failed to create signing context");
 
   if (EVP_PKEY_sign_init(pctx.get()) <= 0) {
     throw CryptoError("Failed to initialize signing");
@@ -859,8 +851,7 @@ bool Ps256Algorithm::verifyImpl(std::span<const uint8_t> data,
   // Use RAII wrapper for automatic cleanup
   auto pctx =
       EvpPkeyCtxWrapper(EVP_PKEY_CTX_new(pImpl_->publicKey.get(), nullptr));
-  if (!pctx.get())
-    return false;
+  if (!pctx.get()) return false;
 
   if (EVP_PKEY_verify_init(pctx.get()) <= 0) {
     return false;
@@ -888,7 +879,7 @@ int64_t Ps256Algorithm::algorithmId() const { return ALG_PS256; }
 // AES-GCM Algorithm
 //
 
-AesGcmAlgorithm::AesGcmAlgorithm(const std::vector<uint8_t> &key,
+AesGcmAlgorithm::AesGcmAlgorithm(const std::vector<uint8_t>& key,
                                  int64_t algorithmId)
     : key_(key.begin(), key.end()), algorithmId_(algorithmId) {
   if (!crypto_constants::is_valid_aes_key_size(key.size())) {
@@ -897,26 +888,26 @@ AesGcmAlgorithm::AesGcmAlgorithm(const std::vector<uint8_t> &key,
 
   // Validate algorithm ID matches key size
   switch (algorithmId) {
-  case ALG_A128GCM:
-    if (key.size() != crypto_constants::AES128_KEY_SIZE) {
-      throw CryptoError(
-          "Key size doesn't match algorithm (A128GCM requires 128-bit key)");
-    }
-    break;
-  case ALG_A192GCM:
-    if (key.size() != crypto_constants::AES192_KEY_SIZE) {
-      throw CryptoError(
-          "Key size doesn't match algorithm (A192GCM requires 192-bit key)");
-    }
-    break;
-  case ALG_A256GCM:
-    if (key.size() != crypto_constants::AES256_KEY_SIZE) {
-      throw CryptoError(
-          "Key size doesn't match algorithm (A256GCM requires 256-bit key)");
-    }
-    break;
-  default:
-    throw CryptoError("Invalid AES-GCM algorithm identifier");
+    case ALG_A128GCM:
+      if (key.size() != crypto_constants::AES128_KEY_SIZE) {
+        throw CryptoError(
+            "Key size doesn't match algorithm (A128GCM requires 128-bit key)");
+      }
+      break;
+    case ALG_A192GCM:
+      if (key.size() != crypto_constants::AES192_KEY_SIZE) {
+        throw CryptoError(
+            "Key size doesn't match algorithm (A192GCM requires 192-bit key)");
+      }
+      break;
+    case ALG_A256GCM:
+      if (key.size() != crypto_constants::AES256_KEY_SIZE) {
+        throw CryptoError(
+            "Key size doesn't match algorithm (A256GCM requires 256-bit key)");
+      }
+      break;
+    default:
+      throw CryptoError("Invalid AES-GCM algorithm identifier");
   }
 }
 
@@ -973,9 +964,8 @@ bool AesGcmAlgorithm::verifyImpl(std::span<const uint8_t>,
       "AES-GCM algorithm does not support signature verification");
 }
 
-std::vector<uint8_t>
-AesGcmAlgorithm::encryptImpl(std::span<const uint8_t> data,
-                             std::span<const uint8_t> iv) const {
+std::vector<uint8_t> AesGcmAlgorithm::encryptImpl(
+    std::span<const uint8_t> data, std::span<const uint8_t> iv) const {
   if (iv.size() != crypto_constants::GCM_IV_SIZE) {
     throw CryptoError("Invalid IV size for AES-GCM (must be 12 bytes)");
   }
@@ -987,19 +977,19 @@ AesGcmAlgorithm::encryptImpl(std::span<const uint8_t> data,
   }
 
   // Determine cipher type based on key size
-  const EVP_CIPHER *cipher;
+  const EVP_CIPHER* cipher;
   switch (key_.size()) {
-  case crypto_constants::AES128_KEY_SIZE:
-    cipher = EVP_aes_128_gcm();
-    break;
-  case crypto_constants::AES192_KEY_SIZE:
-    cipher = EVP_aes_192_gcm();
-    break;
-  case crypto_constants::AES256_KEY_SIZE:
-    cipher = EVP_aes_256_gcm();
-    break;
-  default:
-    throw CryptoError("Invalid AES key size");
+    case crypto_constants::AES128_KEY_SIZE:
+      cipher = EVP_aes_128_gcm();
+      break;
+    case crypto_constants::AES192_KEY_SIZE:
+      cipher = EVP_aes_192_gcm();
+      break;
+    case crypto_constants::AES256_KEY_SIZE:
+      cipher = EVP_aes_256_gcm();
+      break;
+    default:
+      throw CryptoError("Invalid AES key size");
   }
 
   // Initialize encryption
@@ -1034,9 +1024,8 @@ AesGcmAlgorithm::encryptImpl(std::span<const uint8_t> data,
   return ciphertext;
 }
 
-std::vector<uint8_t>
-AesGcmAlgorithm::decryptImpl(std::span<const uint8_t> encryptedData,
-                             std::span<const uint8_t> iv) const {
+std::vector<uint8_t> AesGcmAlgorithm::decryptImpl(
+    std::span<const uint8_t> encryptedData, std::span<const uint8_t> iv) const {
   if (iv.size() != crypto_constants::GCM_IV_SIZE) {
     throw CryptoError("Invalid IV size for AES-GCM (must be 12 bytes)");
   }
@@ -1051,19 +1040,19 @@ AesGcmAlgorithm::decryptImpl(std::span<const uint8_t> encryptedData,
   }
 
   // Determine cipher type based on key size
-  const EVP_CIPHER *cipher;
+  const EVP_CIPHER* cipher;
   switch (key_.size()) {
-  case crypto_constants::AES128_KEY_SIZE:
-    cipher = EVP_aes_128_gcm();
-    break;
-  case crypto_constants::AES192_KEY_SIZE:
-    cipher = EVP_aes_192_gcm();
-    break;
-  case crypto_constants::AES256_KEY_SIZE:
-    cipher = EVP_aes_256_gcm();
-    break;
-  default:
-    throw CryptoError("Invalid AES key size");
+    case crypto_constants::AES128_KEY_SIZE:
+      cipher = EVP_aes_128_gcm();
+      break;
+    case crypto_constants::AES192_KEY_SIZE:
+      cipher = EVP_aes_192_gcm();
+      break;
+    case crypto_constants::AES256_KEY_SIZE:
+      cipher = EVP_aes_256_gcm();
+      break;
+    default:
+      throw CryptoError("Invalid AES key size");
   }
 
   // Initialize decryption
@@ -1074,15 +1063,15 @@ AesGcmAlgorithm::decryptImpl(std::span<const uint8_t> encryptedData,
 
   // Separate ciphertext and tag
   size_t ciphertext_len = encryptedData.size() - crypto_constants::GCM_TAG_SIZE;
-  const uint8_t *ciphertext = encryptedData.data();
-  const uint8_t *tag = encryptedData.data() + ciphertext_len;
+  const uint8_t* ciphertext = encryptedData.data();
+  const uint8_t* tag = encryptedData.data() + ciphertext_len;
 
   // Set authentication tag
   // Note: const_cast is safe here - OpenSSL's EVP_CTRL_GCM_SET_TAG only reads
   // the tag data, never modifies it. The non-const API is a legacy artifact.
   if (EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_TAG,
                           crypto_constants::GCM_TAG_SIZE,
-                          const_cast<uint8_t *>(tag)) != 1) {
+                          const_cast<uint8_t*>(tag)) != 1) {
     throw CryptoError("Failed to set AES-GCM authentication tag");
   }
 
@@ -1114,7 +1103,7 @@ int64_t AesGcmAlgorithm::algorithmId() const { return algorithmId_; }
 //
 
 ChaCha20Poly1305Algorithm::ChaCha20Poly1305Algorithm(
-    const std::vector<uint8_t> &key)
+    const std::vector<uint8_t>& key)
     : key_(key.begin(), key.end()) {
   if (key.size() != crypto_constants::ChaCha20_KEY_SIZE) {
     throw CryptoError("Invalid ChaCha20 key size (must be 32 bytes)");
@@ -1160,8 +1149,8 @@ std::vector<uint8_t> ChaCha20Poly1305Algorithm::generateNonce() {
   return nonce;
 }
 
-std::vector<uint8_t>
-ChaCha20Poly1305Algorithm::signImpl(std::span<const uint8_t>) const {
+std::vector<uint8_t> ChaCha20Poly1305Algorithm::signImpl(
+    std::span<const uint8_t>) const {
   throw CryptoError("ChaCha20-Poly1305 algorithm does not support signing");
 }
 
@@ -1171,9 +1160,8 @@ bool ChaCha20Poly1305Algorithm::verifyImpl(std::span<const uint8_t>,
       "ChaCha20-Poly1305 algorithm does not support signature verification");
 }
 
-std::vector<uint8_t>
-ChaCha20Poly1305Algorithm::encryptImpl(std::span<const uint8_t> data,
-                                       std::span<const uint8_t> nonce) const {
+std::vector<uint8_t> ChaCha20Poly1305Algorithm::encryptImpl(
+    std::span<const uint8_t> data, std::span<const uint8_t> nonce) const {
   if (nonce.size() != crypto_constants::ChaCha20_NONCE_SIZE) {
     throw CryptoError(
         "Invalid nonce size for ChaCha20-Poly1305 (must be 12 bytes)");
@@ -1217,9 +1205,9 @@ ChaCha20Poly1305Algorithm::encryptImpl(std::span<const uint8_t> data,
   return ciphertext;
 }
 
-std::vector<uint8_t>
-ChaCha20Poly1305Algorithm::decryptImpl(std::span<const uint8_t> encryptedData,
-                                       std::span<const uint8_t> nonce) const {
+std::vector<uint8_t> ChaCha20Poly1305Algorithm::decryptImpl(
+    std::span<const uint8_t> encryptedData,
+    std::span<const uint8_t> nonce) const {
   if (nonce.size() != crypto_constants::ChaCha20_NONCE_SIZE) {
     throw CryptoError(
         "Invalid nonce size for ChaCha20-Poly1305 (must be 12 bytes)");
@@ -1244,15 +1232,15 @@ ChaCha20Poly1305Algorithm::decryptImpl(std::span<const uint8_t> encryptedData,
   // Separate ciphertext and tag
   size_t ciphertext_len =
       encryptedData.size() - crypto_constants::ChaCha20_TAG_SIZE;
-  const uint8_t *ciphertext = encryptedData.data();
-  const uint8_t *tag = encryptedData.data() + ciphertext_len;
+  const uint8_t* ciphertext = encryptedData.data();
+  const uint8_t* tag = encryptedData.data() + ciphertext_len;
 
   // Set authentication tag
   // Note: const_cast is safe here - OpenSSL's EVP_CTRL_AEAD_SET_TAG only reads
   // the tag data, never modifies it. The non-const API is a legacy artifact.
   if (EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_AEAD_SET_TAG,
                           crypto_constants::ChaCha20_TAG_SIZE,
-                          const_cast<uint8_t *>(tag)) != 1) {
+                          const_cast<uint8_t*>(tag)) != 1) {
     throw CryptoError("Failed to set ChaCha20-Poly1305 authentication tag");
   }
 
@@ -1282,4 +1270,4 @@ int64_t ChaCha20Poly1305Algorithm::algorithmId() const {
   return ALG_ChaCha20_Poly1305;
 }
 
-} // namespace catapult
+}  // namespace catapult

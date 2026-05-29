@@ -41,8 +41,7 @@ std::vector<uint8_t> base64UrlDecode(std::string_view encoded) {
   static const std::array<int8_t, 256> decode_table = []() {
     std::array<int8_t, 256> table{};
     // Initialize all to -1 (invalid)
-    for (size_t i = 0; i < 256; ++i)
-      table[i] = -1;
+    for (size_t i = 0; i < 256; ++i) table[i] = -1;
 
     // Set valid base64url characters
     for (size_t i = 0; i < base64_chars_url.size(); ++i) {
@@ -68,12 +67,11 @@ std::vector<uint8_t> base64UrlDecode(std::string_view encoded) {
   }
 
   std::vector<uint8_t> result;
-  result.reserve((encoded.size() * 3) / 4); // Reserve estimated size
+  result.reserve((encoded.size() * 3) / 4);  // Reserve estimated size
 
   int val = 0, valb = -8;
   for (char c : encoded) {
-    if (c == '=')
-      break;
+    if (c == '=') break;
 
     // Use lookup table for O(1) character validation and conversion
     int8_t decoded = decode_table[static_cast<unsigned char>(c)];
@@ -91,4 +89,4 @@ std::vector<uint8_t> base64UrlDecode(std::string_view encoded) {
   return result;
 }
 
-} // namespace catapult
+}  // namespace catapult

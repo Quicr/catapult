@@ -16,7 +16,7 @@ constexpr size_t MAX_REGEX_PATTERNS = 50;
 constexpr size_t MAX_URI_LENGTH = 8192;
 
 // Validate regex pattern for potentially dangerous constructs
-bool isRegexPatternSafe(const std::string &pattern) {
+bool isRegexPatternSafe(const std::string& pattern) {
   if (pattern.length() > MAX_REGEX_PATTERN_LENGTH) {
     return false;
   }
@@ -43,7 +43,7 @@ bool isRegexPatternSafe(const std::string &pattern) {
           ++i;
         }
       }
-      ++i; // Skip closing ]
+      ++i;  // Skip closing ]
       continue;
     }
 
@@ -74,7 +74,7 @@ bool isRegexPatternSafe(const std::string &pattern) {
           if (next == '+' || next == '*' || next == '?' || next == '{') {
             // Group is being quantified - if it contained quantifiers, reject
             if (inner_quantified) {
-              return false; // Nested quantifier: (a+)+ or similar
+              return false;  // Nested quantifier: (a+)+ or similar
             }
             // Mark parent group as containing a quantifier
             if (!group_has_quantifier.empty()) {
@@ -105,41 +105,42 @@ bool isRegexPatternSafe(const std::string &pattern) {
 
   return true;
 }
-} // namespace
+}  // namespace
 
-void UriMatcher::addPattern(const UriPattern &pattern) {
+void UriMatcher::addPattern(const UriPattern& pattern) {
   switch (pattern.type) {
-  case UriPatternType::Exact:
-    exactPatterns[pattern.pattern] = pattern.pattern;
-    break;
-  case UriPatternType::Prefix:
-    prefixTrie.insert(pattern.pattern, pattern.pattern);
-    break;
-  case UriPatternType::Suffix:
-    suffixTrie.insert(pattern.pattern, pattern.pattern);
-    break;
-  case UriPatternType::Regex:
-    // Limit number of regex patterns
-    if (regexPatterns.size() >= MAX_REGEX_PATTERNS) {
-      throw InvalidClaimValueError("Too many regex patterns");
-    }
-    // Validate pattern safety
-    if (!isRegexPatternSafe(pattern.pattern)) {
-      throw InvalidClaimValueError("Regex pattern rejected for safety");
-    }
-    try {
-      regexPatterns.emplace_back(std::regex(pattern.pattern), pattern.pattern);
-    } catch (const std::regex_error &) {
-      // Invalid regex pattern, skip
-    }
-    break;
-  case UriPatternType::Hash:
-    hashPatterns[pattern.pattern] = pattern.pattern;
-    break;
+    case UriPatternType::Exact:
+      exactPatterns[pattern.pattern] = pattern.pattern;
+      break;
+    case UriPatternType::Prefix:
+      prefixTrie.insert(pattern.pattern, pattern.pattern);
+      break;
+    case UriPatternType::Suffix:
+      suffixTrie.insert(pattern.pattern, pattern.pattern);
+      break;
+    case UriPatternType::Regex:
+      // Limit number of regex patterns
+      if (regexPatterns.size() >= MAX_REGEX_PATTERNS) {
+        throw InvalidClaimValueError("Too many regex patterns");
+      }
+      // Validate pattern safety
+      if (!isRegexPatternSafe(pattern.pattern)) {
+        throw InvalidClaimValueError("Regex pattern rejected for safety");
+      }
+      try {
+        regexPatterns.emplace_back(std::regex(pattern.pattern),
+                                   pattern.pattern);
+      } catch (const std::regex_error&) {
+        // Invalid regex pattern, skip
+      }
+      break;
+    case UriPatternType::Hash:
+      hashPatterns[pattern.pattern] = pattern.pattern;
+      break;
   }
 }
 
-bool UriMatcher::matches(const std::string &uri) const {
+bool UriMatcher::matches(const std::string& uri) const {
   // Reject oversized URIs to prevent DoS
   if (uri.length() > MAX_URI_LENGTH) {
     return false;
@@ -161,7 +162,7 @@ bool UriMatcher::matches(const std::string &uri) const {
   }
 
   // Check regex patterns
-  for (const auto &regexPair : regexPatterns) {
+  for (const auto& regexPair : regexPatterns) {
     if (std::regex_match(uri, regexPair.first)) {
       return true;
     }
@@ -178,8 +179,8 @@ bool UriMatcher::matches(const std::string &uri) const {
   return false;
 }
 
-std::vector<std::string>
-UriMatcher::getMatchingPatterns(const std::string &uri) const {
+std::vector<std::string> UriMatcher::getMatchingPatterns(
+    const std::string& uri) const {
   std::vector<std::string> matches;
 
   // Reject oversized URIs to prevent DoS
@@ -195,18 +196,18 @@ UriMatcher::getMatchingPatterns(const std::string &uri) const {
 
   // Check prefix matches
   auto prefixMatches = prefixTrie.searchPrefix(uri);
-  for (const auto &prefixMatch : prefixMatches) {
+  for (const auto& prefixMatch : prefixMatches) {
     matches.push_back("prefix:" + prefixMatch);
   }
 
   // Check suffix matches
   auto suffixMatches = suffixTrie.searchSuffix(uri);
-  for (const auto &suffixMatch : suffixMatches) {
+  for (const auto& suffixMatch : suffixMatches) {
     matches.push_back("suffix:" + suffixMatch);
   }
 
   // Check regex patterns
-  for (const auto &regexPair : regexPatterns) {
+  for (const auto& regexPair : regexPatterns) {
     if (std::regex_match(uri, regexPair.first)) {
       matches.push_back("regex:" + regexPair.second);
     }
@@ -224,4 +225,4 @@ UriMatcher::getMatchingPatterns(const std::string &uri) const {
   return matches;
 }
 
-} // namespace catapult
+}  // namespace catapult

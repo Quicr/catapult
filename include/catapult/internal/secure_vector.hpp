@@ -29,20 +29,23 @@ namespace catapult {
  * - Secure zeroing before deallocation
  * - Protection against memory analysis attacks
  */
-template <typename T> class SecureAllocator {
-public:
+template <typename T>
+class SecureAllocator {
+ public:
   using value_type = T;
   using size_type = std::size_t;
-  using pointer = T *;
-  using const_pointer = const T *;
+  using pointer = T*;
+  using const_pointer = const T*;
 
-  template <typename U> struct rebind {
+  template <typename U>
+  struct rebind {
     using other = SecureAllocator<U>;
   };
 
   SecureAllocator() = default;
 
-  template <typename U> SecureAllocator(const SecureAllocator<U> &) noexcept {}
+  template <typename U>
+  SecureAllocator(const SecureAllocator<U>&) noexcept {}
 
   /**
    * @brief Allocate and lock memory to prevent swapping
@@ -50,9 +53,8 @@ public:
    * @return Pointer to locked memory
    * @throws std::bad_alloc if allocation or locking fails
    */
-  T *allocate(size_t n) {
-    if (n == 0)
-      return nullptr;
+  T* allocate(size_t n) {
+    if (n == 0) return nullptr;
 
     // Check for integer overflow before multiplication
     if (n > std::numeric_limits<size_t>::max() / sizeof(T)) {
@@ -70,9 +72,8 @@ public:
     size_t aligned_size = ((size + page_size - 1) / page_size) * page_size;
 
     // Allocate memory with proper alignment
-    T *ptr = static_cast<T *>(std::aligned_alloc(page_size, aligned_size));
-    if (!ptr)
-      throw std::bad_alloc();
+    T* ptr = static_cast<T*>(std::aligned_alloc(page_size, aligned_size));
+    if (!ptr) throw std::bad_alloc();
 
     // Lock memory to prevent swapping (best effort - failure is not fatal)
     lockMemory(ptr, aligned_size);
@@ -85,7 +86,7 @@ public:
    * @param ptr Pointer to memory to deallocate
    * @param n Number of elements (used for size calculation)
    */
-  void deallocate(T *ptr, size_t n) noexcept {
+  void deallocate(T* ptr, size_t n) noexcept {
     if (ptr) {
       size_t size = n * sizeof(T);
       size_t page_size = getPageSize();
@@ -102,16 +103,16 @@ public:
   }
 
   template <typename U>
-  bool operator==(const SecureAllocator<U> &) const noexcept {
+  bool operator==(const SecureAllocator<U>&) const noexcept {
     return true;
   }
 
   template <typename U>
-  bool operator!=(const SecureAllocator<U> &) const noexcept {
+  bool operator!=(const SecureAllocator<U>&) const noexcept {
     return false;
   }
 
-private:
+ private:
   /**
    * @brief Get system page size for memory alignment
    * @return Page size in bytes
@@ -131,11 +132,11 @@ private:
    * @param ptr Pointer to memory to lock
    * @param size Size of memory region
    */
-  static void lockMemory(void *ptr, size_t size) noexcept {
+  static void lockMemory(void* ptr, size_t size) noexcept {
 #ifdef _WIN32
-    VirtualLock(ptr, size); // Ignore failures - best effort
+    VirtualLock(ptr, size);  // Ignore failures - best effort
 #else
-    mlock(ptr, size); // Ignore failures - best effort
+    mlock(ptr, size);  // Ignore failures - best effort
 #endif
   }
 
@@ -144,7 +145,7 @@ private:
    * @param ptr Pointer to memory to unlock
    * @param size Size of memory region
    */
-  static void unlockMemory(void *ptr, size_t size) noexcept {
+  static void unlockMemory(void* ptr, size_t size) noexcept {
 #ifdef _WIN32
     VirtualUnlock(ptr, size);
 #else
@@ -157,8 +158,8 @@ private:
    * @param ptr Pointer to memory to zero
    * @param size Size of memory region
    */
-  static void secureZero(void *ptr, size_t size) noexcept {
-    volatile unsigned char *p = static_cast<volatile unsigned char *>(ptr);
+  static void secureZero(void* ptr, size_t size) noexcept {
+    volatile unsigned char* p = static_cast<volatile unsigned char*>(ptr);
     for (size_t i = 0; i < size; ++i) {
       p[i] = 0;
     }
@@ -168,7 +169,8 @@ private:
 /**
  * @brief Secure vector type for sensitive data
  */
-template <typename T> using SecureVector = std::vector<T, SecureAllocator<T>>;
+template <typename T>
+using SecureVector = std::vector<T, SecureAllocator<T>>;
 
 /**
  * @brief Utility functions for secure memory operations and timing-attack
@@ -182,12 +184,12 @@ namespace secure_utils {
  * @param size Size of regions to compare
  * @return 0 if equal, non-zero if different (timing independent)
  */
-inline int constantTimeCompare(const void *a, const void *b,
+inline int constantTimeCompare(const void* a, const void* b,
                                size_t size) noexcept {
-  const volatile unsigned char *va =
-      static_cast<const volatile unsigned char *>(a);
-  const volatile unsigned char *vb =
-      static_cast<const volatile unsigned char *>(b);
+  const volatile unsigned char* va =
+      static_cast<const volatile unsigned char*>(a);
+  const volatile unsigned char* vb =
+      static_cast<const volatile unsigned char*>(b);
   unsigned char result = 0;
 
   // Use volatile to  compiler optimization
@@ -206,8 +208,8 @@ inline int constantTimeCompare(const void *a, const void *b,
  * @note Size comparison is constant-time to prevent length oracle attacks
  */
 template <typename T>
-inline bool constantTimeEqual(const std::vector<T> &a,
-                              const std::vector<T> &b) noexcept {
+inline bool constantTimeEqual(const std::vector<T>& a,
+                              const std::vector<T>& b) noexcept {
   // Constant-time size comparison to prevent length oracle
   volatile size_t size_a = a.size();
   volatile size_t size_b = b.size();
@@ -255,7 +257,7 @@ inline bool constantTimeEqual(std::span<const T> a,
  * @return Regular vector with copied data
  */
 template <typename T>
-std::vector<T> to_regular_vector(const SecureVector<T> &secure_vec) {
+std::vector<T> to_regular_vector(const SecureVector<T>& secure_vec) {
   return std::vector<T>(secure_vec.begin(), secure_vec.end());
 }
 
@@ -265,9 +267,9 @@ std::vector<T> to_regular_vector(const SecureVector<T> &secure_vec) {
  * @return SecureVector with copied data
  */
 template <typename T>
-SecureVector<T> to_secure_vector(const std::vector<T> &regular_vec) {
+SecureVector<T> to_secure_vector(const std::vector<T>& regular_vec) {
   return SecureVector<T>(regular_vec.begin(), regular_vec.end());
 }
-} // namespace secure_utils
+}  // namespace secure_utils
 
-} // namespace catapult
+}  // namespace catapult

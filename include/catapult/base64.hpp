@@ -38,7 +38,8 @@ concept Base64Data = requires(T t) {
  * @param data Input bytes
  * @return Base64url string
  */
-template <Base64Data T> std::string base64UrlEncode(const T &data) {
+template <Base64Data T>
+std::string base64UrlEncode(const T& data) {
   return base64UrlEncodeImpl({std::data(data), std::size(data)});
 }
 
@@ -50,4 +51,4 @@ template <Base64Data T> std::string base64UrlEncode(const T &data) {
  */
 std::vector<uint8_t> base64UrlDecode(std::string_view data);
 
-} // namespace catapult
+}  // namespace catapult

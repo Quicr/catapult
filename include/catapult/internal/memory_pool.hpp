@@ -7,8 +7,8 @@
 
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable                                                        \
-                : 4324) // structure was padded due to alignment specifier
+#pragma warning(disable \
+                : 4324)  // structure was padded due to alignment specifier
 #endif
 
 #include <array>
@@ -32,9 +32,10 @@ namespace catapult {
  * 4. False sharing prevention: Separates frequently accessed atomics
  * 5. Exception safety: Provides strong exception safety guarantees
  */
-template <typename T, size_t PoolSize = 1024> class LockFreeMemoryPool {
-private:
-  static constexpr size_t CACHE_LINE_SIZE = 64; // Standard cache line size
+template <typename T, size_t PoolSize = 1024>
+class LockFreeMemoryPool {
+ private:
+  static constexpr size_t CACHE_LINE_SIZE = 64;  // Standard cache line size
 
   /**
    * @brief Pool node structure with cache-line alignment
@@ -46,13 +47,13 @@ private:
    * - Atomic in_use flag to track object lifecycle
    */
   struct alignas(CACHE_LINE_SIZE) PoolNode {
-    alignas(T) std::byte storage[sizeof(T)]; // Properly aligned storage for T
-    std::atomic<PoolNode *> next{nullptr};   // Next node in free list
-    std::atomic<bool> in_use{false}; // Tracks if node holds valid object
+    alignas(T) std::byte storage[sizeof(T)];  // Properly aligned storage for T
+    std::atomic<PoolNode*> next{nullptr};     // Next node in free list
+    std::atomic<bool> in_use{false};  // Tracks if node holds valid object
   };
 
   // Free list head - separate cache line to avoid contention
-  alignas(CACHE_LINE_SIZE) std::atomic<PoolNode *> free_head_{nullptr};
+  alignas(CACHE_LINE_SIZE) std::atomic<PoolNode*> free_head_{nullptr};
 
   // Pool storage - contiguous array for spatial locality
   alignas(CACHE_LINE_SIZE) std::array<PoolNode, PoolSize> pool_;
@@ -63,12 +64,12 @@ private:
   // Performance statistics - each in separate cache line to prevent false
   // sharing
   alignas(CACHE_LINE_SIZE) mutable std::atomic<size_t> pool_hits_{
-      0}; // Successful pool allocations
+      0};  // Successful pool allocations
 
   alignas(CACHE_LINE_SIZE) mutable std::atomic<size_t> pool_misses_{
-      0}; // Fallback heap allocations
+      0};  // Fallback heap allocations
 
-public:
+ public:
   /**
    * @brief RAII wrapper Pool memory management for objects
    *
@@ -79,14 +80,14 @@ public:
    * - Offers standard smart pointer interface (get, operator->, etc.)
    */
   class PoolPtr {
-  private:
-    T *ptr_ = nullptr;                   // Managed object pointer
-    LockFreeMemoryPool *pool_ = nullptr; // Owning pool (null for heap objects)
+   private:
+    T* ptr_ = nullptr;                    // Managed object pointer
+    LockFreeMemoryPool* pool_ = nullptr;  // Owning pool (null for heap objects)
 
-  public:
+   public:
     PoolPtr() = default;
 
-    PoolPtr(T *ptr, LockFreeMemoryPool *pool) noexcept
+    PoolPtr(T* ptr, LockFreeMemoryPool* pool) noexcept
         : ptr_(ptr), pool_(pool) {}
 
     ~PoolPtr() {
@@ -100,11 +101,11 @@ public:
     }
 
     // Move semantics
-    PoolPtr(PoolPtr &&other) noexcept
+    PoolPtr(PoolPtr&& other) noexcept
         : ptr_(std::exchange(other.ptr_, nullptr)),
           pool_(std::exchange(other.pool_, nullptr)) {}
 
-    PoolPtr &operator=(PoolPtr &&other) noexcept {
+    PoolPtr& operator=(PoolPtr&& other) noexcept {
       if (this != &other) {
         if (ptr_) {
           if (pool_) {
@@ -120,17 +121,17 @@ public:
     }
 
     // Non-copyable
-    PoolPtr(const PoolPtr &) = delete;
-    PoolPtr &operator=(const PoolPtr &) = delete;
+    PoolPtr(const PoolPtr&) = delete;
+    PoolPtr& operator=(const PoolPtr&) = delete;
 
     // Accessors
-    T *get() const noexcept { return ptr_; }
-    T *operator->() const noexcept { return ptr_; }
-    T &operator*() const noexcept { return *ptr_; }
+    T* get() const noexcept { return ptr_; }
+    T* operator->() const noexcept { return ptr_; }
+    T& operator*() const noexcept { return *ptr_; }
     explicit operator bool() const noexcept { return ptr_ != nullptr; }
 
     // Release ownership
-    T *release() noexcept {
+    T* release() noexcept {
       pool_ = nullptr;
       return std::exchange(ptr_, nullptr);
     }
@@ -144,7 +145,7 @@ public:
   LockFreeMemoryPool() {
     // Initialize free list as linear chain, not circular
     for (size_t i = 0; i < PoolSize - 1; ++i) {
-      auto &node = pool_[i];
+      auto& node = pool_[i];
       node.next.store(&pool_[i + 1], std::memory_order_relaxed);
     }
     // Last node points to null (end of list)
@@ -155,25 +156,25 @@ public:
 
   ~LockFreeMemoryPool() {
     // Destroy any constructed objects
-    for (auto &node : pool_) {
+    for (auto& node : pool_) {
       if (node.in_use.load(std::memory_order_acquire)) {
-        std::destroy_at(reinterpret_cast<T *>(node.storage));
+        std::destroy_at(reinterpret_cast<T*>(node.storage));
       }
     }
   }
 
   // Non-copyable, non-movable
-  LockFreeMemoryPool(const LockFreeMemoryPool &) = delete;
-  LockFreeMemoryPool &operator=(const LockFreeMemoryPool &) = delete;
-  LockFreeMemoryPool(LockFreeMemoryPool &&) = delete;
-  LockFreeMemoryPool &operator=(LockFreeMemoryPool &&) = delete;
+  LockFreeMemoryPool(const LockFreeMemoryPool&) = delete;
+  LockFreeMemoryPool& operator=(const LockFreeMemoryPool&) = delete;
+  LockFreeMemoryPool(LockFreeMemoryPool&&) = delete;
+  LockFreeMemoryPool& operator=(LockFreeMemoryPool&&) = delete;
 
   template <typename... Args>
-  [[nodiscard]] PoolPtr
-  make(Args &&...args) noexcept(std::is_nothrow_constructible_v<T, Args...>) {
+  [[nodiscard]] PoolPtr make(Args&&... args) noexcept(
+      std::is_nothrow_constructible_v<T, Args...>) {
     static_assert(std::is_constructible_v<T, Args...>,
                   "T must be constructible from Args...");
-    if (auto *ptr = allocate_raw()) {
+    if (auto* ptr = allocate_raw()) {
       if constexpr (std::is_nothrow_constructible_v<T, Args...>) {
         std::construct_at(ptr, std::forward<Args>(args)...);
         return PoolPtr(ptr, this);
@@ -204,8 +205,8 @@ public:
   /**
    * @brief Allocate default-constructed object
    */
-  [[nodiscard]] PoolPtr
-  make() noexcept(std::is_nothrow_default_constructible_v<T>) {
+  [[nodiscard]] PoolPtr make() noexcept(
+      std::is_nothrow_default_constructible_v<T>) {
     return make<>();
   }
 
@@ -231,7 +232,7 @@ public:
    */
   size_t available() const noexcept {
     size_t count = 0;
-    auto *current = free_head_.load(std::memory_order_acquire);
+    auto* current = free_head_.load(std::memory_order_acquire);
     while (current && count < PoolSize) {
       current = current->next.load(std::memory_order_acquire);
       ++count;
@@ -239,7 +240,7 @@ public:
     return count;
   }
 
-private:
+ private:
   /**
    * @brief Lock-free allocation from pool
    *
@@ -254,11 +255,11 @@ private:
    * - acquire on loads to see writes from deallocating threads
    * - release on CAS to publish the allocation
    */
-  T *allocate_raw() noexcept {
-    auto *head = free_head_.load(std::memory_order_acquire);
+  T* allocate_raw() noexcept {
+    auto* head = free_head_.load(std::memory_order_acquire);
 
     while (head) {
-      auto *next = head->next.load(std::memory_order_acquire);
+      auto* next = head->next.load(std::memory_order_acquire);
 
       // Try to pop head from free list
       if (free_head_.compare_exchange_weak(head, next,
@@ -266,12 +267,12 @@ private:
                                            std::memory_order_acquire)) {
         head->in_use.store(true, std::memory_order_release);
         pool_hits_.fetch_add(1, std::memory_order_relaxed);
-        return reinterpret_cast<T *>(head->storage);
+        return reinterpret_cast<T*>(head->storage);
       }
       // CAS failed, head was updated by another thread, retry
     }
 
-    return nullptr; // Pool exhausted
+    return nullptr;  // Pool exhausted
   }
 
   /**
@@ -287,17 +288,16 @@ private:
    * - Uses offsetof to calculate node address from storage address
    * - Validates pointer is within pool array bounds
    */
-  void deallocate_raw(T *ptr) noexcept {
-    if (!ptr)
-      return;
+  void deallocate_raw(T* ptr) noexcept {
+    if (!ptr) return;
 
     // Check if pointer belongs to pool using address range of storage areas
-    const auto *pool_start =
-        reinterpret_cast<const std::byte *>(&pool_[0].storage);
-    const auto *pool_end =
-        reinterpret_cast<const std::byte *>(&pool_[PoolSize - 1].storage) +
+    const auto* pool_start =
+        reinterpret_cast<const std::byte*>(&pool_[0].storage);
+    const auto* pool_end =
+        reinterpret_cast<const std::byte*>(&pool_[PoolSize - 1].storage) +
         sizeof(T);
-    const auto *ptr_addr = reinterpret_cast<const std::byte *>(ptr);
+    const auto* ptr_addr = reinterpret_cast<const std::byte*>(ptr);
 
     // Check if pointer is within pool storage range
     if (ptr_addr < pool_start || ptr_addr >= pool_end) {
@@ -307,8 +307,8 @@ private:
     }
 
     // Calculate node address from storage address
-    auto *node_ptr = reinterpret_cast<PoolNode *>(
-        reinterpret_cast<std::byte *>(ptr) - offsetof(PoolNode, storage));
+    auto* node_ptr = reinterpret_cast<PoolNode*>(
+        reinterpret_cast<std::byte*>(ptr) - offsetof(PoolNode, storage));
 
     // Pool allocated - destroy object and return to free list
     // Use compare_exchange to prevent double-free race condition
@@ -322,7 +322,7 @@ private:
     std::destroy_at(ptr);
 
     // Atomically prepend to free list
-    auto *old_head = free_head_.load(std::memory_order_acquire);
+    auto* old_head = free_head_.load(std::memory_order_acquire);
     do {
       node_ptr->next.store(old_head, std::memory_order_relaxed);
     } while (!free_head_.compare_exchange_weak(old_head, node_ptr,
@@ -331,40 +331,38 @@ private:
   }
 
   friend class PoolPtr;
-  friend struct TrieNodePoolDeleter; // Allow trie deleter to access
-                                     // deallocate_raw
-  void deallocate(T *ptr) noexcept { deallocate_raw(ptr); }
+  friend struct TrieNodePoolDeleter;  // Allow trie deleter to access
+                                      // deallocate_raw
+  void deallocate(T* ptr) noexcept { deallocate_raw(ptr); }
 
-public:
+ public:
   // Method for custom deleters that need to control destruction
-  bool is_pool_memory(T *ptr) const noexcept {
-    if (!ptr)
-      return false;
+  bool is_pool_memory(T* ptr) const noexcept {
+    if (!ptr) return false;
 
-    const auto *pool_start =
-        reinterpret_cast<const std::byte *>(&pool_[0].storage);
-    const auto *pool_end =
-        reinterpret_cast<const std::byte *>(&pool_[PoolSize - 1].storage) +
+    const auto* pool_start =
+        reinterpret_cast<const std::byte*>(&pool_[0].storage);
+    const auto* pool_end =
+        reinterpret_cast<const std::byte*>(&pool_[PoolSize - 1].storage) +
         sizeof(T);
-    const auto *ptr_addr = reinterpret_cast<const std::byte *>(ptr);
+    const auto* ptr_addr = reinterpret_cast<const std::byte*>(ptr);
 
     return ptr_addr >= pool_start && ptr_addr < pool_end;
   }
 
   // Deallocate pool memory after object has been destroyed by custom deleter
-  void deallocate_pool_memory_only(T *ptr) noexcept {
-    if (!ptr)
-      return;
+  void deallocate_pool_memory_only(T* ptr) noexcept {
+    if (!ptr) return;
 
     // Calculate node address from storage address
-    auto *node_ptr = reinterpret_cast<PoolNode *>(
-        reinterpret_cast<std::byte *>(ptr) - offsetof(PoolNode, storage));
+    auto* node_ptr = reinterpret_cast<PoolNode*>(
+        reinterpret_cast<std::byte*>(ptr) - offsetof(PoolNode, storage));
 
     // Mark node as not in use and return to free list
     node_ptr->in_use.store(false, std::memory_order_release);
 
     // Atomically prepend to free list
-    auto *old_head = free_head_.load(std::memory_order_acquire);
+    auto* old_head = free_head_.load(std::memory_order_acquire);
     do {
       node_ptr->next.store(old_head, std::memory_order_relaxed);
     } while (!free_head_.compare_exchange_weak(old_head, node_ptr,
@@ -387,16 +385,17 @@ public:
  * - No sharing of unused capacity between threads
  * - Pool lifetime tied to thread lifetime
  */
-template <typename T, size_t PoolSize = 1024> class ThreadLocalMemoryPool {
-private:
+template <typename T, size_t PoolSize = 1024>
+class ThreadLocalMemoryPool {
+ private:
   thread_local static LockFreeMemoryPool<T, PoolSize> pool_;
 
-public:
+ public:
   using PoolPtr = typename LockFreeMemoryPool<T, PoolSize>::PoolPtr;
 
   template <typename... Args>
-  [[nodiscard]] static PoolPtr
-  make(Args &&...args) noexcept(std::is_nothrow_constructible_v<T, Args...>) {
+  [[nodiscard]] static PoolPtr make(Args&&... args) noexcept(
+      std::is_nothrow_constructible_v<T, Args...>) {
     return pool_.make(std::forward<Args>(args)...);
   }
 
@@ -407,7 +406,7 @@ template <typename T, size_t PoolSize>
 thread_local LockFreeMemoryPool<T, PoolSize>
     ThreadLocalMemoryPool<T, PoolSize>::pool_;
 
-} // namespace catapult
+}  // namespace catapult
 
 #ifdef _MSC_VER
 #pragma warning(pop)

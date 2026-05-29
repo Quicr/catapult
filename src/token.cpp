@@ -14,22 +14,22 @@ namespace catapult {
 
 CatTokenValidator::CatTokenValidator() : clockSkewTolerance_(60) {}
 
-CatTokenValidator &CatTokenValidator::withExpectedIssuers(
-    const std::vector<std::string> &issuers) {
+CatTokenValidator& CatTokenValidator::withExpectedIssuers(
+    const std::vector<std::string>& issuers) {
   expectedIssuers_ =
       std::unordered_set<std::string>(issuers.begin(), issuers.end());
   return *this;
 }
 
-CatTokenValidator &CatTokenValidator::withExpectedAudiences(
-    const std::vector<std::string> &audiences) {
+CatTokenValidator& CatTokenValidator::withExpectedAudiences(
+    const std::vector<std::string>& audiences) {
   expectedAudiences_ =
       std::unordered_set<std::string>(audiences.begin(), audiences.end());
   return *this;
 }
 
-CatTokenValidator &
-CatTokenValidator::withClockSkewTolerance(int64_t toleranceSeconds) {
+CatTokenValidator& CatTokenValidator::withClockSkewTolerance(
+    int64_t toleranceSeconds) {
   if (toleranceSeconds < 0) {
     throw InvalidClaimValueError("Clock skew tolerance must be non-negative");
   }
@@ -40,19 +40,21 @@ CatTokenValidator::withClockSkewTolerance(int64_t toleranceSeconds) {
 /**
  * @brief Template-based claim validation helper
  */
-template <typename ClaimType> consteval void validate_single_claim() {
+template <typename ClaimType>
+consteval void validate_single_claim() {
   static_assert(ClaimType::value > 0 && ClaimType::value <= 65535,
                 "Invalid claim identifier");
   static_assert(composite_constants::is_valid_claim_id(ClaimType::value),
                 "Claim not validated by composite constants");
 }
 
-template <typename... ClaimTypes> consteval void validate_claims() {
+template <typename... ClaimTypes>
+consteval void validate_claims() {
   static_assert(sizeof...(ClaimTypes) > 0, "At least one claim type required");
   (validate_single_claim<ClaimTypes>(), ...);
 }
 
-void CatTokenValidator::validate(const CatToken &token) const {
+void CatTokenValidator::validate(const CatToken& token) const {
   CAT_LOG_DEBUG("Starting token validation");
 
   // Compile-time validation of all claim types used in validation
@@ -99,7 +101,7 @@ void CatTokenValidator::validate(const CatToken &token) const {
   if (expectedAudiences_) {
     if (token.core.aud) {
       bool found = false;
-      for (const auto &aud : *token.core.aud) {
+      for (const auto& aud : *token.core.aud) {
         if (expectedAudiences_->find(aud) != expectedAudiences_->end()) {
           found = true;
           break;
@@ -119,9 +121,9 @@ void CatTokenValidator::validate(const CatToken &token) const {
 }
 
 void CatTokenValidator::validateGeographicRestrictions(
-    const CatToken &token) const {
+    const CatToken& token) const {
   if (token.cat.catgeocoord) {
-    const auto &coords = *token.cat.catgeocoord;
+    const auto& coords = *token.cat.catgeocoord;
 
     // Use runtime validation that matches the compile-time checks
     if (coords.lat < -90.0 || coords.lat > 90.0 || coords.lon < -180.0 ||
@@ -131,7 +133,7 @@ void CatTokenValidator::validateGeographicRestrictions(
   }
 
   if (token.cat.geohash) {
-    const auto &geohash = *token.cat.geohash;
+    const auto& geohash = *token.cat.geohash;
     if (geohash.empty() || geohash.length() > 12) {
       throw GeographicValidationError("Invalid geohash length");
     }
@@ -147,15 +149,15 @@ void CatTokenValidator::validateGeographicRestrictions(
   }
 }
 
-void CatTokenValidator::validateUsageLimits(const CatToken &token) const {
+void CatTokenValidator::validateUsageLimits(const CatToken& token) const {
   // Placeholder for usage limit validation
   // In a real implementation, this would check against a usage tracking system
 }
 
-void CatTokenValidator::validateCompositeClaims(const CatToken &token) const {
+void CatTokenValidator::validateCompositeClaims(const CatToken& token) const {
   if (token.composite.hasComposites()) {
     // Check nesting depth limit using the provided utility
-    auto checkDepth = [](const auto &claim) {
+    auto checkDepth = [](const auto& claim) {
       if (claim.has_value() && (*claim) &&
           (*claim)->getDepth() > composite_constants::MAX_NESTING_DEPTH) {
         throw InvalidClaimValueError(
@@ -174,28 +176,28 @@ void CatTokenValidator::validateCompositeClaims(const CatToken &token) const {
   }
 }
 
-bool CatTokenValidator::validateTypedOrClaim(const OrClaim &orClaim) const {
+bool CatTokenValidator::validateTypedOrClaim(const OrClaim& orClaim) const {
   return validateTypedCompositeClaim(orClaim, *this);
 }
 
-bool CatTokenValidator::validateTypedAndClaim(const AndClaim &andClaim) const {
+bool CatTokenValidator::validateTypedAndClaim(const AndClaim& andClaim) const {
   return validateTypedCompositeClaim(andClaim, *this);
 }
 
-bool CatTokenValidator::validateTypedNorClaim(const NorClaim &norClaim) const {
+bool CatTokenValidator::validateTypedNorClaim(const NorClaim& norClaim) const {
   return validateTypedCompositeClaim(norClaim, *this);
 }
 
-CatToken createMinimalToken(const std::string &issuer,
-                            const std::string &audience) {
+CatToken createMinimalToken(const std::string& issuer,
+                            const std::string& audience) {
   CatToken token;
   token.core.iss = issuer;
   token.core.aud = std::vector<std::string>{audience};
   return token;
 }
 
-std::string encodeToken(const CatToken &token,
-                        CryptographicAlgorithm &algorithm) {
+std::string encodeToken(const CatToken& token,
+                        CryptographicAlgorithm& algorithm) {
   CAT_LOG_DEBUG("Encoding CAT token with algorithm ID: {}",
                 algorithm.algorithmId());
   Cwt cwt(algorithm.algorithmId(), token);
@@ -225,8 +227,8 @@ std::string encodeToken(const CatToken &token,
   return headerB64 + "." + payloadB64 + "." + signatureB64;
 }
 
-CatToken decodeToken(const std::string &tokenStr,
-                     CryptographicAlgorithm &algorithm) {
+CatToken decodeToken(const std::string& tokenStr,
+                     CryptographicAlgorithm& algorithm) {
   CAT_LOG_DEBUG("Decoding CAT token with algorithm ID: {}",
                 algorithm.algorithmId());
   // Split token
@@ -261,12 +263,12 @@ CatToken decodeToken(const std::string &tokenStr,
 
 // Explicit template instantiations for composite claims with CatTokenValidator
 template bool CompositeClaims::validateAll<CatTokenValidator>(
-    const CatTokenValidator &validator) const;
+    const CatTokenValidator& validator) const;
 template bool OrClaim::evaluateClaimSet<CatTokenValidator>(
-    const ClaimSet &claimSet, const CatTokenValidator &validator) const;
+    const ClaimSet& claimSet, const CatTokenValidator& validator) const;
 template bool AndClaim::evaluateClaimSet<CatTokenValidator>(
-    const ClaimSet &claimSet, const CatTokenValidator &validator) const;
+    const ClaimSet& claimSet, const CatTokenValidator& validator) const;
 template bool NorClaim::evaluateClaimSet<CatTokenValidator>(
-    const ClaimSet &claimSet, const CatTokenValidator &validator) const;
+    const ClaimSet& claimSet, const CatTokenValidator& validator) const;
 
-} // namespace catapult
+}  // namespace catapult
