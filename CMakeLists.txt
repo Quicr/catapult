@@ -142,6 +142,8 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     )
 
     target_include_directories(catapult_tests PRIVATE ${OPENSSL_INCLUDE_DIR})
+    target_compile_definitions(catapult_tests PRIVATE
+        TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/test_data")
 
     if(CATAPULT_ENABLE_JSON AND TARGET nlohmann_json::nlohmann_json)
         target_link_libraries(catapult_tests nlohmann_json::nlohmann_json)
