@@ -127,18 +127,25 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         tests/memory_pool.cpp
         tests/moqt_claims.cpp
         tests/secure_vector.cpp
+        tests/test_vectors.cpp
         tests/token.cpp
         tests/token_factory.cpp
         tests/trie.cpp
         tests/validator.cpp
     )
 
-    target_link_libraries(catapult_tests 
+    target_link_libraries(catapult_tests
         catapult
         ${OPENSSL_LIBRARIES}
         cbor
         doctest::doctest
     )
+
+    target_include_directories(catapult_tests PRIVATE ${OPENSSL_INCLUDE_DIR})
+
+    if(CATAPULT_ENABLE_JSON AND TARGET nlohmann_json::nlohmann_json)
+        target_link_libraries(catapult_tests nlohmann_json::nlohmann_json)
+    endif()
 
     # Apply same security flags to tests
     target_compile_options(catapult_tests PRIVATE 
