@@ -11,12 +11,15 @@
 
 #include <openssl/bio.h>
 #include <openssl/bn.h>
-#include <openssl/core_names.h>
 #include <openssl/ec.h>
 #include <openssl/ecdsa.h>
 #include <openssl/evp.h>
-#include <openssl/param_build.h>
 #include <openssl/x509.h>
+#include <openssl/opensslv.h>
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#include <openssl/param_build.h>
+#include <openssl/core_names.h>
+#endif
 
 #include <fstream>
 #include <sstream>
@@ -68,12 +71,13 @@ std::string bytesToHex(const std::vector<uint8_t> &bytes) {
 }
 
 json loadTestVectors() {
-  std::ifstream file("tests/test_data/cat_test_vectors.json");
+  std::string path = std::string(TEST_DATA_DIR) + "/cat_test_vectors.json";
+  std::ifstream file(path);
   if (!file.is_open()) {
-    file.open("../tests/test_data/cat_test_vectors.json");
+    file.open("tests/test_data/cat_test_vectors.json");
   }
   if (!file.is_open()) {
-    file.open("../../tests/test_data/cat_test_vectors.json");
+    file.open("../tests/test_data/cat_test_vectors.json");
   }
   REQUIRE(file.is_open());
   json j;
@@ -88,30 +92,42 @@ std::vector<uint8_t> buildDerPublicKey(const std::vector<uint8_t> &x,
   uncompressed.insert(uncompressed.end(), x.begin(), x.end());
   uncompressed.insert(uncompressed.end(), y.begin(), y.end());
 
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
   OSSL_PARAM_BLD *bld = OSSL_PARAM_BLD_new();
   OSSL_PARAM_BLD_push_utf8_string(bld, OSSL_PKEY_PARAM_GROUP_NAME, "P-256", 0);
   OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PUB_KEY,
                                    uncompressed.data(), uncompressed.size());
   OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(bld);
-
   EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(nullptr, "EC", nullptr);
   EVP_PKEY_fromdata_init(ctx);
   EVP_PKEY *pkey = nullptr;
   EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params);
-
   BIO *bio = BIO_new(BIO_s_mem());
   i2d_PUBKEY_bio(bio, pkey);
-
   char *data;
   long len = BIO_get_mem_data(bio, &data);
   std::vector<uint8_t> der(data, data + len);
-
   BIO_free(bio);
   EVP_PKEY_free(pkey);
   EVP_PKEY_CTX_free(ctx);
   OSSL_PARAM_free(params);
   OSSL_PARAM_BLD_free(bld);
-
+#else
+  EC_KEY *ec = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+  EC_KEY_set_public_key_affine_coordinates(
+      ec,
+      BN_bin2bn(x.data(), static_cast<int>(x.size()), nullptr),
+      BN_bin2bn(y.data(), static_cast<int>(y.size()), nullptr));
+  EVP_PKEY *pkey = EVP_PKEY_new();
+  EVP_PKEY_assign_EC_KEY(pkey, ec);
+  BIO *bio = BIO_new(BIO_s_mem());
+  i2d_PUBKEY_bio(bio, pkey);
+  char *data;
+  long len = BIO_get_mem_data(bio, &data);
+  std::vector<uint8_t> der(data, data + len);
+  BIO_free(bio);
+  EVP_PKEY_free(pkey);
+#endif
   return der;
 }
 
@@ -123,39 +139,60 @@ buildDerKeyPair(const std::vector<uint8_t> &privKey,
   uncompressed.insert(uncompressed.end(), x.begin(), x.end());
   uncompressed.insert(uncompressed.end(), y.begin(), y.end());
 
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+  BIGNUM *bn_priv = BN_bin2bn(privKey.data(), static_cast<int>(privKey.size()), nullptr);
   OSSL_PARAM_BLD *bld = OSSL_PARAM_BLD_new();
   OSSL_PARAM_BLD_push_utf8_string(bld, OSSL_PKEY_PARAM_GROUP_NAME, "P-256", 0);
-  OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_PRIV_KEY,
-                          BN_bin2bn(privKey.data(), static_cast<int>(privKey.size()), nullptr));
+  OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_PRIV_KEY, bn_priv);
   OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PUB_KEY,
                                    uncompressed.data(), uncompressed.size());
   OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(bld);
-
   EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(nullptr, "EC", nullptr);
   EVP_PKEY_fromdata_init(ctx);
   EVP_PKEY *pkey = nullptr;
   EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_KEYPAIR, params);
-
   BIO *priv_bio = BIO_new(BIO_s_mem());
   BIO *pub_bio = BIO_new(BIO_s_mem());
   i2d_PrivateKey_bio(priv_bio, pkey);
   i2d_PUBKEY_bio(pub_bio, pkey);
-
   char *priv_data;
   long priv_len = BIO_get_mem_data(priv_bio, &priv_data);
   std::vector<uint8_t> derPriv(priv_data, priv_data + priv_len);
-
   char *pub_data;
   long pub_len = BIO_get_mem_data(pub_bio, &pub_data);
   std::vector<uint8_t> derPub(pub_data, pub_data + pub_len);
-
   BIO_free(priv_bio);
   BIO_free(pub_bio);
   EVP_PKEY_free(pkey);
   EVP_PKEY_CTX_free(ctx);
   OSSL_PARAM_free(params);
   OSSL_PARAM_BLD_free(bld);
-
+  BN_free(bn_priv);
+#else
+  EC_KEY *ec = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+  BIGNUM *bn_priv = BN_bin2bn(privKey.data(), static_cast<int>(privKey.size()), nullptr);
+  EC_KEY_set_private_key(ec, bn_priv);
+  EC_KEY_set_public_key_affine_coordinates(
+      ec,
+      BN_bin2bn(x.data(), static_cast<int>(x.size()), nullptr),
+      BN_bin2bn(y.data(), static_cast<int>(y.size()), nullptr));
+  EVP_PKEY *pkey = EVP_PKEY_new();
+  EVP_PKEY_assign_EC_KEY(pkey, ec);
+  BIO *priv_bio = BIO_new(BIO_s_mem());
+  BIO *pub_bio = BIO_new(BIO_s_mem());
+  i2d_PrivateKey_bio(priv_bio, pkey);
+  i2d_PUBKEY_bio(pub_bio, pkey);
+  char *priv_data;
+  long priv_len = BIO_get_mem_data(priv_bio, &priv_data);
+  std::vector<uint8_t> derPriv(priv_data, priv_data + priv_len);
+  char *pub_data;
+  long pub_len = BIO_get_mem_data(pub_bio, &pub_data);
+  std::vector<uint8_t> derPub(pub_data, pub_data + pub_len);
+  BIO_free(priv_bio);
+  BIO_free(pub_bio);
+  EVP_PKEY_free(pkey);
+  BN_free(bn_priv);
+#endif
   return {derPriv, derPub};
 }
 
