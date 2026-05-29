@@ -1290,8 +1290,7 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
                 static_cast<int64_t>(cbor_get_int(headerPairs[i].value));
           } else if (cbor_isa_negint(headerPairs[i].value)) {
             headerAlgId =
-                -static_cast<int64_t>(cbor_get_int(headerPairs[i].value)) -
-                1;
+                -static_cast<int64_t>(cbor_get_int(headerPairs[i].value)) - 1;
           }
           break;
         }
