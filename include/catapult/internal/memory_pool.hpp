@@ -7,8 +7,9 @@
 
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable \
-                : 4324)  // structure was padded due to alignment specifier
+// clang-format off
+#pragma warning(disable : 4324)  // structure was padded due to alignment specifier
+// clang-format on
 #endif
 
 #include <array>
