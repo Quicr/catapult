@@ -23,14 +23,14 @@ class CatToken;
  * @brief Validator for CAT tokens with configurable validation rules
  */
 class CatTokenValidator {
-private:
+ private:
   std::optional<std::unordered_set<std::string>>
-      expectedIssuers_; ///< Expected token issuers
+      expectedIssuers_;  ///< Expected token issuers
   std::optional<std::unordered_set<std::string>>
-      expectedAudiences_;      ///< Expected token audiences
-  int64_t clockSkewTolerance_; ///< Clock skew tolerance in seconds
+      expectedAudiences_;       ///< Expected token audiences
+  int64_t clockSkewTolerance_;  ///< Clock skew tolerance in seconds
 
-public:
+ public:
   /**
    * @brief Construct a validator with default settings
    */
@@ -41,30 +41,30 @@ public:
    * @param issuers List of valid issuers
    * @return Reference to this validator for chaining
    */
-  CatTokenValidator &
-  withExpectedIssuers(const std::vector<std::string> &issuers);
+  CatTokenValidator& withExpectedIssuers(
+      const std::vector<std::string>& issuers);
 
   /**
    * @brief Set expected token audiences
    * @param audiences List of valid audiences
    * @return Reference to this validator for chaining
    */
-  CatTokenValidator &
-  withExpectedAudiences(const std::vector<std::string> &audiences);
+  CatTokenValidator& withExpectedAudiences(
+      const std::vector<std::string>& audiences);
 
   /**
    * @brief Set clock skew tolerance
    * @param toleranceSeconds Tolerance in seconds
    * @return Reference to this validator for chaining
    */
-  CatTokenValidator &withClockSkewTolerance(int64_t toleranceSeconds);
+  CatTokenValidator& withClockSkewTolerance(int64_t toleranceSeconds);
 
   /**
    * @brief Validate a CAT token
    * @param token Token to validate
    * @throws Various CatError subclasses on validation failure
    */
-  void validate(const CatToken &token) const;
+  void validate(const CatToken& token) const;
 
   /**
    * @brief Validate multiple typed composite claims using CompositeClaimType
@@ -74,33 +74,33 @@ public:
    * @return true if all claims are valid
    */
   template <CompositeClaimType T>
-  bool validateTypedComposites(const std::vector<T> &claims) const;
+  bool validateTypedComposites(const std::vector<T>& claims) const;
 
   /**
    * @brief Validate a typed OR composite claim
    * @param orClaim The OR composite claim to validate
    * @return true if the claim is valid
    */
-  bool validateTypedOrClaim(const OrClaim &orClaim) const;
+  bool validateTypedOrClaim(const OrClaim& orClaim) const;
 
   /**
    * @brief Validate a typed AND composite claim
    * @param andClaim The AND composite claim to validate
    * @return true if the claim is valid
    */
-  bool validateTypedAndClaim(const AndClaim &andClaim) const;
+  bool validateTypedAndClaim(const AndClaim& andClaim) const;
 
   /**
    * @brief Validate a typed NOR composite claim
    * @param norClaim The NOR composite claim to validate
    * @return true if the claim is valid
    */
-  bool validateTypedNorClaim(const NorClaim &norClaim) const;
+  bool validateTypedNorClaim(const NorClaim& norClaim) const;
 
-private:
-  void validateGeographicRestrictions(const CatToken &token) const;
-  void validateUsageLimits(const CatToken &token) const;
-  void validateCompositeClaims(const CatToken &token) const;
+ private:
+  void validateGeographicRestrictions(const CatToken& token) const;
+  void validateUsageLimits(const CatToken& token) const;
+  void validateCompositeClaims(const CatToken& token) const;
 };
 
 /**
@@ -109,8 +109,8 @@ private:
  * @param algorithm Cryptographic algorithm for signing
  * @return Encoded token string
  */
-std::string encodeToken(const CatToken &token,
-                        CryptographicAlgorithm &algorithm);
+std::string encodeToken(const CatToken& token,
+                        CryptographicAlgorithm& algorithm);
 
 /**
  * @brief Decode and verify a CAT token from string format
@@ -119,8 +119,8 @@ std::string encodeToken(const CatToken &token,
  * @return Decoded and verified token
  * @throws SignatureVerificationError if verification fails
  */
-CatToken decodeToken(const std::string &tokenStr,
-                     CryptographicAlgorithm &algorithm);
+CatToken decodeToken(const std::string& tokenStr,
+                     CryptographicAlgorithm& algorithm);
 
 /**
  * @brief Create a minimal valid token using token factory utilities
@@ -128,8 +128,8 @@ CatToken decodeToken(const std::string &tokenStr,
  * @param audience The token audience
  * @return A minimal valid CatToken
  */
-CatToken createMinimalToken(const std::string &issuer,
-                            const std::string &audience);
+CatToken createMinimalToken(const std::string& issuer,
+                            const std::string& audience);
 
 /**
  * @brief Create typed composite claims using factory utilities
@@ -139,8 +139,8 @@ CatToken createMinimalToken(const std::string &issuer,
  */
 template <CompositeOperator Op>
   requires(is_valid_operator<Op>())
-TypedCompositeClaim<Op>
-createTypedComposite(const std::vector<CatToken> &tokens);
+TypedCompositeClaim<Op> createTypedComposite(
+    const std::vector<CatToken>& tokens);
 
 /**
  * @brief Validate a typed composite claim using the CompositeClaimType concept
@@ -152,13 +152,13 @@ createTypedComposite(const std::vector<CatToken> &tokens);
  * validation
  */
 template <CompositeClaimType T, TokenValidator Validator>
-bool validateTypedCompositeClaim(const T &compositeClaim,
-                                 const Validator &validator);
+bool validateTypedCompositeClaim(const T& compositeClaim,
+                                 const Validator& validator);
 
 // Template implementation
 template <CompositeClaimType T, TokenValidator Validator>
-bool validateTypedCompositeClaim(const T &compositeClaim,
-                                 const Validator &validator) {
+bool validateTypedCompositeClaim(const T& compositeClaim,
+                                 const Validator& validator) {
   // First validate the depth using the concept
   if (!composite_utils::validateDepth(compositeClaim)) {
     throw InvalidClaimValueError(
@@ -172,11 +172,11 @@ bool validateTypedCompositeClaim(const T &compositeClaim,
 // CatTokenValidator template method implementation
 template <CompositeClaimType T>
 bool CatTokenValidator::validateTypedComposites(
-    const std::vector<T> &claims) const {
-  return std::ranges::all_of(claims, [this](const T &claim) {
+    const std::vector<T>& claims) const {
+  return std::ranges::all_of(claims, [this](const T& claim) {
     try {
       return validateTypedCompositeClaim(claim, *this);
-    } catch (const CatError &) {
+    } catch (const CatError&) {
       return false;
     }
   });
@@ -186,10 +186,10 @@ bool CatTokenValidator::validateTypedComposites(
 
 template <CompositeOperator Op>
   requires(is_valid_operator<Op>())
-TypedCompositeClaim<Op>
-createTypedComposite(const std::vector<CatToken> &tokens) {
+TypedCompositeClaim<Op> createTypedComposite(
+    const std::vector<CatToken>& tokens) {
   TypedCompositeClaim<Op> composite;
-  for (const auto &token : tokens) {
+  for (const auto& token : tokens) {
     composite.addToken(token);
   }
 
@@ -204,4 +204,4 @@ createTypedComposite(const std::vector<CatToken> &tokens) {
   return composite;
 }
 
-} // namespace catapult
+}  // namespace catapult

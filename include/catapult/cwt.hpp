@@ -29,7 +29,7 @@ struct AuthorizationContext;
  * @brief RAII wrapper for CBOR items
  */
 struct CborItemDeleter {
-  void operator()(cbor_item_t *item) const noexcept;
+  void operator()(cbor_item_t* item) const noexcept;
 };
 using CborItemPtr = std::unique_ptr<cbor_item_t, CborItemDeleter>;
 
@@ -37,7 +37,7 @@ using CborItemPtr = std::unique_ptr<cbor_item_t, CborItemDeleter>;
  * @brief RAII wrapper for CBOR buffer
  */
 struct CborBufferDeleter {
-  void operator()(unsigned char *buffer) const noexcept;
+  void operator()(unsigned char* buffer) const noexcept;
 };
 using CborBufferPtr = std::unique_ptr<unsigned char, CborBufferDeleter>;
 
@@ -54,9 +54,9 @@ concept CborEncodable = requires(T t) {
  * @brief CWT header structure
  */
 struct CwtHeader {
-  int64_t alg;                    ///< Algorithm identifier
-  std::optional<std::string> kid; ///< Key ID
-  std::optional<std::string> typ; ///< Token type
+  int64_t alg;                     ///< Algorithm identifier
+  std::optional<std::string> kid;  ///< Key ID
+  std::optional<std::string> typ;  ///< Token type
 
   /**
    * @brief Construct a CWT header
@@ -69,22 +69,23 @@ struct CwtHeader {
  * @brief CWT creation mode enumeration
  */
 enum class CwtMode {
-  Signed,      ///< Signed CWT (COSE_Sign1) - single signature
-  MultiSigned, ///< Multi-signed CWT (COSE_Sign) - multiple signatures
-  MACed,       ///< MACed CWT (COSE_Mac0)
-  Encrypted    ///< Encrypted CWT (COSE_Encrypt0)
+  Signed,       ///< Signed CWT (COSE_Sign1) - single signature
+  MultiSigned,  ///< Multi-signed CWT (COSE_Sign) - multiple signatures
+  MACed,        ///< MACed CWT (COSE_Mac0)
+  Encrypted     ///< Encrypted CWT (COSE_Encrypt0)
 };
 
 /**
  * @brief COSE signature structure for multi-signature support
  */
 struct CoseSignature {
-  std::vector<uint8_t> protectedHeader; ///< Signature-specific protected header
-  std::vector<uint8_t> signature;       ///< Digital signature bytes
-  int64_t algorithmId;                  ///< Algorithm ID for this signature
+  std::vector<uint8_t>
+      protectedHeader;             ///< Signature-specific protected header
+  std::vector<uint8_t> signature;  ///< Digital signature bytes
+  int64_t algorithmId;             ///< Algorithm ID for this signature
 
-  CoseSignature(const std::vector<uint8_t> &header,
-                const std::vector<uint8_t> &sig, int64_t algId)
+  CoseSignature(const std::vector<uint8_t>& header,
+                const std::vector<uint8_t>& sig, int64_t algId)
       : protectedHeader(header), signature(sig), algorithmId(algId) {}
 };
 
@@ -92,25 +93,25 @@ struct CoseSignature {
  * @brief CBOR Web Token representation
  */
 class Cwt {
-public:
-  CwtHeader header;                      ///< CWT header
-  CatToken payload;                      ///< Token payload
-  std::vector<uint8_t> signature;        ///< Digital signature (COSE_Sign1)
-  std::vector<CoseSignature> signatures; ///< Multiple signatures (COSE_Sign)
+ public:
+  CwtHeader header;                       ///< CWT header
+  CatToken payload;                       ///< Token payload
+  std::vector<uint8_t> signature;         ///< Digital signature (COSE_Sign1)
+  std::vector<CoseSignature> signatures;  ///< Multiple signatures (COSE_Sign)
 
   /**
    * @brief Construct a CWT with algorithm and token
    * @param alg COSE algorithm identifier
    * @param token CAT token payload
    */
-  Cwt(int64_t alg, const CatToken &token);
+  Cwt(int64_t alg, const CatToken& token);
 
   /**
    * @brief Set the key ID in the header
    * @param kid Key identifier
    * @return Reference to this CWT for chaining
    */
-  Cwt &withKeyId(const std::string &kid);
+  Cwt& withKeyId(const std::string& kid);
 
   /**
    * @brief Add a signature for COSE_Sign (multi-signature) mode.
@@ -118,8 +119,8 @@ public:
    * @param signatureHeader Optional signature-specific protected header
    * @return Reference to this CWT for chaining
    */
-  Cwt &addSignature(const class CryptographicAlgorithm &algorithm,
-                    const std::vector<uint8_t> &signatureHeader = {});
+  Cwt& addSignature(const class CryptographicAlgorithm& algorithm,
+                    const std::vector<uint8_t>& signatureHeader = {});
 
   /**
    * @brief Encode the payload to CBOR format
@@ -132,7 +133,7 @@ public:
    * @param cborData CBOR-encoded data
    * @return Decoded CAT token
    */
-  static CatToken decodePayload(const std::vector<uint8_t> &cborData);
+  static CatToken decodePayload(const std::vector<uint8_t>& cborData);
 
   /**
    * @brief Create and sign/MAC/encrypt a CWT (RFC 8392)
@@ -140,8 +141,8 @@ public:
    * @param algorithm Cryptographic algorithm implementation
    * @return Raw CBOR-encoded CWT bytes
    */
-  std::vector<uint8_t>
-  createCwt(CwtMode mode, const class CryptographicAlgorithm &algorithm) const;
+  std::vector<uint8_t> createCwt(
+      CwtMode mode, const class CryptographicAlgorithm& algorithm) const;
 
   /**
    * @brief Validate a COSE_Sign1 CWT from raw CBOR bytes (RFC 8392)
@@ -152,7 +153,7 @@ public:
    * @throws InvalidTokenFormatError if token is COSE_Sign format
    */
   static Cwt validateCwt(std::span<const uint8_t> cwtBytes,
-                         const class CryptographicAlgorithm &algorithm);
+                         const class CryptographicAlgorithm& algorithm);
 
   /**
    * @brief Validate a multi-signed CWT with per-signature algorithms
@@ -163,33 +164,32 @@ public:
    */
   static Cwt validateMultiSignedCwt(
       std::span<const uint8_t> cwtBytes,
-      const std::map<int64_t,
-                     std::reference_wrapper<const class CryptographicAlgorithm>>
-          &algorithms);
+      const std::map<
+          int64_t, std::reference_wrapper<const class CryptographicAlgorithm>>&
+          algorithms);
 
   // Base64url convenience helpers
 
   /**
    * @brief Create CWT and return as base64url-encoded string
    */
-  std::string
-  createCwtBase64(CwtMode mode,
-                  const class CryptographicAlgorithm &algorithm) const;
+  std::string createCwtBase64(
+      CwtMode mode, const class CryptographicAlgorithm& algorithm) const;
 
   /**
    * @brief Validate a base64url-encoded CWT string
    */
-  static Cwt validateCwtBase64(const std::string &encodedCwt,
-                               const class CryptographicAlgorithm &algorithm);
+  static Cwt validateCwtBase64(const std::string& encodedCwt,
+                               const class CryptographicAlgorithm& algorithm);
 
   /**
    * @brief Validate a base64url-encoded multi-signed CWT
    */
   static Cwt validateMultiSignedCwtBase64(
-      const std::string &encodedCwt,
-      const std::map<int64_t,
-                     std::reference_wrapper<const class CryptographicAlgorithm>>
-          &algorithms);
+      const std::string& encodedCwt,
+      const std::map<
+          int64_t, std::reference_wrapper<const class CryptographicAlgorithm>>&
+          algorithms);
 
   /**
    * @brief Create COSE header for the CWT
@@ -205,10 +205,10 @@ public:
    * @param ath Optional access token hash
    * @return CBOR-encoded DPoP signing input bytes
    */
-  static std::vector<uint8_t>
-  createDpopSigningInput(const struct AuthorizationContext &actx, int64_t iat,
-                         const std::optional<std::string> &jti = std::nullopt,
-                         const std::optional<std::string> &ath = std::nullopt);
+  static std::vector<uint8_t> createDpopSigningInput(
+      const struct AuthorizationContext& actx, int64_t iat,
+      const std::optional<std::string>& jti = std::nullopt,
+      const std::optional<std::string>& ath = std::nullopt);
 };
 
-} // namespace catapult
+}  // namespace catapult

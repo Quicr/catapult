@@ -10,11 +10,10 @@ namespace catapult {
 /**
  * @brief Pool-aware deleter implementation
  */
-void TrieNodePoolDeleter::operator()(TrieNode *ptr) const {
-  if (!ptr)
-    return;
+void TrieNodePoolDeleter::operator()(TrieNode* ptr) const {
+  if (!ptr) return;
 
-  auto &pool = getTrieNodePool();
+  auto& pool = getTrieNodePool();
 
   if (pool.is_pool_memory(ptr)) {
     // Pool allocated - destroy object first, then return memory to pool
@@ -40,7 +39,7 @@ void TrieNode::setChild(char c, TrieNodePtr child) {
 
 TrieNodePtr TrieNode::removeChild(char c) {
   auto child = std::move(children[static_cast<unsigned char>(c)]);
-  return child; // child is already a TrieNodePtr
+  return child;  // child is already a TrieNodePtr
 }
 
 /**
@@ -68,10 +67,10 @@ PrefixTrie::PrefixTrie(size_t expected_size)
 }
 
 void PrefixTrie::insert(std::string_view pattern, std::string_view value) {
-  TrieNode *current = root.get();
+  TrieNode* current = root.get();
 
   for (char ch : pattern) {
-    TrieNode *child = current->getChild(ch);
+    TrieNode* child = current->getChild(ch);
     if (!child) {
       current->setChild(ch, createNode());
       child = current->getChild(ch);
@@ -88,9 +87,9 @@ void PrefixTrie::insert(std::string_view pattern, std::string_view value) {
 }
 
 void PrefixTrie::insertBatch(
-    const std::vector<std::pair<std::string_view, std::string_view>>
-        &patterns) {
-  for (const auto &[pattern, value] : patterns) {
+    const std::vector<std::pair<std::string_view, std::string_view>>&
+        patterns) {
+  for (const auto& [pattern, value] : patterns) {
     insert(pattern, value);
   }
 }
@@ -100,11 +99,11 @@ std::vector<std::string> PrefixTrie::searchPrefix(std::string_view text) const {
   matches.reserve(
       expected_capacity_ > 0 ? std::min(expected_capacity_, text.size()) : 10);
 
-  const TrieNode *current = root.get();
+  const TrieNode* current = root.get();
 
   for (size_t i = 0; i < text.length(); ++i) {
     char ch = text[i];
-    const TrieNode *child = current->getChild(ch);
+    const TrieNode* child = current->getChild(ch);
     if (!child) {
       break;
     }
@@ -118,10 +117,10 @@ std::vector<std::string> PrefixTrie::searchPrefix(std::string_view text) const {
 }
 
 std::vector<std::vector<std::string>> PrefixTrie::searchPrefixBatch(
-    const std::vector<std::string_view> &texts) const {
+    const std::vector<std::string_view>& texts) const {
   std::vector<std::vector<std::string>> results;
   results.reserve(texts.size());
-  for (const auto &text : texts) {
+  for (const auto& text : texts) {
     results.push_back(searchPrefix(text));
   }
   return results;
@@ -131,9 +130,8 @@ size_t PrefixTrie::getMemoryUsage() const noexcept {
   return calculateNodeMemory(root.get());
 }
 
-size_t PrefixTrie::calculateNodeMemory(const TrieNode *node) const noexcept {
-  if (!node)
-    return 0;
+size_t PrefixTrie::calculateNodeMemory(const TrieNode* node) const noexcept {
+  if (!node) return 0;
 
   size_t memory = sizeof(TrieNode);
   memory += node->value.capacity();
@@ -142,7 +140,7 @@ size_t PrefixTrie::calculateNodeMemory(const TrieNode *node) const noexcept {
   memory += sizeof(node->children);
 
   // Recursively calculate children memory
-  for (const auto &child : node->children) {
+  for (const auto& child : node->children) {
     if (child) {
       memory += calculateNodeMemory(child.get());
     }
@@ -157,10 +155,10 @@ void PrefixTrie::clear() noexcept {
 }
 
 bool PrefixTrie::containsPrefix(std::string_view text) const {
-  const TrieNode *current = root.get();
+  const TrieNode* current = root.get();
 
   for (char ch : text) {
-    const TrieNode *child = current->getChild(ch);
+    const TrieNode* child = current->getChild(ch);
     if (child) {
       current = child;
       if (current->isTerminal) {
@@ -180,16 +178,16 @@ std::vector<std::string> PrefixTrie::getAllPatterns() const {
   return patterns;
 }
 
-void PrefixTrie::collectPatterns(const TrieNode *node,
-                                 const std::string &prefix,
-                                 std::vector<std::string> &patterns) const {
+void PrefixTrie::collectPatterns(const TrieNode* node,
+                                 const std::string& prefix,
+                                 std::vector<std::string>& patterns) const {
   if (node->isTerminal) {
     patterns.push_back(prefix);
   }
 
   auto childChars = node->getChildChars();
   for (char ch : childChars) {
-    const TrieNode *child = node->getChild(ch);
+    const TrieNode* child = node->getChild(ch);
     if (child) {
       collectPatterns(child, prefix + ch, patterns);
     }
@@ -200,9 +198,9 @@ bool PrefixTrie::remove(std::string_view pattern) {
   return removeRecursive(root.get(), std::string(pattern), 0);
 }
 
-size_t PrefixTrie::removeBatch(const std::vector<std::string_view> &patterns) {
+size_t PrefixTrie::removeBatch(const std::vector<std::string_view>& patterns) {
   size_t removed = 0;
-  for (const auto &pattern : patterns) {
+  for (const auto& pattern : patterns) {
     if (remove(pattern)) {
       removed++;
     }
@@ -210,7 +208,7 @@ size_t PrefixTrie::removeBatch(const std::vector<std::string_view> &patterns) {
   return removed;
 }
 
-bool PrefixTrie::removeRecursive(TrieNode *node, const std::string &pattern,
+bool PrefixTrie::removeRecursive(TrieNode* node, const std::string& pattern,
                                  size_t index) {
   if (index == pattern.length()) {
     if (node->isTerminal) {
@@ -223,7 +221,7 @@ bool PrefixTrie::removeRecursive(TrieNode *node, const std::string &pattern,
   }
 
   char ch = pattern[index];
-  TrieNode *child = node->getChild(ch);
+  TrieNode* child = node->getChild(ch);
 
   if (child) {
     bool shouldDeleteChild = removeRecursive(child, pattern, index + 1);
@@ -253,10 +251,10 @@ std::string SuffixTrie::reverse(std::string_view str) const {
 
 void SuffixTrie::insert(std::string_view pattern, std::string_view value) {
   std::string reversed = reverse(pattern);
-  TrieNode *current = root.get();
+  TrieNode* current = root.get();
 
   for (char ch : reversed) {
-    TrieNode *child = current->getChild(ch);
+    TrieNode* child = current->getChild(ch);
     if (!child) {
       current->setChild(ch, createNode());
       child = current->getChild(ch);
@@ -273,9 +271,9 @@ void SuffixTrie::insert(std::string_view pattern, std::string_view value) {
 }
 
 void SuffixTrie::insertBatch(
-    const std::vector<std::pair<std::string_view, std::string_view>>
-        &patterns) {
-  for (const auto &[pattern, value] : patterns) {
+    const std::vector<std::pair<std::string_view, std::string_view>>&
+        patterns) {
+  for (const auto& [pattern, value] : patterns) {
     insert(pattern, value);
   }
 }
@@ -285,10 +283,10 @@ std::vector<std::string> SuffixTrie::searchSuffix(std::string_view text) const {
   matches.reserve(
       expected_capacity_ > 0 ? std::min(expected_capacity_, text.size()) : 10);
   std::string reversed = reverse(text);
-  const TrieNode *current = root.get();
+  const TrieNode* current = root.get();
 
   for (char ch : reversed) {
-    const TrieNode *child = current->getChild(ch);
+    const TrieNode* child = current->getChild(ch);
     if (child) {
       current = child;
       if (current->isTerminal) {
@@ -303,10 +301,10 @@ std::vector<std::string> SuffixTrie::searchSuffix(std::string_view text) const {
 }
 
 std::vector<std::vector<std::string>> SuffixTrie::searchSuffixBatch(
-    const std::vector<std::string_view> &texts) const {
+    const std::vector<std::string_view>& texts) const {
   std::vector<std::vector<std::string>> results;
   results.reserve(texts.size());
-  for (const auto &text : texts) {
+  for (const auto& text : texts) {
     results.push_back(searchSuffix(text));
   }
   return results;
@@ -314,10 +312,10 @@ std::vector<std::vector<std::string>> SuffixTrie::searchSuffixBatch(
 
 bool SuffixTrie::containsSuffix(std::string_view text) const {
   std::string reversed = reverse(text);
-  const TrieNode *current = root.get();
+  const TrieNode* current = root.get();
 
   for (char ch : reversed) {
-    const TrieNode *child = current->getChild(ch);
+    const TrieNode* child = current->getChild(ch);
     if (child) {
       current = child;
       if (current->isTerminal) {
@@ -335,22 +333,22 @@ std::vector<std::string> SuffixTrie::getAllPatterns() const {
   std::vector<std::string> patterns;
   collectPatterns(root.get(), "", patterns);
   // Reverse all collected patterns
-  for (auto &pattern : patterns) {
+  for (auto& pattern : patterns) {
     pattern = reverse(pattern);
   }
   return patterns;
 }
 
-void SuffixTrie::collectPatterns(const TrieNode *node,
-                                 const std::string &prefix,
-                                 std::vector<std::string> &patterns) const {
+void SuffixTrie::collectPatterns(const TrieNode* node,
+                                 const std::string& prefix,
+                                 std::vector<std::string>& patterns) const {
   if (node->isTerminal) {
     patterns.push_back(prefix);
   }
 
   auto childChars = node->getChildChars();
   for (char ch : childChars) {
-    const TrieNode *child = node->getChild(ch);
+    const TrieNode* child = node->getChild(ch);
     if (child) {
       collectPatterns(child, prefix + ch, patterns);
     }
@@ -362,7 +360,7 @@ bool SuffixTrie::remove(std::string_view pattern) {
   return removeRecursive(root.get(), reversed, 0);
 }
 
-bool SuffixTrie::removeRecursive(TrieNode *node, const std::string &pattern,
+bool SuffixTrie::removeRecursive(TrieNode* node, const std::string& pattern,
                                  size_t index) {
   if (index == pattern.length()) {
     if (node->isTerminal) {
@@ -375,7 +373,7 @@ bool SuffixTrie::removeRecursive(TrieNode *node, const std::string &pattern,
   }
 
   char ch = pattern[index];
-  TrieNode *child = node->getChild(ch);
+  TrieNode* child = node->getChild(ch);
 
   if (child) {
     bool shouldDeleteChild = removeRecursive(child, pattern, index + 1);
@@ -389,4 +387,4 @@ bool SuffixTrie::removeRecursive(TrieNode *node, const std::string &pattern,
   return false;
 }
 
-} // namespace catapult
+}  // namespace catapult
