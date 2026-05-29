@@ -525,11 +525,11 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
         }
         for (size_t i = 0; i < map_size; ++i) {
           if (pairs[i].key && cbor_isa_uint(pairs[i].key)) {
-            uint8_t key = cbor_get_uint8(pairs[i].key);
+            uint64_t key = cbor_get_int(pairs[i].key);
             if (key == dpop_labels::ALG && pairs[i].value &&
                 cbor_isa_negint(pairs[i].value)) {
               header.alg_id =
-                  -1 - static_cast<int64_t>(cbor_get_uint8(pairs[i].value));
+                  -1 - static_cast<int64_t>(cbor_get_int(pairs[i].value));
             } else if (key == dpop_labels::COSE_KEY && pairs[i].value &&
                        cbor_isa_bytestring(pairs[i].value)) {
               size_t ck_len = cbor_bytestring_length(pairs[i].value);
@@ -575,7 +575,7 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
         }
 
         if (key_str == "iat" && cbor_isa_uint(pairs[i].value)) {
-          payload.iat = static_cast<int64_t>(cbor_get_uint64(pairs[i].value));
+          payload.iat = static_cast<int64_t>(cbor_get_int(pairs[i].value));
         } else if (key_str == "jti" && cbor_isa_string(pairs[i].value)) {
           payload.jti = std::string(reinterpret_cast<const char *>(
                                         cbor_string_handle(pairs[i].value)),
@@ -603,7 +603,7 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
             } else if (actx_key == "action" &&
                        cbor_isa_uint(actx_pairs[j].value)) {
               payload.actx.action =
-                  static_cast<int>(cbor_get_uint64(actx_pairs[j].value));
+                  static_cast<int>(cbor_get_int(actx_pairs[j].value));
             } else if (actx_key == "tns" &&
                        cbor_isa_string(actx_pairs[j].value)) {
               payload.actx.tns =

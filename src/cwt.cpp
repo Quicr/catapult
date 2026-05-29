@@ -531,7 +531,7 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t> &cborData) {
       continue;
     }
 
-    uint64_t claim_id = cbor_get_uint64(key_item);
+    uint64_t claim_id = cbor_get_int(key_item);
 
     switch (claim_id) {
     case CLAIM_ISS:
@@ -566,7 +566,7 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t> &cborData) {
 
     case CLAIM_EXP:
       if (cbor_isa_uint(value_item)) {
-        uint64_t exp_val = cbor_get_uint64(value_item);
+        uint64_t exp_val = cbor_get_int(value_item);
         if (exp_val <=
             static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
           token.core.exp = static_cast<int64_t>(exp_val);
@@ -576,7 +576,7 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t> &cborData) {
 
     case CLAIM_NBF:
       if (cbor_isa_uint(value_item)) {
-        uint64_t nbf_val = cbor_get_uint64(value_item);
+        uint64_t nbf_val = cbor_get_int(value_item);
         if (nbf_val <=
             static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
           token.core.nbf = static_cast<int64_t>(nbf_val);
@@ -612,7 +612,7 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t> &cborData) {
 
     case CLAIM_CATU:
       if (cbor_isa_uint(value_item)) {
-        token.cat.catu = static_cast<uint32_t>(cbor_get_uint32(value_item));
+        token.cat.catu = static_cast<uint32_t>(cbor_get_int(value_item));
       }
       break;
 
@@ -670,7 +670,7 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t> &cborData) {
 
     case CLAIM_IAT:
       if (cbor_isa_uint(value_item)) {
-        token.informational.iat = cbor_get_uint64(value_item);
+        token.informational.iat = cbor_get_int(value_item);
       }
       break;
 
@@ -728,7 +728,7 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t> &cborData) {
                 cbor_item_t *act = cbor_array_get(actions_arr, ai);
                 if (act && cbor_isa_uint(act)) {
                   // Use uint64 to handle all possible CBOR uint values
-                  uint64_t action_u64 = cbor_get_uint64(act);
+                  uint64_t action_u64 = cbor_get_int(act);
                   // Validate action is within valid range for int
                   if (action_u64 <=
                       static_cast<uint64_t>(std::numeric_limits<int>::max())) {
@@ -756,7 +756,7 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t> &cborData) {
                 cbor_item_t *val_item = cbor_array_get(item, 1);
                 if (type_item && cbor_isa_uint(type_item) && val_item &&
                     cbor_isa_bytestring(val_item)) {
-                  int type = static_cast<int>(cbor_get_uint8(type_item));
+                  int type = static_cast<int>(cbor_get_int(type_item));
                   std::string_view sv(reinterpret_cast<const char *>(
                                           cbor_bytestring_handle(val_item)),
                                       cbor_bytestring_length(val_item));
@@ -1162,7 +1162,7 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
 
       for (size_t i = 0; i < map_size; i++) {
         if (cbor_isa_uint(pairs[i].key) &&
-            cbor_get_uint8(pairs[i].key) == 5) { // IV label
+            cbor_get_int(pairs[i].key) == 5) { // IV label
           if (cbor_isa_bytestring(pairs[i].value)) {
             iv = std::vector<uint8_t>(
                 cbor_bytestring_handle(pairs[i].value),
@@ -1284,13 +1284,13 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
     if (headerPairs) {
       for (size_t i = 0; i < headerMapSize; i++) {
         if (cbor_isa_uint(headerPairs[i].key) &&
-            cbor_get_uint8(headerPairs[i].key) == 1) { // algorithm label
+            cbor_get_int(headerPairs[i].key) == 1) { // algorithm label
           if (cbor_isa_uint(headerPairs[i].value)) {
             headerAlgId =
-                static_cast<int64_t>(cbor_get_uint64(headerPairs[i].value));
+                static_cast<int64_t>(cbor_get_int(headerPairs[i].value));
           } else if (cbor_isa_negint(headerPairs[i].value)) {
             headerAlgId =
-                -static_cast<int64_t>(cbor_get_uint64(headerPairs[i].value)) -
+                -static_cast<int64_t>(cbor_get_int(headerPairs[i].value)) -
                 1;
           }
           break;
@@ -1481,13 +1481,13 @@ Cwt Cwt::validateMultiSignedCwt(
 
           for (size_t j = 0; j < mapSize; j++) {
             if (cbor_isa_uint(pairs[j].key) &&
-                cbor_get_uint8(pairs[j].key) == 1) { // algorithm label
+                cbor_get_int(pairs[j].key) == 1) { // algorithm label
               if (cbor_isa_uint(pairs[j].value)) {
-                sigAlgId = cbor_get_uint64(pairs[j].value);
+                sigAlgId = cbor_get_int(pairs[j].value);
                 algFound = true;
               } else if (cbor_isa_negint(pairs[j].value)) {
                 sigAlgId =
-                    -static_cast<int64_t>(cbor_get_uint64(pairs[j].value)) - 1;
+                    -static_cast<int64_t>(cbor_get_int(pairs[j].value)) - 1;
                 algFound = true;
               }
               break;
