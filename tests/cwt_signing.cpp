@@ -526,3 +526,76 @@ TEST_SUITE("CWT Signing Integration Tests") {
         }
     }
 }
+
+TEST_SUITE("Cwt::decodeHeader") {
+
+    TEST_CASE("Extracts alg and kid from HMAC CWT") {
+        CatToken token;
+        token.core.iss = "decode-header-test";
+
+        Cwt cwt(ALG_HMAC256_256, token);
+        cwt.withKeyId("key-42");
+
+        HmacSha256Algorithm hmac(std::vector<uint8_t>(32, 0xAB));
+        auto cwtBytes = cwt.createCwt(CwtMode::MACed, hmac);
+
+        auto header = Cwt::decodeHeader(
+            std::span<const uint8_t>(cwtBytes.data(), cwtBytes.size()));
+
+        CHECK(header.alg == ALG_HMAC256_256);
+        REQUIRE(header.kid.has_value());
+        CHECK(*header.kid == "key-42");
+    }
+
+    TEST_CASE("Extracts alg from ECDSA CWT without kid") {
+        CatToken token;
+        token.core.iss = "no-kid-test";
+
+        auto keyPair = Es256Algorithm::generateSecureKeyPair();
+        Es256Algorithm ecdsa(keyPair.first, keyPair.second);
+
+        Cwt cwt(ALG_ES256, token);
+        auto cwtBytes = cwt.createCwt(CwtMode::Signed, ecdsa);
+
+        auto header = Cwt::decodeHeader(
+            std::span<const uint8_t>(cwtBytes.data(), cwtBytes.size()));
+
+        CHECK(header.alg == ALG_ES256);
+        CHECK_FALSE(header.kid.has_value());
+    }
+
+    TEST_CASE("Extracts header from encrypted CWT") {
+        CatToken token;
+        token.core.iss = "encrypt-test";
+
+        std::vector<uint8_t> aesKey(16, 0xCC);
+        AesGcmAlgorithm aes(aesKey, ALG_A128GCM);
+
+        Cwt cwt(ALG_A128GCM, token);
+        cwt.withKeyId("enc-key-1");
+        auto cwtBytes = cwt.createCwt(CwtMode::Encrypted, aes);
+
+        auto header = Cwt::decodeHeader(
+            std::span<const uint8_t>(cwtBytes.data(), cwtBytes.size()));
+
+        CHECK(header.alg == ALG_A128GCM);
+        REQUIRE(header.kid.has_value());
+        CHECK(*header.kid == "enc-key-1");
+    }
+
+    TEST_CASE("Throws on invalid CBOR") {
+        std::vector<uint8_t> garbage = {0xFF, 0xFE, 0x00};
+        CHECK_THROWS_AS(
+            Cwt::decodeHeader(
+                std::span<const uint8_t>(garbage.data(), garbage.size())),
+            InvalidCborError);
+    }
+
+    TEST_CASE("Throws on non-array CBOR") {
+        std::vector<uint8_t> notArray = {0x05};
+        CHECK_THROWS_AS(
+            Cwt::decodeHeader(
+                std::span<const uint8_t>(notArray.data(), notArray.size())),
+            InvalidTokenFormatError);
+    }
+}

@@ -170,6 +170,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
             benchmarks/cbor_bench.cpp
             benchmarks/crypto_bench.cpp
             benchmarks/token_bench.cpp
+            benchmarks/cwt_validation_bench.cpp
         )
         
         target_link_libraries(catapult_benchmarks

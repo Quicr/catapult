@@ -3,7 +3,7 @@
 #include <vector>
 #include <thread>
 #include <random>
-#include "catapult/memory_pool.hpp"
+#include "catapult/internal/memory_pool.hpp"
 
 using namespace catapult;
 

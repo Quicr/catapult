@@ -51,16 +51,21 @@ concept CborEncodable = requires(T t) {
 };
 
 /**
- * @brief CWT header structure
+ * @brief COSE protected header fields extracted from a CWT.
+ *
+ * When constructed explicitly (for token creation), alg is required and typ
+ * defaults to "CAT". When returned by decodeHeader(), all fields reflect
+ * what was present in the wire encoding — alg may be 0 if the header was
+ * malformed, and kid/typ are populated only if present in the CBOR map.
  */
 struct CwtHeader {
-  int64_t alg;                     ///< Algorithm identifier
-  std::optional<std::string> kid;  ///< Key ID
-  std::optional<std::string> typ;  ///< Token type
+  int64_t alg;                     ///< COSE algorithm identifier (label 1)
+  std::optional<std::string> kid;  ///< Key ID (label 4), used for key routing
+  std::optional<std::string> typ;  ///< Content type (label 16)
 
   /**
-   * @brief Construct a CWT header
-   * @param algorithm COSE algorithm identifier
+   * @brief Construct a CWT header for token creation
+   * @param algorithm COSE algorithm identifier (e.g. ALG_HMAC256_256, ALG_ES256)
    */
   CwtHeader(int64_t algorithm) : alg(algorithm), typ("CAT") {}
 };
@@ -90,7 +95,20 @@ struct CoseSignature {
 };
 
 /**
- * @brief CBOR Web Token representation
+ * @brief CBOR Web Token (CWT) per RFC 8392.
+ *
+ * Encapsulates a CAT token payload with COSE security (signing, MAC, or
+ * encryption). Supports COSE_Sign1, COSE_Sign (multi-signature), COSE_Mac0,
+ * and COSE_Encrypt0 envelopes.
+ *
+ * Typical creation flow:
+ *   Cwt cwt(ALG_HMAC256_256, token);
+ *   cwt.withKeyId("key-1");
+ *   auto bytes = cwt.createCwt(CwtMode::MACed, hmacAlgorithm);
+ *
+ * Typical validation flow:
+ *   auto header = Cwt::decodeHeader(bytes);  // extract kid without crypto
+ *   auto cwt = Cwt::validateCwt(bytes, algorithm);  // full verification
  */
 class Cwt {
  public:
@@ -143,6 +161,24 @@ class Cwt {
    */
   std::vector<uint8_t> createCwt(
       CwtMode mode, const class CryptographicAlgorithm& algorithm) const;
+
+  /**
+   * @brief Decode the COSE protected header from a CWT without MAC/signature
+   *        verification.
+   *
+   * Parses only the outer CBOR array and the protected-header bytestring to
+   * extract routing metadata (alg, kid, typ). No cryptographic operations are
+   * performed, so the returned header MUST NOT be trusted for authorization
+   * decisions — use it solely to select which key to pass to validateCwt().
+   *
+   * @param cwtBytes Raw CBOR-encoded CWT bytes (COSE_Sign1, COSE_Mac0, or
+   *                 COSE_Encrypt0)
+   * @return CwtHeader populated with alg, and optionally kid and typ
+   * @throws InvalidCborError if the bytes are not valid CBOR
+   * @throws InvalidTokenFormatError if the structure is not a valid COSE array
+   *         or the protected header cannot be decoded
+   */
+  static CwtHeader decodeHeader(std::span<const uint8_t> cwtBytes);
 
   /**
    * @brief Validate a COSE_Sign1 CWT from raw CBOR bytes (RFC 8392)
