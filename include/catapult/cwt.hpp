@@ -65,7 +65,8 @@ struct CwtHeader {
 
   /**
    * @brief Construct a CWT header for token creation
-   * @param algorithm COSE algorithm identifier (e.g. ALG_HMAC256_256, ALG_ES256)
+   * @param algorithm COSE algorithm identifier (e.g. ALG_HMAC256_256,
+   * ALG_ES256)
    */
   CwtHeader(int64_t algorithm) : alg(algorithm), typ("CAT") {}
 };

@@ -1119,10 +1119,10 @@ CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
     throw InvalidTokenFormatError();
   }
 
-  auto protectedHeaderBytes = std::vector<uint8_t>(
-      cbor_bytestring_handle(coseArray[0]),
-      cbor_bytestring_handle(coseArray[0]) +
-          cbor_bytestring_length(coseArray[0]));
+  auto protectedHeaderBytes =
+      std::vector<uint8_t>(cbor_bytestring_handle(coseArray[0]),
+                           cbor_bytestring_handle(coseArray[0]) +
+                               cbor_bytestring_length(coseArray[0]));
 
   cbor_decref(&coseItem);
 
