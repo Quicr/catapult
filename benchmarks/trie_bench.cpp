@@ -1,5 +1,5 @@
 #include <benchmark/benchmark.h>
-#include "catapult/trie.hpp"
+#include "catapult/internal/trie.hpp"
 #include <vector>
 #include <string>
 #include <random>

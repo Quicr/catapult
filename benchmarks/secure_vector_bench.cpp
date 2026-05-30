@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 #include <vector>
 #include <random>
-#include "catapult/secure_vector.hpp"
+#include "catapult/internal/secure_vector.hpp"
 
 using namespace catapult;
 

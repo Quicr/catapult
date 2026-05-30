@@ -1094,6 +1094,89 @@ std::string Cwt::createCwtBase64(
   return base64UrlEncode(cwtBytes);
 }
 
+CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
+  struct cbor_load_result result;
+  cbor_item_t* coseItem = cbor_load(cwtBytes.data(), cwtBytes.size(), &result);
+
+  if (result.error.code != CBOR_ERR_NONE || !coseItem) {
+    throw InvalidCborError("Failed to parse COSE structure");
+  }
+
+  if (!cbor_isa_array(coseItem)) {
+    cbor_decref(&coseItem);
+    throw InvalidTokenFormatError();
+  }
+
+  size_t arraySize = cbor_array_size(coseItem);
+  if (arraySize < 3 || arraySize > 4) {
+    cbor_decref(&coseItem);
+    throw InvalidTokenFormatError();
+  }
+
+  cbor_item_t** coseArray = cbor_array_handle(coseItem);
+  if (!coseArray || !cbor_isa_bytestring(coseArray[0])) {
+    cbor_decref(&coseItem);
+    throw InvalidTokenFormatError();
+  }
+
+  auto protectedHeaderBytes = std::vector<uint8_t>(
+      cbor_bytestring_handle(coseArray[0]),
+      cbor_bytestring_handle(coseArray[0]) +
+          cbor_bytestring_length(coseArray[0]));
+
+  cbor_decref(&coseItem);
+
+  // Decode the protected header map
+  struct cbor_load_result headerResult;
+  cbor_item_t* headerItem = cbor_load(
+      protectedHeaderBytes.data(), protectedHeaderBytes.size(), &headerResult);
+
+  if (headerResult.error.code != CBOR_ERR_NONE || !headerItem ||
+      !cbor_isa_map(headerItem)) {
+    if (headerItem) cbor_decref(&headerItem);
+    throw InvalidTokenFormatError();
+  }
+
+  int64_t algId = 0;
+  std::optional<std::string> kid;
+  std::optional<std::string> typ;
+
+  struct cbor_pair* pairs = cbor_map_handle(headerItem);
+  size_t mapSize = cbor_map_size(headerItem);
+
+  for (size_t i = 0; i < mapSize; i++) {
+    if (!cbor_isa_uint(pairs[i].key)) continue;
+    uint64_t label = cbor_get_int(pairs[i].key);
+
+    if (label == 1) {  // alg
+      if (cbor_isa_uint(pairs[i].value)) {
+        algId = static_cast<int64_t>(cbor_get_int(pairs[i].value));
+      } else if (cbor_isa_negint(pairs[i].value)) {
+        algId = -static_cast<int64_t>(cbor_get_int(pairs[i].value)) - 1;
+      }
+    } else if (label == 4) {  // kid
+      if (cbor_isa_string(pairs[i].value)) {
+        kid = std::string(
+            reinterpret_cast<const char*>(cbor_string_handle(pairs[i].value)),
+            cbor_string_length(pairs[i].value));
+      }
+    } else if (label == 16) {  // content type / typ
+      if (cbor_isa_string(pairs[i].value)) {
+        typ = std::string(
+            reinterpret_cast<const char*>(cbor_string_handle(pairs[i].value)),
+            cbor_string_length(pairs[i].value));
+      }
+    }
+  }
+
+  cbor_decref(&headerItem);
+
+  CwtHeader header(algId);
+  header.kid = std::move(kid);
+  header.typ = std::move(typ);
+  return header;
+}
+
 Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
                      const CryptographicAlgorithm& algorithm) {
   try {

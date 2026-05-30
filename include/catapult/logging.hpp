@@ -1,3 +1,12 @@
+/**
+ * @file logging.hpp
+ * @brief Internal logging infrastructure for the Catapult library.
+ *
+ * Provides compile-time switchable logging via the ENABLE_LOGGING macro.
+ * When enabled, uses spdlog with a colored stdout sink. When disabled,
+ * all CAT_LOG_* macros expand to no-ops with zero runtime cost.
+ */
+
 #pragma once
 
 #ifdef ENABLE_LOGGING
@@ -10,6 +19,9 @@
 namespace catapult {
 namespace logging {
 
+/**
+ * @brief Log severity levels (mirrors spdlog levels)
+ */
 enum class LogLevel {
   TRACE = 0,
   DEBUG = 1,
@@ -20,6 +32,12 @@ enum class LogLevel {
   OFF = 6
 };
 
+/**
+ * @brief Singleton logger for the Catapult library.
+ *
+ * Initializes a colored stdout logger named "catapult" at INFO level.
+ * Use setLevel() or setLogLevel() to adjust verbosity at runtime.
+ */
 class Logger {
  public:
   static Logger& getInstance() {

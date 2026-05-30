@@ -247,6 +247,13 @@ class HmacSha256Algorithm : public CryptographicAlgorithm {
   ~HmacSha256Algorithm() override = default;
 };
 
+/**
+ * @brief ECDSA P-256 (ES256) algorithm implementation.
+ *
+ * Provides ECDSA signing and verification using the NIST P-256 curve with
+ * SHA-256. Supports both sign+verify (with private key) and verify-only
+ * (with public key only) modes. Keys are DER-encoded.
+ */
 class Es256Algorithm : public CryptographicAlgorithm {
  public:
   struct Impl;  // Made public for memory pool access
@@ -259,39 +266,61 @@ class Es256Algorithm : public CryptographicAlgorithm {
   void initializeImpl();
 
  public:
+  /**
+   * @brief Default constructor (generates a new key pair internally)
+   */
   Es256Algorithm();
+
+  /**
+   * @brief Construct with an existing key pair
+   * @param privateKey DER-encoded P-256 private key (32 bytes raw)
+   * @param publicKey DER-encoded P-256 public key
+   */
   Es256Algorithm(const std::vector<uint8_t>& privateKey,
                  const std::vector<uint8_t>& publicKey);
+
   /**
-   * @brief Constructor with secure private key storage
+   * @brief Construct with secure private key storage
+   * @param privateKey Private key in secure memory
+   * @param publicKey DER-encoded P-256 public key
    */
   Es256Algorithm(const SecureVector<uint8_t>& privateKey,
                  const std::vector<uint8_t>& publicKey);
 
-  explicit Es256Algorithm(
-      const std::vector<uint8_t>& publicKey);  // For verification only
+  /**
+   * @brief Construct for verification only (no signing capability)
+   * @param publicKey DER-encoded P-256 public key
+   */
+  explicit Es256Algorithm(const std::vector<uint8_t>& publicKey);
+
   ~Es256Algorithm();
 
-  // Move constructor and assignment
   Es256Algorithm(Es256Algorithm&& other) noexcept;
   Es256Algorithm& operator=(Es256Algorithm&& other) noexcept;
 
-  // Delete copy constructor and assignment
   Es256Algorithm(const Es256Algorithm&) = delete;
   Es256Algorithm& operator=(const Es256Algorithm&) = delete;
 
+  /**
+   * @brief Generate an ES256 key pair
+   * @deprecated Use generateSecureKeyPair() for enhanced security
+   * @return Pair of (DER private key, DER public key)
+   */
   [[deprecated("Use generateSecureKeyPair() for enhanced security")]]
   static std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
   generateKeyPair();
 
   /**
    * @brief Generate ES256 key pair with secure memory for private key
-   * @return Pair of (private key, public key) where private key uses secure
-   * storage
+   * @return Pair of (private key in secure storage, DER public key)
    */
   static std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>
   generateSecureKeyPair();
 
+  /**
+   * @brief Get the DER-encoded public key
+   * @return Public key bytes
+   */
   std::vector<uint8_t> getPublicKey() const;
 
   std::vector<uint8_t> signImpl(std::span<const uint8_t> data) const override;
@@ -300,6 +329,13 @@ class Es256Algorithm : public CryptographicAlgorithm {
   int64_t algorithmId() const override;
 };
 
+/**
+ * @brief RSASSA-PSS with SHA-256 (PS256) algorithm implementation.
+ *
+ * Provides RSA-PSS signing and verification using SHA-256 as both the hash
+ * and MGF1 hash. Minimum key size is 2048 bits. Supports sign+verify and
+ * verify-only modes. Keys are DER-encoded.
+ */
 class Ps256Algorithm : public CryptographicAlgorithm {
  public:
   struct Impl;  // Made public for memory pool access
@@ -312,38 +348,61 @@ class Ps256Algorithm : public CryptographicAlgorithm {
   void loadPublicKey(const uint8_t* keyData, size_t keySize);
 
  public:
+  /**
+   * @brief Default constructor (generates a new 2048-bit RSA key pair)
+   */
   Ps256Algorithm();
+
+  /**
+   * @brief Construct with an existing key pair
+   * @param privateKey DER-encoded RSA private key
+   * @param publicKey DER-encoded RSA public key
+   */
   Ps256Algorithm(const std::vector<uint8_t>& privateKey,
                  const std::vector<uint8_t>& publicKey);
+
   /**
-   * @brief Constructor with secure private key storage
+   * @brief Construct with secure private key storage
+   * @param privateKey RSA private key in secure memory
+   * @param publicKey DER-encoded RSA public key
    */
   Ps256Algorithm(const SecureVector<uint8_t>& privateKey,
                  const std::vector<uint8_t>& publicKey);
-  explicit Ps256Algorithm(
-      const std::vector<uint8_t>& publicKey);  // For verification only
+
+  /**
+   * @brief Construct for verification only (no signing capability)
+   * @param publicKey DER-encoded RSA public key
+   */
+  explicit Ps256Algorithm(const std::vector<uint8_t>& publicKey);
+
   ~Ps256Algorithm();
 
-  // Move constructor and assignment
   Ps256Algorithm(Ps256Algorithm&& other) noexcept;
   Ps256Algorithm& operator=(Ps256Algorithm&& other) noexcept;
 
-  // Delete copy constructor and assignment
   Ps256Algorithm(const Ps256Algorithm&) = delete;
   Ps256Algorithm& operator=(const Ps256Algorithm&) = delete;
 
+  /**
+   * @brief Generate a PS256 key pair
+   * @deprecated Use generateSecureKeyPair() for enhanced security
+   * @return Pair of (DER private key, DER public key)
+   */
   [[deprecated("Use generateSecureKeyPair() for enhanced security")]]
   static std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
   generateKeyPair();
 
   /**
    * @brief Generate PS256 key pair with secure memory for private key
-   * @return Pair of (private key, public key) where private key uses secure
-   * storage
+   * @return Pair of (private key in secure storage, DER public key)
    */
   static std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>
   generateSecureKeyPair();
 
+  /**
+   * @brief Get the DER-encoded public key
+   * @return Public key bytes
+   */
   std::vector<uint8_t> getPublicKey() const;
 
   std::vector<uint8_t> signImpl(std::span<const uint8_t> data) const override;
