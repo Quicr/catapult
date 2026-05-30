@@ -32,8 +32,8 @@ static std::vector<uint8_t> createTestCwt(const HmacKeyEntry& key) {
   token.core.iss = "bench-issuer";
   token.core.aud = std::vector<std::string>{"bench-audience"};
   auto now = std::chrono::system_clock::now();
-  token.core.exp = std::chrono::system_clock::to_time_t(
-      now + std::chrono::hours(1));
+  token.core.exp =
+      std::chrono::system_clock::to_time_t(now + std::chrono::hours(1));
 
   Cwt cwt(ALG_HMAC256_256, token);
   cwt.withKeyId(key.id);
@@ -80,8 +80,9 @@ static void BM_ValidateCwt_DecodeHeaderFirst(benchmark::State& state) {
   for (auto _ : state) {
     auto header = Cwt::decodeHeader(span);
     if (header.kid.has_value()) {
-      auto it = std::find_if(keys.begin(), keys.end(),
-          [&](const auto& k) { return k.id == *header.kid; });
+      auto it = std::find_if(keys.begin(), keys.end(), [&](const auto& k) {
+        return k.id == *header.kid;
+      });
       if (it != keys.end()) {
         HmacSha256Algorithm hmac(it->secret);
         auto cwt = Cwt::validateCwt(span, hmac);
@@ -144,8 +145,9 @@ static void BM_ValidateCwt_Throughput_HMAC(benchmark::State& state) {
 
     auto header = Cwt::decodeHeader(span);
     if (header.kid.has_value()) {
-      auto it = std::find_if(keys.begin(), keys.end(),
-          [&](const auto& k) { return k.id == *header.kid; });
+      auto it = std::find_if(keys.begin(), keys.end(), [&](const auto& k) {
+        return k.id == *header.kid;
+      });
       if (it != keys.end()) {
         HmacSha256Algorithm hmac(it->secret);
         auto cwt = Cwt::validateCwt(span, hmac);
@@ -175,8 +177,8 @@ static void BM_ValidateCwt_Throughput_ES256(benchmark::State& state) {
   token.core.iss = "bench-issuer";
   token.core.aud = std::vector<std::string>{"bench-audience"};
   auto now = std::chrono::system_clock::now();
-  token.core.exp = std::chrono::system_clock::to_time_t(
-      now + std::chrono::hours(1));
+  token.core.exp =
+      std::chrono::system_clock::to_time_t(now + std::chrono::hours(1));
 
   Cwt cwt(ALG_ES256, token);
   cwt.withKeyId("es256-key");
@@ -190,8 +192,7 @@ static void BM_ValidateCwt_Throughput_ES256(benchmark::State& state) {
 
   state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ValidateCwt_Throughput_ES256)
-    ->Unit(benchmark::kMicrosecond);
+BENCHMARK(BM_ValidateCwt_Throughput_ES256)->Unit(benchmark::kMicrosecond);
 
 // Benchmark decodeHeader alone (the overhead of the optimization)
 static void BM_DecodeHeader_Only(benchmark::State& state) {
