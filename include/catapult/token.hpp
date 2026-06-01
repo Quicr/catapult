@@ -245,16 +245,74 @@ class CatToken {
   CatToken& withAndComposite(std::unique_ptr<AndClaim> andClaim);
 
   // MOQT claim builder methods
+
+  /**
+   * @brief Set pre-built MOQT claims directly
+   *
+   * Use when you have already constructed a MoqtClaims object with multiple
+   * scopes configured.
+   */
   CatToken& withMoqtClaims(MoqtClaims claims);
 
+  /**
+   * @brief Add a MOQT scope with runtime-determined actions
+   *
+   * Preferred when: actions come from configuration, user input, or are
+   * determined at runtime (e.g., loaded from a database or policy file).
+   *
+   * @param actions  Range of action integers (validated at runtime)
+   * @param namespace_match  Single match condition for namespace
+   * @param track_match  Single match condition for track
+   */
   template <std::ranges::range ActionRange>
   CatToken& withMoqtActionsDynamic(const ActionRange& actions,
                                    MoqtBinaryMatch namespace_match,
                                    MoqtBinaryMatch track_match);
 
+  /**
+   * @brief Add a MOQT scope with runtime actions and compound matches
+   *
+   * Preferred when: actions are runtime-determined AND you need multiple
+   * AND-ed match conditions per dimension.
+   *
+   * @param actions  Range of action integers (validated at runtime)
+   * @param namespace_match  Compound match (AND of conditions) for namespace
+   * @param track_match  Compound match (AND of conditions) for track
+   */
+  template <std::ranges::range ActionRange>
+  CatToken& withMoqtActionsDynamic(const ActionRange& actions,
+                                   MoqtCompoundMatch namespace_match,
+                                   MoqtCompoundMatch track_match);
+
+  /**
+   * @brief Add a MOQT scope with compile-time validated actions
+   *
+   * Preferred when: the set of actions is known at compile time (e.g., a
+   * publisher always gets PUBLISH + ANNOUNCE). Actions are validated via
+   * static_assert — invalid actions produce a compile error, not a runtime
+   * exception.
+   *
+   * @tparam Actions  MOQT action constants (compile-time validated)
+   * @param namespace_match  Single match condition for namespace
+   * @param track_match  Single match condition for track
+   */
   template <int... Actions>
   CatToken& withMoqtActions(MoqtBinaryMatch namespace_match,
                             MoqtBinaryMatch track_match);
+
+  /**
+   * @brief Add a MOQT scope with compile-time actions and compound matches
+   *
+   * Preferred when: actions are compile-time constants AND you need multiple
+   * AND-ed match conditions per dimension.
+   *
+   * @tparam Actions  MOQT action constants (compile-time validated)
+   * @param namespace_match  Compound match (AND of conditions) for namespace
+   * @param track_match  Compound match (AND of conditions) for track
+   */
+  template <int... Actions>
+  CatToken& withMoqtActions(MoqtCompoundMatch namespace_match,
+                            MoqtCompoundMatch track_match);
 
   CatToken& withMoqtRevalidationInterval(std::chrono::seconds interval);
 
@@ -367,9 +425,28 @@ CatToken& CatToken::withMoqtActionsDynamic(const ActionRange& actions,
   return *this;
 }
 
+template <std::ranges::range ActionRange>
+CatToken& CatToken::withMoqtActionsDynamic(const ActionRange& actions,
+                                           MoqtCompoundMatch namespace_match,
+                                           MoqtCompoundMatch track_match) {
+  auto& moqt_claims = extended.getMoqtClaims();
+  moqt_claims.addScope(actions, std::move(namespace_match),
+                       std::move(track_match));
+  return *this;
+}
+
 template <int... Actions>
 CatToken& CatToken::withMoqtActions(MoqtBinaryMatch namespace_match,
                                     MoqtBinaryMatch track_match) {
+  auto& moqt_claims = extended.getMoqtClaims();
+  moqt_claims.template addCompileTimeScope<Actions...>(
+      std::move(namespace_match), std::move(track_match));
+  return *this;
+}
+
+template <int... Actions>
+CatToken& CatToken::withMoqtActions(MoqtCompoundMatch namespace_match,
+                                    MoqtCompoundMatch track_match) {
   auto& moqt_claims = extended.getMoqtClaims();
   moqt_claims.template addCompileTimeScope<Actions...>(
       std::move(namespace_match), std::move(track_match));
