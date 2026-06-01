@@ -300,22 +300,41 @@ class ClaimProcessor {
       (void)cbor_array_push(scope_array.get(), actions_array.release());
 
       if (scope_len >= 2) {
-        auto ns_matches = CborItemPtr(cbor_new_definite_array(1));
-        auto ns_item = serializeBinaryMatch(scope.namespace_match);
-        if (ns_item) {
-          (void)cbor_array_push(ns_matches.get(), ns_item);
-        } else {
-          (void)cbor_array_push(ns_matches.get(), cbor_new_null());
+        const auto& ns_conditions = scope.namespace_match.conditions();
+        auto ns_matches =
+            CborItemPtr(cbor_new_definite_array(ns_conditions.size()));
+        for (const auto& cond : ns_conditions) {
+          auto ns_item = serializeBinaryMatch(cond);
+          if (ns_item) {
+            (void)cbor_array_push(ns_matches.get(), ns_item);
+          } else {
+            (void)cbor_array_push(ns_matches.get(), cbor_new_null());
+          }
         }
         (void)cbor_array_push(scope_array.get(), ns_matches.release());
       }
 
       if (scope_len >= 3) {
-        auto track_item = serializeBinaryMatch(scope.track_match);
-        if (track_item) {
-          (void)cbor_array_push(scope_array.get(), track_item);
+        const auto& tr_conditions = scope.track_match.conditions();
+        if (tr_conditions.size() == 1) {
+          auto track_item = serializeBinaryMatch(tr_conditions[0]);
+          if (track_item) {
+            (void)cbor_array_push(scope_array.get(), track_item);
+          } else {
+            (void)cbor_array_push(scope_array.get(), cbor_new_null());
+          }
         } else {
-          (void)cbor_array_push(scope_array.get(), cbor_new_null());
+          auto tr_matches =
+              CborItemPtr(cbor_new_definite_array(tr_conditions.size()));
+          for (const auto& cond : tr_conditions) {
+            auto tr_item = serializeBinaryMatch(cond);
+            if (tr_item) {
+              (void)cbor_array_push(tr_matches.get(), tr_item);
+            } else {
+              (void)cbor_array_push(tr_matches.get(), cbor_new_null());
+            }
+          }
+          (void)cbor_array_push(scope_array.get(), tr_matches.release());
         }
       }
 
@@ -769,18 +788,51 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
                 return MoqtBinaryMatch::any();
               };
 
-              MoqtBinaryMatch ns_match = MoqtBinaryMatch::any();
-              MoqtBinaryMatch track_match = MoqtBinaryMatch::any();
+              MoqtCompoundMatch ns_match = MoqtCompoundMatch::any();
+              MoqtCompoundMatch track_match = MoqtCompoundMatch::any();
 
               if (scope_len >= 2) {
                 cbor_item_t* ns_arr = cbor_array_get(scope_arr, 1);
                 if (ns_arr && cbor_isa_array(ns_arr) &&
                     cbor_array_size(ns_arr) > 0) {
-                  ns_match = parse_bin_match(cbor_array_get(ns_arr, 0));
+                  std::vector<MoqtBinaryMatch> ns_conditions;
+                  for (size_t ni = 0; ni < cbor_array_size(ns_arr); ++ni) {
+                    auto m = parse_bin_match(cbor_array_get(ns_arr, ni));
+                    if (!m.is_empty()) {
+                      ns_conditions.push_back(std::move(m));
+                    }
+                  }
+                  ns_match = MoqtCompoundMatch::all(std::move(ns_conditions));
                 }
               }
               if (scope_len >= 3) {
-                track_match = parse_bin_match(cbor_array_get(scope_arr, 2));
+                cbor_item_t* track_item = cbor_array_get(scope_arr, 2);
+                if (track_item && cbor_isa_array(track_item) &&
+                    cbor_array_size(track_item) > 0) {
+                  cbor_item_t* first = cbor_array_get(track_item, 0);
+                  if (first && cbor_isa_array(first)) {
+                    std::vector<MoqtBinaryMatch> tr_conditions;
+                    for (size_t ti = 0; ti < cbor_array_size(track_item);
+                         ++ti) {
+                      auto m = parse_bin_match(cbor_array_get(track_item, ti));
+                      if (!m.is_empty()) {
+                        tr_conditions.push_back(std::move(m));
+                      }
+                    }
+                    track_match =
+                        MoqtCompoundMatch::all(std::move(tr_conditions));
+                  } else {
+                    auto m = parse_bin_match(track_item);
+                    if (!m.is_empty()) {
+                      track_match = MoqtCompoundMatch::single(std::move(m));
+                    }
+                  }
+                } else if (track_item && cbor_isa_bytestring(track_item)) {
+                  auto m = parse_bin_match(track_item);
+                  if (!m.is_empty()) {
+                    track_match = MoqtCompoundMatch::single(std::move(m));
+                  }
+                }
               }
 
               if (!actions.empty()) {
