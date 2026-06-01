@@ -186,6 +186,64 @@ class MoqtBinaryMatch {
 };  // class MoqtBinaryMatch
 
 /**
+ * @brief Compound match combining multiple binary matches with AND semantics
+ *
+ * All conditions must match for the compound match to succeed.
+ * This allows expressing constraints like "starts with /live AND ends with
+ * .mp4" on a single dimension.
+ */
+class MoqtCompoundMatch {
+ public:
+  static MoqtCompoundMatch any() { return MoqtCompoundMatch{}; }
+
+  static MoqtCompoundMatch single(MoqtBinaryMatch match) {
+    MoqtCompoundMatch result;
+    if (!match.is_empty()) {
+      result.conditions_.push_back(std::move(match));
+    }
+    return result;
+  }
+
+  static MoqtCompoundMatch all(std::vector<MoqtBinaryMatch> conditions) {
+    MoqtCompoundMatch result;
+    for (auto& c : conditions) {
+      if (!c.is_empty()) {
+        result.conditions_.push_back(std::move(c));
+      }
+    }
+    return result;
+  }
+
+  static MoqtCompoundMatch all(
+      std::initializer_list<MoqtBinaryMatch> conditions) {
+    return all(std::vector<MoqtBinaryMatch>(conditions));
+  }
+
+  [[nodiscard]] bool matches(std::span<const uint8_t> data) const noexcept {
+    return std::ranges::all_of(conditions_,
+                               [&](const auto& m) { return m.matches(data); });
+  }
+
+  [[nodiscard]] bool matches(std::string_view str) const noexcept {
+    return std::ranges::all_of(conditions_,
+                               [&](const auto& m) { return m.matches(str); });
+  }
+
+  [[nodiscard]] bool is_empty() const noexcept { return conditions_.empty(); }
+
+  [[nodiscard]] size_t size() const noexcept { return conditions_.size(); }
+
+  [[nodiscard]] const std::vector<MoqtBinaryMatch>& conditions()
+      const noexcept {
+    return conditions_;
+  }
+
+ private:
+  MoqtCompoundMatch() = default;
+  std::vector<MoqtBinaryMatch> conditions_;
+};
+
+/**
  * @brief MOQT action scope representing one scope entry in the moqt claim
  */
 class MoqtActionScope {
@@ -198,12 +256,12 @@ class MoqtActionScope {
   MoqtActionScope() = delete;
 
   /**
-   * @brief Constructor with actions and match patterns
+   * @brief Constructor with actions and compound match patterns
    */
   template <std::ranges::range ActionRange>
     requires MoqtActionType<std::ranges::range_value_t<ActionRange>>
-  MoqtActionScope(const ActionRange& action_list, MoqtBinaryMatch ns_match,
-                  MoqtBinaryMatch tr_match)
+  MoqtActionScope(const ActionRange& action_list, MoqtCompoundMatch ns_match,
+                  MoqtCompoundMatch tr_match)
       : namespace_match(std::move(ns_match)), track_match(std::move(tr_match)) {
     auto action_copy = action_list;
     if constexpr (std::ranges::sized_range<ActionRange>) {
@@ -219,12 +277,25 @@ class MoqtActionScope {
   }
 
  public:
-  std::vector<int> actions;         ///< Allowed MOQT actions
-  MoqtBinaryMatch namespace_match;  ///< Namespace match pattern
-  MoqtBinaryMatch track_match;      ///< Track match pattern
+  std::vector<int> actions;           ///< Allowed MOQT actions
+  MoqtCompoundMatch namespace_match;  ///< Namespace match (AND of conditions)
+  MoqtCompoundMatch track_match;      ///< Track match (AND of conditions)
 
   /**
-   * @brief Factory method for creating validated scope
+   * @brief Factory method for creating validated scope with compound matches
+   */
+  template <std::ranges::range ActionRange>
+    requires std::ranges::range<ActionRange> &&
+             MoqtActionType<std::ranges::range_value_t<ActionRange>>
+  static MoqtActionScope create(const ActionRange& action_list,
+                                MoqtCompoundMatch ns_match,
+                                MoqtCompoundMatch tr_match) {
+    return MoqtActionScope(action_list, std::move(ns_match),
+                           std::move(tr_match));
+  }
+
+  /**
+   * @brief Factory method with single binary matches (convenience)
    */
   template <std::ranges::range ActionRange>
     requires std::ranges::range<ActionRange> &&
@@ -232,8 +303,9 @@ class MoqtActionScope {
   static MoqtActionScope create(const ActionRange& action_list,
                                 MoqtBinaryMatch ns_match,
                                 MoqtBinaryMatch tr_match) {
-    return MoqtActionScope(action_list, std::move(ns_match),
-                           std::move(tr_match));
+    return MoqtActionScope(action_list,
+                           MoqtCompoundMatch::single(std::move(ns_match)),
+                           MoqtCompoundMatch::single(std::move(tr_match)));
   }
 
   /**
@@ -242,19 +314,16 @@ class MoqtActionScope {
   template <MoqtActionType ActionT>
   [[nodiscard]] bool authorizes(ActionT action, std::string_view namespace_name,
                                 std::string_view track_name) const noexcept {
-    // Check if action is in the allowed list
     if (!std::ranges::any_of(actions,
                              [action](int a) { return a == action; })) {
       return false;
     }
 
-    // Check namespace match
     if (!namespace_match.is_empty() &&
         !namespace_match.matches(namespace_name)) {
       return false;
     }
 
-    // Check track match
     if (!track_match.is_empty() && !track_match.matches(track_name)) {
       return false;
     }
@@ -384,7 +453,18 @@ class MoqtClaims {
   }
 
   /**
-   * @brief Add a scope to the claims
+   * @brief Add a scope with compound matches
+   */
+  template <std::ranges::range ActionRange>
+    requires MoqtActionType<std::ranges::range_value_t<ActionRange>>
+  void addScope(const ActionRange& actions, MoqtCompoundMatch namespace_match,
+                MoqtCompoundMatch track_match) {
+    scopes.emplace_back(MoqtActionScope::create(
+        actions, std::move(namespace_match), std::move(track_match)));
+  }
+
+  /**
+   * @brief Add a scope with single binary matches (convenience)
    */
   template <std::ranges::range ActionRange>
     requires MoqtActionType<std::ranges::range_value_t<ActionRange>>
@@ -407,6 +487,20 @@ class MoqtClaims {
   template <int... Actions>
   void addCompileTimeScope(MoqtBinaryMatch namespace_match,
                            MoqtBinaryMatch track_match) {
+    static_assert((moqt_actions::is_valid_action(Actions) && ...),
+                  "All actions must be valid MOQT actions");
+
+    constexpr std::array action_array{Actions...};
+    scopes.emplace_back(MoqtActionScope::create(
+        action_array, std::move(namespace_match), std::move(track_match)));
+  }
+
+  /**
+   * @brief Compile-time scope addition with compound matches
+   */
+  template <int... Actions>
+  void addCompileTimeScope(MoqtCompoundMatch namespace_match,
+                           MoqtCompoundMatch track_match) {
     static_assert((moqt_actions::is_valid_action(Actions) && ...),
                   "All actions must be valid MOQT actions");
 

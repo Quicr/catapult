@@ -133,6 +133,24 @@ void to_json(nlohmann::json& j, const MoqtBinaryMatch& match) {
   j["pattern"] = pattern_str;
 }
 
+void to_json(nlohmann::json& j, const MoqtCompoundMatch& match) {
+  if (match.is_empty()) {
+    j = nlohmann::json::object();
+    j["type"] = "any";
+    return;
+  }
+  if (match.size() == 1) {
+    to_json(j, match.conditions()[0]);
+    return;
+  }
+  j = nlohmann::json::array();
+  for (const auto& cond : match.conditions()) {
+    nlohmann::json cond_json;
+    to_json(cond_json, cond);
+    j.push_back(std::move(cond_json));
+  }
+}
+
 void to_json(nlohmann::json& j, const MoqtActionScope& scope) {
   j = nlohmann::json::object();
   j["actions"] = scope.actions;
