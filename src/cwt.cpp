@@ -151,7 +151,7 @@ class CborMapBuilder {
 
   void addClaimImpl(int64_t claim_id, const std::vector<uint8_t>& data) {
     auto key = CborItemPtr(cbor_build_uint64(claim_id));
-    auto val = CborItemPtr(cbor_build_bytestring(data.data(), data.size()));
+    auto val = cbor_build_bytestring_owned(data.data(), data.size());
     addPair(std::move(key), std::move(val));
   }
 
