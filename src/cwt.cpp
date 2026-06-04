@@ -1243,6 +1243,10 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       throw InvalidCborError("Failed to parse COSE structure");
     }
 
+    if (!cbor_isa_array(coseItem.get())) {
+      throw InvalidTokenFormatError();
+    }
+
     // Step 3: Handle different COSE structures
     std::vector<uint8_t> protectedHeaderBytes;
     std::vector<uint8_t> payloadBytes;
@@ -1458,6 +1462,10 @@ Cwt Cwt::validateMultiSignedCwt(
 
     if (result.error.code != CBOR_ERR_NONE || !coseItem) {
       throw InvalidCborError("Failed to parse COSE structure");
+    }
+
+    if (!cbor_isa_array(coseItem.get())) {
+      throw InvalidTokenFormatError();
     }
 
     std::vector<uint8_t> protectedHeaderBytes;
