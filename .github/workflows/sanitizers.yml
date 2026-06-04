@@ -30,7 +30,6 @@ jobs:
     env:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}
-      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
 
     steps:
@@ -62,6 +61,8 @@ jobs:
       run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
     - name: Run tests under ASan/UBSan
+      env:
+        ASAN_OPTIONS: ${{ matrix.os == 'ubuntu-latest' && 'detect_leaks=1:halt_on_error=1:strict_string_checks=1' || 'halt_on_error=1:strict_string_checks=1' }}
       run: ctest --test-dir build --output-on-failure --timeout 600
 
     - name: Upload sanitizer logs
