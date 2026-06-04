@@ -8,6 +8,7 @@
 #include "catapult/base64.hpp"
 #include "catapult/crypto.hpp"
 #include "catapult/dpop.hpp"
+#include "catapult/internal/cbor_owned.hpp"
 #include "catapult/logging.hpp"
 
 namespace catapult {
@@ -257,18 +258,29 @@ class ClaimProcessor {
     }
   }
 
-  static cbor_item_t* serializeBinaryMatch(const MoqtBinaryMatch& match) {
+  static CborItemPtr serializeBinaryMatch(const MoqtBinaryMatch& match) {
     if (match.is_empty()) {
       return nullptr;
     }
     if (match.match_type == BinaryMatchType::EXACT) {
-      return cbor_build_bytestring(match.pattern.data(), match.pattern.size());
+      return cbor_build_bytestring_owned(match.pattern.data(),
+                                         match.pattern.size());
     }
-    auto arr = cbor_new_definite_array(2);
-    (void)cbor_array_push(
-        arr, cbor_build_uint8(static_cast<uint8_t>(match.match_type)));
-    (void)cbor_array_push(
-        arr, cbor_build_bytestring(match.pattern.data(), match.pattern.size()));
+    auto arr = cbor_new_definite_array_owned(2);
+    auto type_val =
+        cbor_build_uint8_owned(static_cast<uint8_t>(match.match_type));
+    if (!cbor_array_push(arr.get(), type_val.get())) {
+      throw InvalidCborError("Failed to push match type");
+    }
+    type_val.release();
+
+    auto bstr =
+        cbor_build_bytestring_owned(match.pattern.data(), match.pattern.size());
+    if (!cbor_array_push(arr.get(), bstr.get())) {
+      throw InvalidCborError("Failed to push match pattern");
+    }
+    bstr.release();
+
     return arr;
   }
 
@@ -306,7 +318,7 @@ class ClaimProcessor {
         for (const auto& cond : ns_conditions) {
           auto ns_item = serializeBinaryMatch(cond);
           if (ns_item) {
-            (void)cbor_array_push(ns_matches.get(), ns_item);
+            (void)cbor_array_push(ns_matches.get(), ns_item.release());
           } else {
             (void)cbor_array_push(ns_matches.get(), cbor_new_null());
           }
@@ -319,7 +331,7 @@ class ClaimProcessor {
         if (tr_conditions.size() == 1) {
           auto track_item = serializeBinaryMatch(tr_conditions[0]);
           if (track_item) {
-            (void)cbor_array_push(scope_array.get(), track_item);
+            (void)cbor_array_push(scope_array.get(), track_item.release());
           } else {
             (void)cbor_array_push(scope_array.get(), cbor_new_null());
           }
@@ -329,7 +341,7 @@ class ClaimProcessor {
           for (const auto& cond : tr_conditions) {
             auto tr_item = serializeBinaryMatch(cond);
             if (tr_item) {
-              (void)cbor_array_push(tr_matches.get(), tr_item);
+              (void)cbor_array_push(tr_matches.get(), tr_item.release());
             } else {
               (void)cbor_array_push(tr_matches.get(), cbor_new_null());
             }
@@ -483,7 +495,7 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
   }
 
   struct cbor_load_result result;
-  cbor_item_t* raw_item = cbor_load(cborData.data(), cborData.size(), &result);
+  auto item = cbor_load_owned(cborData.data(), cborData.size(), result);
 
   if (result.error.code != CBOR_ERR_NONE) {
     if (result.error.code == CBOR_ERR_MEMERROR) {
@@ -492,9 +504,6 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
       throw InvalidCborError("Failed to parse CBOR data");
     }
   }
-
-  // Use RAII wrapper for automatic cleanup
-  CborItemPtr item(raw_item);
 
   if (!cbor_isa_map(item.get())) {
     throw InvalidTokenFormatError();
@@ -713,41 +722,37 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
         if (cbor_isa_bytestring(value_item)) {
           auto moqt_data = extract_bytestring(value_item);
           cbor_load_result moqt_result;
-          cbor_item_t* moqt_array = cbor_load(
-              reinterpret_cast<const unsigned char*>(moqt_data.data()),
-              moqt_data.size(), &moqt_result);
-          if (moqt_array && cbor_isa_array(moqt_array)) {
-            // Limit MOQT scopes to prevent resource exhaustion
+          auto moqt_array = cbor_load_owned(
+              reinterpret_cast<const uint8_t*>(moqt_data.data()),
+              moqt_data.size(), moqt_result);
+          if (moqt_array && cbor_isa_array(moqt_array.get())) {
             constexpr size_t MAX_MOQT_SCOPES = 100;
-            size_t moqt_scope_count = cbor_array_size(moqt_array);
+            size_t moqt_scope_count = cbor_array_size(moqt_array.get());
             if (moqt_scope_count > MAX_MOQT_SCOPES) {
-              cbor_decref(&moqt_array);
               throw InvalidClaimValueError("Too many MOQT scopes");
             }
             auto moqt_claims = MoqtClaims::create(moqt_scope_count);
             for (size_t si = 0; si < moqt_scope_count; ++si) {
-              cbor_item_t* scope_arr = cbor_array_get(moqt_array, si);
-              if (!scope_arr || !cbor_isa_array(scope_arr)) continue;
-              size_t scope_len = cbor_array_size(scope_arr);
+              auto scope_arr =
+                  cbor_array_get_owned(moqt_array.get(), si);
+              if (!scope_arr || !cbor_isa_array(scope_arr.get())) continue;
+              size_t scope_len = cbor_array_size(scope_arr.get());
               if (scope_len < 1) continue;
 
               std::vector<int> actions;
-              cbor_item_t* actions_arr = cbor_array_get(scope_arr, 0);
-              if (actions_arr && cbor_isa_array(actions_arr)) {
-                // Limit actions per scope
+              auto actions_arr =
+                  cbor_array_get_owned(scope_arr.get(), 0);
+              if (actions_arr && cbor_isa_array(actions_arr.get())) {
                 constexpr size_t MAX_ACTIONS = 50;
-                size_t action_count = cbor_array_size(actions_arr);
+                size_t action_count = cbor_array_size(actions_arr.get());
                 if (action_count > MAX_ACTIONS) continue;
                 for (size_t ai = 0; ai < action_count; ++ai) {
-                  cbor_item_t* act = cbor_array_get(actions_arr, ai);
-                  if (act && cbor_isa_uint(act)) {
-                    // Use uint64 to handle all possible CBOR uint values
-                    uint64_t action_u64 = cbor_get_int(act);
-                    // Validate action is within valid range for int
+                  auto act = cbor_array_get_owned(actions_arr.get(), ai);
+                  if (act && cbor_isa_uint(act.get())) {
+                    uint64_t action_u64 = cbor_get_int(act.get());
                     if (action_u64 <= static_cast<uint64_t>(
                                           std::numeric_limits<int>::max())) {
                       int action_val = static_cast<int>(action_u64);
-                      // Validate action is within valid MOQT action range
                       if (moqt_actions::is_valid_action(action_val)) {
                         actions.push_back(action_val);
                       }
@@ -765,14 +770,15 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
                   return MoqtBinaryMatch::exact(sv);
                 }
                 if (cbor_isa_array(item) && cbor_array_size(item) == 2) {
-                  cbor_item_t* type_item = cbor_array_get(item, 0);
-                  cbor_item_t* val_item = cbor_array_get(item, 1);
-                  if (type_item && cbor_isa_uint(type_item) && val_item &&
-                      cbor_isa_bytestring(val_item)) {
-                    int type = static_cast<int>(cbor_get_int(type_item));
-                    std::string_view sv(reinterpret_cast<const char*>(
-                                            cbor_bytestring_handle(val_item)),
-                                        cbor_bytestring_length(val_item));
+                  auto type_item = cbor_array_get_owned(item, 0);
+                  auto val_item = cbor_array_get_owned(item, 1);
+                  if (type_item && cbor_isa_uint(type_item.get()) && val_item &&
+                      cbor_isa_bytestring(val_item.get())) {
+                    int type = static_cast<int>(cbor_get_int(type_item.get()));
+                    std::string_view sv(
+                        reinterpret_cast<const char*>(
+                            cbor_bytestring_handle(val_item.get())),
+                        cbor_bytestring_length(val_item.get()));
                     switch (type) {
                       case 1:
                         return MoqtBinaryMatch::prefix(sv);
@@ -792,12 +798,15 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
               MoqtCompoundMatch track_match = MoqtCompoundMatch::any();
 
               if (scope_len >= 2) {
-                cbor_item_t* ns_arr = cbor_array_get(scope_arr, 1);
-                if (ns_arr && cbor_isa_array(ns_arr) &&
-                    cbor_array_size(ns_arr) > 0) {
+                auto ns_arr = cbor_array_get_owned(scope_arr.get(), 1);
+                if (ns_arr && cbor_isa_array(ns_arr.get()) &&
+                    cbor_array_size(ns_arr.get()) > 0) {
                   std::vector<MoqtBinaryMatch> ns_conditions;
-                  for (size_t ni = 0; ni < cbor_array_size(ns_arr); ++ni) {
-                    auto m = parse_bin_match(cbor_array_get(ns_arr, ni));
+                  for (size_t ni = 0; ni < cbor_array_size(ns_arr.get());
+                       ++ni) {
+                    auto ns_elem =
+                        cbor_array_get_owned(ns_arr.get(), ni);
+                    auto m = parse_bin_match(ns_elem.get());
                     if (!m.is_empty()) {
                       ns_conditions.push_back(std::move(m));
                     }
@@ -806,15 +815,18 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
                 }
               }
               if (scope_len >= 3) {
-                cbor_item_t* track_item = cbor_array_get(scope_arr, 2);
-                if (track_item && cbor_isa_array(track_item) &&
-                    cbor_array_size(track_item) > 0) {
-                  cbor_item_t* first = cbor_array_get(track_item, 0);
-                  if (first && cbor_isa_array(first)) {
+                auto track_item =
+                    cbor_array_get_owned(scope_arr.get(), 2);
+                if (track_item && cbor_isa_array(track_item.get()) &&
+                    cbor_array_size(track_item.get()) > 0) {
+                  auto first = cbor_array_get_owned(track_item.get(), 0);
+                  if (first && cbor_isa_array(first.get())) {
                     std::vector<MoqtBinaryMatch> tr_conditions;
-                    for (size_t ti = 0; ti < cbor_array_size(track_item);
-                         ++ti) {
-                      auto m = parse_bin_match(cbor_array_get(track_item, ti));
+                    for (size_t ti = 0;
+                         ti < cbor_array_size(track_item.get()); ++ti) {
+                      auto tr_elem =
+                          cbor_array_get_owned(track_item.get(), ti);
+                      auto m = parse_bin_match(tr_elem.get());
                       if (!m.is_empty()) {
                         tr_conditions.push_back(std::move(m));
                       }
@@ -822,13 +834,14 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
                     track_match =
                         MoqtCompoundMatch::all(std::move(tr_conditions));
                   } else {
-                    auto m = parse_bin_match(track_item);
+                    auto m = parse_bin_match(track_item.get());
                     if (!m.is_empty()) {
                       track_match = MoqtCompoundMatch::single(std::move(m));
                     }
                   }
-                } else if (track_item && cbor_isa_bytestring(track_item)) {
-                  auto m = parse_bin_match(track_item);
+                } else if (track_item &&
+                           cbor_isa_bytestring(track_item.get())) {
+                  auto m = parse_bin_match(track_item.get());
                   if (!m.is_empty()) {
                     track_match = MoqtCompoundMatch::single(std::move(m));
                   }
@@ -840,7 +853,6 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
                                      std::move(track_match));
               }
             }
-            cbor_decref(&moqt_array);
             token.extended.setMoqtClaims(std::move(moqt_claims));
           }
         }
@@ -1148,26 +1160,23 @@ std::string Cwt::createCwtBase64(
 
 CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
   struct cbor_load_result result;
-  cbor_item_t* coseItem = cbor_load(cwtBytes.data(), cwtBytes.size(), &result);
+  auto coseItem = cbor_load_owned(cwtBytes, result);
 
   if (result.error.code != CBOR_ERR_NONE || !coseItem) {
     throw InvalidCborError("Failed to parse COSE structure");
   }
 
-  if (!cbor_isa_array(coseItem)) {
-    cbor_decref(&coseItem);
+  if (!cbor_isa_array(coseItem.get())) {
     throw InvalidTokenFormatError();
   }
 
-  size_t arraySize = cbor_array_size(coseItem);
+  size_t arraySize = cbor_array_size(coseItem.get());
   if (arraySize < 3 || arraySize > 4) {
-    cbor_decref(&coseItem);
     throw InvalidTokenFormatError();
   }
 
-  cbor_item_t** coseArray = cbor_array_handle(coseItem);
+  cbor_item_t** coseArray = cbor_array_handle(coseItem.get());
   if (!coseArray || !cbor_isa_bytestring(coseArray[0])) {
-    cbor_decref(&coseItem);
     throw InvalidTokenFormatError();
   }
 
@@ -1176,16 +1185,15 @@ CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
                            cbor_bytestring_handle(coseArray[0]) +
                                cbor_bytestring_length(coseArray[0]));
 
-  cbor_decref(&coseItem);
+  coseItem.reset();
 
   // Decode the protected header map
   struct cbor_load_result headerResult;
-  cbor_item_t* headerItem = cbor_load(
-      protectedHeaderBytes.data(), protectedHeaderBytes.size(), &headerResult);
+  auto headerItem = cbor_load_owned(protectedHeaderBytes.data(),
+                                    protectedHeaderBytes.size(), headerResult);
 
   if (headerResult.error.code != CBOR_ERR_NONE || !headerItem ||
-      !cbor_isa_map(headerItem)) {
-    if (headerItem) cbor_decref(&headerItem);
+      !cbor_isa_map(headerItem.get())) {
     throw InvalidTokenFormatError();
   }
 
@@ -1193,8 +1201,8 @@ CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
   std::optional<std::string> kid;
   std::optional<std::string> typ;
 
-  struct cbor_pair* pairs = cbor_map_handle(headerItem);
-  size_t mapSize = cbor_map_size(headerItem);
+  struct cbor_pair* pairs = cbor_map_handle(headerItem.get());
+  size_t mapSize = cbor_map_size(headerItem.get());
 
   for (size_t i = 0; i < mapSize; i++) {
     if (!cbor_isa_uint(pairs[i].key)) continue;
@@ -1221,8 +1229,6 @@ CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
     }
   }
 
-  cbor_decref(&headerItem);
-
   CwtHeader header(algId);
   header.kid = std::move(kid);
   header.typ = std::move(typ);
@@ -1236,10 +1242,9 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
 
     // Parse COSE structure from raw CBOR bytes (RFC 8392 Section 9.2)
     struct cbor_load_result result;
-    cbor_item_t* coseItem =
-        cbor_load(cwtBytes.data(), cwtBytes.size(), &result);
+    auto coseItem = cbor_load_owned(cwtBytes, result);
 
-    if (result.error.code != CBOR_ERR_NONE) {
+    if (result.error.code != CBOR_ERR_NONE || !coseItem) {
       throw InvalidCborError("Failed to parse COSE structure");
     }
 
@@ -1250,26 +1255,23 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
     bool isMultiSigned = false;
     std::vector<CoseSignature> validatedSignatures;
 
-    size_t arraySize = cbor_array_size(coseItem);
+    size_t arraySize = cbor_array_size(coseItem.get());
 
     if (arraySize == 3) {
       // COSE_Encrypt0: [protected_header, unprotected_header, ciphertext]
       if (!algorithm.supportsEncryption()) {
-        cbor_decref(&coseItem);
         throw CryptoError(
             "Algorithm does not support decryption for COSE_Encrypt0");
       }
       isEncrypted = true;
 
-      cbor_item_t** coseArray = cbor_array_handle(coseItem);
+      cbor_item_t** coseArray = cbor_array_handle(coseItem.get());
       if (!coseArray) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
 
       // Protected header (bytestring)
       if (!cbor_isa_bytestring(coseArray[0])) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
       protectedHeaderBytes =
@@ -1279,7 +1281,6 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
 
       // Extract IV from unprotected header (map)
       if (!cbor_isa_map(coseArray[1])) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
 
@@ -1301,13 +1302,11 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       }
 
       if (iv.empty()) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
 
       // Ciphertext (bytestring)
       if (!cbor_isa_bytestring(coseArray[2])) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
       auto ciphertext =
@@ -1319,21 +1318,13 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       payloadBytes = algorithm.decrypt(ciphertext, iv);
 
     } else if (arraySize == 4) {
-      cbor_item_t** coseArray = cbor_array_handle(coseItem);
+      cbor_item_t** coseArray = cbor_array_handle(coseItem.get());
       if (!coseArray) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
 
-      // Check if this is COSE_Sign1 or COSE_Sign
-      // COSE_Sign1: [protected_header, unprotected_header, payload, signature]
-      // COSE_Sign:  [protected_header, unprotected_header, payload,
-      // signatures_array]
-
-      // Get common fields first
       // Protected header (bytestring)
       if (!cbor_isa_bytestring(coseArray[0])) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
       protectedHeaderBytes =
@@ -1343,7 +1334,6 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
 
       // Payload (bytestring)
       if (!cbor_isa_bytestring(coseArray[2])) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
       payloadBytes =
@@ -1354,14 +1344,10 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       // Check if the 4th element is an array (COSE_Sign) or bytestring
       // (COSE_Sign1)
       if (cbor_isa_array(coseArray[3])) {
-        // COSE_Sign: [protected_header, unprotected_header, payload,
-        // signatures_array] RFC 8152 Section 4.1: validateCwt should only
-        // handle COSE_Sign1
-        cbor_decref(&coseItem);
+        // COSE_Sign format — validateCwt only handles COSE_Sign1
         throw InvalidTokenFormatError();
       } else if (cbor_isa_bytestring(coseArray[3])) {
-        // COSE_Sign1/COSE_Mac0: [protected_header, unprotected_header, payload,
-        // signature]
+        // COSE_Sign1/COSE_Mac0
         auto signatureBytes =
             std::vector<uint8_t>(cbor_bytestring_handle(coseArray[3]),
                                  cbor_bytestring_handle(coseArray[3]) +
@@ -1373,39 +1359,35 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
         bool isValid = algorithm.verify(signingInput, signatureBytes);
 
         if (!isValid) {
-          cbor_decref(&coseItem);
           throw CryptoError("COSE_Sign1 signature verification failed");
         }
       } else {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
     } else {
-      cbor_decref(&coseItem);
       throw InvalidTokenFormatError();
     }
 
-    cbor_decref(&coseItem);
+    coseItem.reset();
 
     // Step 4: Decode payload and create CWT
     auto decodedPayload = decodePayload(payloadBytes);
 
     // Parse protected header to get algorithm
     struct cbor_load_result headerResult;
-    cbor_item_t* headerItem =
-        cbor_load(protectedHeaderBytes.data(), protectedHeaderBytes.size(),
-                  &headerResult);
+    auto headerItem = cbor_load_owned(protectedHeaderBytes.data(),
+                                      protectedHeaderBytes.size(),
+                                      headerResult);
 
-    if (headerResult.error.code != CBOR_ERR_NONE || !cbor_isa_map(headerItem)) {
-      if (headerItem) cbor_decref(&headerItem);
+    if (headerResult.error.code != CBOR_ERR_NONE || !headerItem ||
+        !cbor_isa_map(headerItem.get())) {
       throw InvalidCborError("Invalid COSE protected header");
     }
 
-    // Extract algorithm from header and verify it matches the provided
-    // algorithm
+    // Extract algorithm from header and verify it matches
     int64_t headerAlgId = 0;
-    struct cbor_pair* headerPairs = cbor_map_handle(headerItem);
-    size_t headerMapSize = cbor_map_size(headerItem);
+    struct cbor_pair* headerPairs = cbor_map_handle(headerItem.get());
+    size_t headerMapSize = cbor_map_size(headerItem.get());
 
     if (headerPairs) {
       for (size_t i = 0; i < headerMapSize; i++) {
@@ -1423,12 +1405,11 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       }
     }
 
-    cbor_decref(&headerItem);
+    headerItem.reset();
 
     // Verify algorithm matches to prevent algorithm confusion attacks
     int64_t algId = algorithm.algorithmId();
 
-    // Require algorithm header to be present to prevent algorithm confusion
     if (headerAlgId == 0) {
       throw CryptoError("Token missing required algorithm header");
     }
@@ -1438,7 +1419,6 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
           "Token algorithm does not match provided verification algorithm");
     }
 
-    // Validate algorithm ID is a known supported value
     auto isKnownAlgorithm = [](int64_t alg) {
       return alg == ALG_ES256 || alg == ALG_PS256 || alg == ALG_HMAC256_256 ||
              alg == ALG_A128GCM || alg == ALG_A192GCM || alg == ALG_A256GCM ||
@@ -1450,11 +1430,9 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
 
     Cwt validatedCwt(algId, decodedPayload);
 
-    // Store validated signatures for multi-signed CWTs
     if (isMultiSigned) {
       validatedCwt.signatures = std::move(validatedSignatures);
     }
-    // Note: For encrypted CWTs, there's no signature to store
 
     CAT_LOG_DEBUG("CWT validation successful");
     return validatedCwt;
@@ -1482,36 +1460,28 @@ Cwt Cwt::validateMultiSignedCwt(
 
     // Parse COSE structure from raw CBOR bytes
     struct cbor_load_result result;
-    cbor_item_t* coseItem =
-        cbor_load(cwtBytes.data(), cwtBytes.size(), &result);
+    auto coseItem = cbor_load_owned(cwtBytes, result);
 
-    if (result.error.code != CBOR_ERR_NONE) {
+    if (result.error.code != CBOR_ERR_NONE || !coseItem) {
       throw InvalidCborError("Failed to parse COSE structure");
     }
 
-    // Step 3: Handle COSE_Sign structure (must be 4-element array with
-    // signatures array)
     std::vector<uint8_t> protectedHeaderBytes;
     std::vector<uint8_t> payloadBytes;
     std::vector<CoseSignature> validatedSignatures;
 
-    size_t arraySize = cbor_array_size(coseItem);
+    size_t arraySize = cbor_array_size(coseItem.get());
 
     if (arraySize != 4) {
-      cbor_decref(&coseItem);
       throw InvalidTokenFormatError();
     }
 
-    cbor_item_t** coseArray = cbor_array_handle(coseItem);
+    cbor_item_t** coseArray = cbor_array_handle(coseItem.get());
     if (!coseArray) {
-      cbor_decref(&coseItem);
       throw InvalidTokenFormatError();
     }
 
-    // Get common fields
-    // Protected header (bytestring)
     if (!cbor_isa_bytestring(coseArray[0])) {
-      cbor_decref(&coseItem);
       throw InvalidTokenFormatError();
     }
     protectedHeaderBytes =
@@ -1519,9 +1489,7 @@ Cwt Cwt::validateMultiSignedCwt(
                              cbor_bytestring_handle(coseArray[0]) +
                                  cbor_bytestring_length(coseArray[0]));
 
-    // Payload (bytestring)
     if (!cbor_isa_bytestring(coseArray[2])) {
-      cbor_decref(&coseItem);
       throw InvalidTokenFormatError();
     }
     payloadBytes =
@@ -1529,44 +1497,34 @@ Cwt Cwt::validateMultiSignedCwt(
                              cbor_bytestring_handle(coseArray[2]) +
                                  cbor_bytestring_length(coseArray[2]));
 
-    // Must be COSE_Sign with signatures array
     if (!cbor_isa_array(coseArray[3])) {
-      cbor_decref(&coseItem);
       throw InvalidTokenFormatError();
     }
 
-    // Validate all signatures in the array
     cbor_item_t** signaturesArray = cbor_array_handle(coseArray[3]);
     size_t signaturesCount = cbor_array_size(coseArray[3]);
 
     if (!signaturesArray) {
-      cbor_decref(&coseItem);
       throw InvalidTokenFormatError();
     }
 
-    // Limit signatures count to prevent resource exhaustion
     constexpr size_t MAX_SIGNATURES = 100;
     if (signaturesCount > MAX_SIGNATURES) {
-      cbor_decref(&coseItem);
       throw InvalidClaimValueError("Too many signatures");
     }
 
     for (size_t i = 0; i < signaturesCount; i++) {
       if (!cbor_isa_array(signaturesArray[i]) ||
           cbor_array_size(signaturesArray[i]) != 3) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
 
       cbor_item_t** signatureStructure = cbor_array_handle(signaturesArray[i]);
       if (!signatureStructure) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
 
-      // Extract signature protected header
       if (!cbor_isa_bytestring(signatureStructure[0])) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
       std::vector<uint8_t> sigProtectedHeader(
@@ -1574,9 +1532,7 @@ Cwt Cwt::validateMultiSignedCwt(
           cbor_bytestring_handle(signatureStructure[0]) +
               cbor_bytestring_length(signatureStructure[0]));
 
-      // Extract signature bytes
       if (!cbor_isa_bytestring(signatureStructure[2])) {
-        cbor_decref(&coseItem);
         throw InvalidTokenFormatError();
       }
       std::vector<uint8_t> signatureBytes(
@@ -1584,29 +1540,26 @@ Cwt Cwt::validateMultiSignedCwt(
           cbor_bytestring_handle(signatureStructure[2]) +
               cbor_bytestring_length(signatureStructure[2]));
 
-      // Extract algorithm ID from signature header
       int64_t sigAlgId = 0;
       bool algFound = false;
 
       if (!sigProtectedHeader.empty()) {
         struct cbor_load_result sigHeaderResult;
-        cbor_item_t* sigHeaderItem =
-            cbor_load(sigProtectedHeader.data(), sigProtectedHeader.size(),
-                      &sigHeaderResult);
-        if (sigHeaderResult.error.code == CBOR_ERR_NONE &&
-            cbor_isa_map(sigHeaderItem)) {
-          struct cbor_pair* pairs = cbor_map_handle(sigHeaderItem);
-          size_t mapSize = cbor_map_size(sigHeaderItem);
+        auto sigHeaderItem = cbor_load_owned(
+            sigProtectedHeader.data(), sigProtectedHeader.size(),
+            sigHeaderResult);
+        if (sigHeaderResult.error.code == CBOR_ERR_NONE && sigHeaderItem &&
+            cbor_isa_map(sigHeaderItem.get())) {
+          struct cbor_pair* pairs = cbor_map_handle(sigHeaderItem.get());
+          size_t mapSize = cbor_map_size(sigHeaderItem.get());
 
           if (!pairs) {
-            cbor_decref(&sigHeaderItem);
-            cbor_decref(&coseItem);
             throw InvalidTokenFormatError();
           }
 
           for (size_t j = 0; j < mapSize; j++) {
             if (cbor_isa_uint(pairs[j].key) &&
-                cbor_get_int(pairs[j].key) == 1) {  // algorithm label
+                cbor_get_int(pairs[j].key) == 1) {
               if (cbor_isa_uint(pairs[j].value)) {
                 sigAlgId = cbor_get_int(pairs[j].value);
                 algFound = true;
@@ -1619,48 +1572,39 @@ Cwt Cwt::validateMultiSignedCwt(
             }
           }
         }
-        if (sigHeaderItem) cbor_decref(&sigHeaderItem);
       }
 
       if (!algFound) {
-        cbor_decref(&coseItem);
         throw CryptoError("Algorithm ID not found in signature " +
                           std::to_string(i) + " protected header");
       }
 
-      // Find the corresponding algorithm
       auto algIt = algorithms.find(sigAlgId);
       if (algIt == algorithms.end()) {
-        cbor_decref(&coseItem);
         throw CryptoError("No algorithm provided for signature " +
                           std::to_string(i) + " with algorithm ID " +
                           std::to_string(sigAlgId));
       }
 
-      // Create COSE_Sign Sig_structure and verify with the specific algorithm
       auto signingInput = createCoseSignInput(
           protectedHeaderBytes, sigProtectedHeader, {}, payloadBytes);
       bool isValid = algIt->second.get().verify(signingInput, signatureBytes);
 
       if (!isValid) {
-        cbor_decref(&coseItem);
         throw CryptoError(
             "Multi-signed CWT signature verification failed for signature " +
             std::to_string(i));
       }
 
-      // Store validated signature with algorithm ID
       validatedSignatures.emplace_back(sigProtectedHeader, signatureBytes,
                                        sigAlgId);
     }
 
-    cbor_decref(&coseItem);
+    coseItem.reset();
 
     // Step 4: Decode payload and create CWT
     auto decodedPayload = decodePayload(payloadBytes);
 
-    // Parse protected header to get primary algorithm (use first signature's
-    // algorithm)
     int64_t primaryAlgId =
         validatedSignatures.empty() ? 0 : validatedSignatures[0].algorithmId;
 
