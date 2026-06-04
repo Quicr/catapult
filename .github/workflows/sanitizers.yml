@@ -52,6 +52,8 @@ jobs:
     - name: Configure with sanitizers
       run: |
         cmake -S . -B build \
+          -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCATAPULT_ENABLE_SANITIZERS=ON \
           -DENABLE_LOGGING=OFF \

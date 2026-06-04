@@ -164,10 +164,8 @@ class CborMapBuilder {
     if (!cbor_map_add(map, pair)) {
       throw InvalidCborError("Failed to add pair to CBOR map");
     }
-    // cbor_map_add calls cbor_incref on value but not key.
-    // Release key ownership to the map; let value's CborItemPtr destructor
-    // balance the extra incref.
-    key.release();
+    // cbor_map_add calls cbor_incref on both key and value.
+    // Let CborItemPtr destructors balance the extra increfs.
   }
 };
 
@@ -409,7 +407,6 @@ Cwt& Cwt::addSignature(const CryptographicAlgorithm& algorithm,
       if (!cbor_map_add(headerMap.get(), alg_pair)) {
         throw InvalidCborError("Failed to add algorithm to signature header");
       }
-      alg_key.release();
 
       unsigned char* raw_buffer;
       size_t buffer_size;
@@ -875,7 +872,6 @@ std::vector<uint8_t> Cwt::createCoseHeader() const {
     if (!cbor_map_add(headerMap.get(), alg_pair)) {
       throw InvalidCborError("Failed to add algorithm to COSE header");
     }
-    alg_key.release();
 
     // Add key ID if present (label 4)
     if (header.kid.has_value()) {
@@ -886,7 +882,6 @@ std::vector<uint8_t> Cwt::createCoseHeader() const {
       if (!cbor_map_add(headerMap.get(), kid_pair)) {
         throw InvalidCborError("Failed to add key ID to COSE header");
       }
-      kid_key.release();
     }
 
     // Add content type if present (label 16)
@@ -898,7 +893,6 @@ std::vector<uint8_t> Cwt::createCoseHeader() const {
       if (!cbor_map_add(headerMap.get(), typ_pair)) {
         throw InvalidCborError("Failed to add content type to COSE header");
       }
-      typ_key.release();
     }
 
     // Serialize to buffer
@@ -1066,7 +1060,6 @@ std::vector<uint8_t> Cwt::createCwt(
       if (!cbor_map_add(unprotectedHeader.get(), iv_pair)) {
         throw InvalidCborError("Failed to add IV to unprotected header");
       }
-      ivKey.release();
 
       if (!cbor_array_push(coseStructure.get(), unprotectedHeader.release())) {
         throw InvalidCborError(
@@ -1646,7 +1639,6 @@ std::vector<uint8_t> Cwt::createDpopSigningInput(
       if (!cbor_map_add(map, pair)) {
         throw InvalidCborError("Failed to add pair to CBOR map");
       }
-      key.release();
     };
 
     // Add type

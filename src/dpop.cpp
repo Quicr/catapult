@@ -52,7 +52,8 @@ bool safeCborMapAdd(cbor_item_t* map, cbor_item_t* key, cbor_item_t* value) {
     cbor_decref(&pair.value);
     return false;
   }
-  // cbor_map_add calls cbor_incref on value, so we must balance it
+  // cbor_map_add calls cbor_incref on both key and value, so balance both
+  cbor_decref(&key);
   cbor_decref(&value);
   return true;
 }
