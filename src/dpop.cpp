@@ -475,9 +475,9 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   auto cose_bytes = base64UrlDecode(std::string(cwt_data));
 
   cbor_load_result result;
-  auto cose_array_ptr = cbor_load_owned(
-      reinterpret_cast<const uint8_t*>(cose_bytes.data()), cose_bytes.size(),
-      result);
+  auto cose_array_ptr =
+      cbor_load_owned(reinterpret_cast<const uint8_t*>(cose_bytes.data()),
+                      cose_bytes.size(), result);
 
   if (!cose_array_ptr || !cbor_isa_array(cose_array_ptr.get()) ||
       cbor_array_size(cose_array_ptr.get()) != 4) {
@@ -536,8 +536,8 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   if (cbor_isa_bytestring(payload_bstr.get())) {
     size_t pay_len = cbor_bytestring_length(payload_bstr.get());
     cbor_load_result pay_result;
-    auto pay_map = cbor_load_owned(
-        cbor_bytestring_handle(payload_bstr.get()), pay_len, pay_result);
+    auto pay_map = cbor_load_owned(cbor_bytestring_handle(payload_bstr.get()),
+                                   pay_len, pay_result);
     if (pay_map && cbor_isa_map(pay_map.get())) {
       size_t map_size = cbor_map_size(pay_map.get());
       cbor_pair* pairs = cbor_map_handle(pay_map.get());
