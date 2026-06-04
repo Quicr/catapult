@@ -160,12 +160,14 @@ class CborMapBuilder {
   }
 
   void addPairToMap(cbor_item_t* map, CborItemPtr key, CborItemPtr value) {
-    struct cbor_pair pair = {key.release(), value.release()};
+    struct cbor_pair pair = {key.get(), value.get()};
     if (!cbor_map_add(map, pair)) {
-      cbor_decref(&pair.key);
-      cbor_decref(&pair.value);
       throw InvalidCborError("Failed to add pair to CBOR map");
     }
+    // cbor_map_add calls cbor_incref on value but not key.
+    // Release key ownership to the map; let value's CborItemPtr destructor
+    // balance the extra incref.
+    key.release();
   }
 };
 
@@ -246,15 +248,9 @@ class ClaimProcessor {
                           const std::vector<uint8_t>& data) {
     if (!data.empty()) {
       auto key = CborItemPtr(cbor_build_uint64(claim_id));
-      auto val = CborItemPtr(cbor_build_bytestring(data.data(), data.size()));
+      auto val = cbor_build_bytestring_owned(data.data(), data.size());
 
-      // Access private methods via friend relationship
-      struct cbor_pair pair = {key.release(), val.release()};
-      if (!cbor_map_add(builder.root_.get(), pair)) {
-        cbor_decref(&pair.key);
-        cbor_decref(&pair.value);
-        throw InvalidCborError("Failed to add raw CBOR data to map");
-      }
+      builder.addPairToMap(builder.root_.get(), std::move(key), std::move(val));
     }
   }
 
@@ -409,12 +405,11 @@ Cwt& Cwt::addSignature(const CryptographicAlgorithm& algorithm,
             CborItemPtr(cbor_build_negint64(-algorithm.algorithmId() - 1));
       }
 
-      struct cbor_pair alg_pair = {alg_key.release(), alg_val.release()};
+      struct cbor_pair alg_pair = {alg_key.get(), alg_val.get()};
       if (!cbor_map_add(headerMap.get(), alg_pair)) {
-        cbor_decref(&alg_pair.key);
-        cbor_decref(&alg_pair.value);
         throw InvalidCborError("Failed to add algorithm to signature header");
       }
+      alg_key.release();
 
       unsigned char* raw_buffer;
       size_t buffer_size;
@@ -876,24 +871,22 @@ std::vector<uint8_t> Cwt::createCoseHeader() const {
       alg_val = CborItemPtr(cbor_build_negint64(-header.alg - 1));
     }
 
-    struct cbor_pair alg_pair = {alg_key.release(), alg_val.release()};
+    struct cbor_pair alg_pair = {alg_key.get(), alg_val.get()};
     if (!cbor_map_add(headerMap.get(), alg_pair)) {
-      cbor_decref(&alg_pair.key);
-      cbor_decref(&alg_pair.value);
       throw InvalidCborError("Failed to add algorithm to COSE header");
     }
+    alg_key.release();
 
     // Add key ID if present (label 4)
     if (header.kid.has_value()) {
       auto kid_key = CborItemPtr(cbor_build_uint8(4));
       auto kid_val = CborItemPtr(cbor_build_string(header.kid->c_str()));
 
-      struct cbor_pair kid_pair = {kid_key.release(), kid_val.release()};
+      struct cbor_pair kid_pair = {kid_key.get(), kid_val.get()};
       if (!cbor_map_add(headerMap.get(), kid_pair)) {
-        cbor_decref(&kid_pair.key);
-        cbor_decref(&kid_pair.value);
         throw InvalidCborError("Failed to add key ID to COSE header");
       }
+      kid_key.release();
     }
 
     // Add content type if present (label 16)
@@ -901,12 +894,11 @@ std::vector<uint8_t> Cwt::createCoseHeader() const {
       auto typ_key = CborItemPtr(cbor_build_uint8(16));
       auto typ_val = CborItemPtr(cbor_build_string(header.typ->c_str()));
 
-      struct cbor_pair typ_pair = {typ_key.release(), typ_val.release()};
+      struct cbor_pair typ_pair = {typ_key.get(), typ_val.get()};
       if (!cbor_map_add(headerMap.get(), typ_pair)) {
-        cbor_decref(&typ_pair.key);
-        cbor_decref(&typ_pair.value);
         throw InvalidCborError("Failed to add content type to COSE header");
       }
+      typ_key.release();
     }
 
     // Serialize to buffer
@@ -1070,12 +1062,11 @@ std::vector<uint8_t> Cwt::createCwt(
       auto ivKey =
           CborItemPtr(cbor_build_uint8(5));  // COSE header label for IV
       auto ivVal = CborItemPtr(cbor_build_bytestring(iv.data(), iv.size()));
-      struct cbor_pair iv_pair = {ivKey.release(), ivVal.release()};
+      struct cbor_pair iv_pair = {ivKey.get(), ivVal.get()};
       if (!cbor_map_add(unprotectedHeader.get(), iv_pair)) {
-        cbor_decref(&iv_pair.key);
-        cbor_decref(&iv_pair.value);
         throw InvalidCborError("Failed to add IV to unprotected header");
       }
+      ivKey.release();
 
       if (!cbor_array_push(coseStructure.get(), unprotectedHeader.release())) {
         throw InvalidCborError(
@@ -1650,129 +1641,54 @@ std::vector<uint8_t> Cwt::createDpopSigningInput(
       throw InvalidCborError("Failed to create Authorization Context map");
     }
 
+    auto addToMap = [](cbor_item_t* map, CborItemPtr key, CborItemPtr val) {
+      struct cbor_pair pair = {key.get(), val.get()};
+      if (!cbor_map_add(map, pair)) {
+        throw InvalidCborError("Failed to add pair to CBOR map");
+      }
+      key.release();
+    };
+
     // Add type
-    auto type_key = CborItemPtr(cbor_build_string("type"));
-    auto type_val = CborItemPtr(cbor_build_string(actx.type.c_str()));
-    if (!type_key || !type_val) {
-      throw InvalidCborError("Failed to create type CBOR items");
-    }
-    struct cbor_pair type_pair = {type_key.release(), type_val.release()};
-    if (!cbor_map_add(actx_map.get(), type_pair)) {
-      cbor_decref(&type_pair.key);
-      cbor_decref(&type_pair.value);
-      throw InvalidCborError("Failed to add type to actx map");
-    }
+    addToMap(actx_map.get(), CborItemPtr(cbor_build_string("type")),
+             CborItemPtr(cbor_build_string(actx.type.c_str())));
 
     // Add action
-    auto action_key = CborItemPtr(cbor_build_string("action"));
-    auto action_val = CborItemPtr(cbor_build_uint64(actx.action));
-    if (!action_key || !action_val) {
-      throw InvalidCborError("Failed to create action CBOR items");
-    }
-    struct cbor_pair action_pair = {action_key.release(), action_val.release()};
-    if (!cbor_map_add(actx_map.get(), action_pair)) {
-      cbor_decref(&action_pair.key);
-      cbor_decref(&action_pair.value);
-      throw InvalidCborError("Failed to add action to actx map");
-    }
+    addToMap(actx_map.get(), CborItemPtr(cbor_build_string("action")),
+             CborItemPtr(cbor_build_uint64(actx.action)));
 
     // Add tns (track namespace)
-    auto tns_key = CborItemPtr(cbor_build_string("tns"));
-    auto tns_val = CborItemPtr(cbor_build_string(actx.tns.c_str()));
-    if (!tns_key || !tns_val) {
-      throw InvalidCborError("Failed to create tns CBOR items");
-    }
-    struct cbor_pair tns_pair = {tns_key.release(), tns_val.release()};
-    if (!cbor_map_add(actx_map.get(), tns_pair)) {
-      cbor_decref(&tns_pair.key);
-      cbor_decref(&tns_pair.value);
-      throw InvalidCborError("Failed to add tns to actx map");
-    }
+    addToMap(actx_map.get(), CborItemPtr(cbor_build_string("tns")),
+             CborItemPtr(cbor_build_string(actx.tns.c_str())));
 
     // Add tn (track name)
-    auto tn_key = CborItemPtr(cbor_build_string("tn"));
-    auto tn_val = CborItemPtr(cbor_build_string(actx.tn.c_str()));
-    if (!tn_key || !tn_val) {
-      throw InvalidCborError("Failed to create tn CBOR items");
-    }
-    struct cbor_pair tn_pair = {tn_key.release(), tn_val.release()};
-    if (!cbor_map_add(actx_map.get(), tn_pair)) {
-      cbor_decref(&tn_pair.key);
-      cbor_decref(&tn_pair.value);
-      throw InvalidCborError("Failed to add tn to actx map");
-    }
+    addToMap(actx_map.get(), CborItemPtr(cbor_build_string("tn")),
+             CborItemPtr(cbor_build_string(actx.tn.c_str())));
 
     // Add resource (optional)
     if (!actx.resource_uri.empty()) {
-      auto resource_key = CborItemPtr(cbor_build_string("resource"));
-      auto resource_val =
-          CborItemPtr(cbor_build_string(actx.resource_uri.c_str()));
-      if (!resource_key || !resource_val) {
-        throw InvalidCborError("Failed to create resource CBOR items");
-      }
-      struct cbor_pair resource_pair = {resource_key.release(),
-                                        resource_val.release()};
-      if (!cbor_map_add(actx_map.get(), resource_pair)) {
-        cbor_decref(&resource_pair.key);
-        cbor_decref(&resource_pair.value);
-        throw InvalidCborError("Failed to add resource to actx map");
-      }
+      addToMap(actx_map.get(), CborItemPtr(cbor_build_string("resource")),
+               CborItemPtr(cbor_build_string(actx.resource_uri.c_str())));
     }
 
     // Add actx to main payload
-    auto actx_payload_key = CborItemPtr(cbor_build_string("actx"));
-    if (!actx_payload_key) {
-      throw InvalidCborError("Failed to create actx payload key");
-    }
-    struct cbor_pair actx_payload_pair = {actx_payload_key.release(),
-                                          actx_map.release()};
-    if (!cbor_map_add(payload_map.get(), actx_payload_pair)) {
-      cbor_decref(&actx_payload_pair.key);
-      cbor_decref(&actx_payload_pair.value);
-      throw InvalidCborError("Failed to add actx to payload map");
-    }
+    addToMap(payload_map.get(), CborItemPtr(cbor_build_string("actx")),
+             std::move(actx_map));
 
     // Add iat (issued at)
-    auto iat_key = CborItemPtr(cbor_build_string("iat"));
-    auto iat_val = CborItemPtr(cbor_build_uint64(iat));
-    if (!iat_key || !iat_val) {
-      throw InvalidCborError("Failed to create iat CBOR items");
-    }
-    struct cbor_pair iat_pair = {iat_key.release(), iat_val.release()};
-    if (!cbor_map_add(payload_map.get(), iat_pair)) {
-      cbor_decref(&iat_pair.key);
-      cbor_decref(&iat_pair.value);
-      throw InvalidCborError("Failed to add iat to payload map");
-    }
+    addToMap(payload_map.get(), CborItemPtr(cbor_build_string("iat")),
+             CborItemPtr(cbor_build_uint64(iat)));
 
     // Add jti if present
     if (jti.has_value()) {
-      auto jti_key = CborItemPtr(cbor_build_string("jti"));
-      auto jti_val = CborItemPtr(cbor_build_string(jti.value().c_str()));
-      if (!jti_key || !jti_val) {
-        throw InvalidCborError("Failed to create jti CBOR items");
-      }
-      struct cbor_pair jti_pair = {jti_key.release(), jti_val.release()};
-      if (!cbor_map_add(payload_map.get(), jti_pair)) {
-        cbor_decref(&jti_pair.key);
-        cbor_decref(&jti_pair.value);
-        throw InvalidCborError("Failed to add jti to payload map");
-      }
+      addToMap(payload_map.get(), CborItemPtr(cbor_build_string("jti")),
+               CborItemPtr(cbor_build_string(jti.value().c_str())));
     }
 
     // Add ath if present
     if (ath.has_value()) {
-      auto ath_key = CborItemPtr(cbor_build_string("ath"));
-      auto ath_val = CborItemPtr(cbor_build_string(ath.value().c_str()));
-      if (!ath_key || !ath_val) {
-        throw InvalidCborError("Failed to create ath CBOR items");
-      }
-      struct cbor_pair ath_pair = {ath_key.release(), ath_val.release()};
-      if (!cbor_map_add(payload_map.get(), ath_pair)) {
-        cbor_decref(&ath_pair.key);
-        cbor_decref(&ath_pair.value);
-        throw InvalidCborError("Failed to add ath to payload map");
-      }
+      addToMap(payload_map.get(), CborItemPtr(cbor_build_string("ath")),
+               CborItemPtr(cbor_build_string(ath.value().c_str())));
     }
 
     // Serialize CBOR to bytes

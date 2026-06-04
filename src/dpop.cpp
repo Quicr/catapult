@@ -52,6 +52,8 @@ bool safeCborMapAdd(cbor_item_t* map, cbor_item_t* key, cbor_item_t* value) {
     cbor_decref(&pair.value);
     return false;
   }
+  // cbor_map_add calls cbor_incref on value, so we must balance it
+  cbor_decref(&value);
   return true;
 }
 
@@ -374,17 +376,15 @@ std::string DpopProof::serialize_cwt() const {
 
   // Protected header with alg and typ
   auto protected_map = cbor_new_definite_map(3);
-  (void)cbor_map_add(
-      protected_map,
-      {cbor_build_uint8(dpop_labels::ALG),
-       cbor_build_negint8(static_cast<uint8_t>(-header_.alg_id - 1))});
-  (void)cbor_map_add(protected_map, {cbor_build_uint8(dpop_labels::TYP),
-                                     cbor_build_string("dpop-proof+cwt")});
+  (void)safeCborMapAdd(
+      protected_map, cbor_build_uint8(dpop_labels::ALG),
+      cbor_build_negint8(static_cast<uint8_t>(-header_.alg_id - 1)));
+  (void)safeCborMapAdd(protected_map, cbor_build_uint8(dpop_labels::TYP),
+                       cbor_build_string("dpop-proof+cwt"));
   if (!header_.cose_key.empty()) {
-    (void)cbor_map_add(protected_map,
-                       {cbor_build_uint8(dpop_labels::COSE_KEY),
-                        cbor_build_bytestring(header_.cose_key.data(),
-                                              header_.cose_key.size())});
+    (void)safeCborMapAdd(protected_map, cbor_build_uint8(dpop_labels::COSE_KEY),
+                         cbor_build_bytestring(header_.cose_key.data(),
+                                               header_.cose_key.size()));
   }
 
   unsigned char* prot_buf = nullptr;
