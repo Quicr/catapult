@@ -733,15 +733,13 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
             }
             auto moqt_claims = MoqtClaims::create(moqt_scope_count);
             for (size_t si = 0; si < moqt_scope_count; ++si) {
-              auto scope_arr =
-                  cbor_array_get_owned(moqt_array.get(), si);
+              auto scope_arr = cbor_array_get_owned(moqt_array.get(), si);
               if (!scope_arr || !cbor_isa_array(scope_arr.get())) continue;
               size_t scope_len = cbor_array_size(scope_arr.get());
               if (scope_len < 1) continue;
 
               std::vector<int> actions;
-              auto actions_arr =
-                  cbor_array_get_owned(scope_arr.get(), 0);
+              auto actions_arr = cbor_array_get_owned(scope_arr.get(), 0);
               if (actions_arr && cbor_isa_array(actions_arr.get())) {
                 constexpr size_t MAX_ACTIONS = 50;
                 size_t action_count = cbor_array_size(actions_arr.get());
@@ -804,8 +802,7 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
                   std::vector<MoqtBinaryMatch> ns_conditions;
                   for (size_t ni = 0; ni < cbor_array_size(ns_arr.get());
                        ++ni) {
-                    auto ns_elem =
-                        cbor_array_get_owned(ns_arr.get(), ni);
+                    auto ns_elem = cbor_array_get_owned(ns_arr.get(), ni);
                     auto m = parse_bin_match(ns_elem.get());
                     if (!m.is_empty()) {
                       ns_conditions.push_back(std::move(m));
@@ -815,17 +812,15 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
                 }
               }
               if (scope_len >= 3) {
-                auto track_item =
-                    cbor_array_get_owned(scope_arr.get(), 2);
+                auto track_item = cbor_array_get_owned(scope_arr.get(), 2);
                 if (track_item && cbor_isa_array(track_item.get()) &&
                     cbor_array_size(track_item.get()) > 0) {
                   auto first = cbor_array_get_owned(track_item.get(), 0);
                   if (first && cbor_isa_array(first.get())) {
                     std::vector<MoqtBinaryMatch> tr_conditions;
-                    for (size_t ti = 0;
-                         ti < cbor_array_size(track_item.get()); ++ti) {
-                      auto tr_elem =
-                          cbor_array_get_owned(track_item.get(), ti);
+                    for (size_t ti = 0; ti < cbor_array_size(track_item.get());
+                         ++ti) {
+                      auto tr_elem = cbor_array_get_owned(track_item.get(), ti);
                       auto m = parse_bin_match(tr_elem.get());
                       if (!m.is_empty()) {
                         tr_conditions.push_back(std::move(m));
@@ -1375,9 +1370,8 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
 
     // Parse protected header to get algorithm
     struct cbor_load_result headerResult;
-    auto headerItem = cbor_load_owned(protectedHeaderBytes.data(),
-                                      protectedHeaderBytes.size(),
-                                      headerResult);
+    auto headerItem = cbor_load_owned(
+        protectedHeaderBytes.data(), protectedHeaderBytes.size(), headerResult);
 
     if (headerResult.error.code != CBOR_ERR_NONE || !headerItem ||
         !cbor_isa_map(headerItem.get())) {
@@ -1545,9 +1539,9 @@ Cwt Cwt::validateMultiSignedCwt(
 
       if (!sigProtectedHeader.empty()) {
         struct cbor_load_result sigHeaderResult;
-        auto sigHeaderItem = cbor_load_owned(
-            sigProtectedHeader.data(), sigProtectedHeader.size(),
-            sigHeaderResult);
+        auto sigHeaderItem =
+            cbor_load_owned(sigProtectedHeader.data(),
+                            sigProtectedHeader.size(), sigHeaderResult);
         if (sigHeaderResult.error.code == CBOR_ERR_NONE && sigHeaderItem &&
             cbor_isa_map(sigHeaderItem.get())) {
           struct cbor_pair* pairs = cbor_map_handle(sigHeaderItem.get());
