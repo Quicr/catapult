@@ -1,0 +1,73 @@
+name: Sanitizers
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  asan-ubsan:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            compiler: clang
+            cc: clang
+            cxx: clang++
+          - os: ubuntu-latest
+            compiler: gcc
+            cc: gcc
+            cxx: g++
+          - os: macos-latest
+            compiler: clang
+            cc: clang
+            cxx: clang++
+
+    runs-on: ${{ matrix.os }}
+
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libssl-dev
+
+    - name: Set up dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install cmake openssl
+
+    - name: Configure with sanitizers
+      run: |
+        cmake -S . -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCATAPULT_ENABLE_SANITIZERS=ON \
+          -DENABLE_LOGGING=OFF \
+          -DCATAPULT_ENABLE_JSON=OFF
+
+    - name: Build
+      run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+    - name: Run tests under ASan/UBSan
+      run: ctest --test-dir build --output-on-failure --timeout 600
+
+    - name: Upload sanitizer logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sanitizer-logs-${{ matrix.os }}-${{ matrix.compiler }}
+        path: |
+          build/Testing/Temporary/LastTest.log
