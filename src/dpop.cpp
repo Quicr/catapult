@@ -28,6 +28,7 @@ using json = nlohmann::json;
 #include "catapult/base64.hpp"
 #include "catapult/crypto.hpp"
 #include "catapult/cwt.hpp"
+#include "catapult/internal/cbor_owned.hpp"
 #include "catapult/moqt_claims.hpp"
 
 namespace catapult {
@@ -36,19 +37,15 @@ namespace catapult {
 
 namespace {
 
-/**
- * @brief Helper to safely add a CBOR map pair with proper cleanup on failure
- */
-bool safeCborMapAdd(cbor_item_t* map, cbor_item_t* key, cbor_item_t* value) {
+bool safeCborMapAdd(cbor_item_t* map, cbor_item_t* raw_key,
+                    cbor_item_t* raw_value) {
+  auto key = CborItemPtr(raw_key);
+  auto value = CborItemPtr(raw_value);
   if (!key || !value) {
-    if (key) cbor_decref(&key);
-    if (value) cbor_decref(&value);
     return false;
   }
-  struct cbor_pair pair = {key, value};
+  struct cbor_pair pair = {key.get(), value.get()};
   if (!cbor_map_add(map, pair)) {
-    cbor_decref(&pair.key);
-    cbor_decref(&pair.value);
     return false;
   }
   return true;
@@ -366,51 +363,51 @@ std::string DpopProof::serialize() const {
 
 std::string DpopProof::serialize_cwt() const {
   // Create COSE_Sign1 structure: [protected, unprotected, payload, signature]
-  auto cose_array = cbor_new_definite_array(4);
+  auto cose_array = CborItemPtr(cbor_new_definite_array(4));
   if (!cose_array) {
     throw CryptoError("Failed to create COSE_Sign1 array");
   }
 
   // Protected header with alg and typ
-  auto protected_map = cbor_new_definite_map(3);
-  (void)cbor_map_add(
-      protected_map,
-      {cbor_build_uint8(dpop_labels::ALG),
-       cbor_build_negint8(static_cast<uint8_t>(-header_.alg_id - 1))});
-  (void)cbor_map_add(protected_map, {cbor_build_uint8(dpop_labels::TYP),
-                                     cbor_build_string("dpop-proof+cwt")});
+  auto protected_map = CborItemPtr(cbor_new_definite_map(3));
+  (void)safeCborMapAdd(
+      protected_map.get(), cbor_build_uint8(dpop_labels::ALG),
+      cbor_build_negint8(static_cast<uint8_t>(-header_.alg_id - 1)));
+  (void)safeCborMapAdd(protected_map.get(), cbor_build_uint8(dpop_labels::TYP),
+                       cbor_build_string("dpop-proof+cwt"));
   if (!header_.cose_key.empty()) {
-    (void)cbor_map_add(protected_map,
-                       {cbor_build_uint8(dpop_labels::COSE_KEY),
-                        cbor_build_bytestring(header_.cose_key.data(),
-                                              header_.cose_key.size())});
+    (void)safeCborMapAdd(protected_map.get(),
+                         cbor_build_uint8(dpop_labels::COSE_KEY),
+                         cbor_build_bytestring(header_.cose_key.data(),
+                                               header_.cose_key.size()));
   }
 
   unsigned char* prot_buf = nullptr;
   size_t prot_size = 0;
-  cbor_serialize_alloc(protected_map, &prot_buf, &prot_size);
-  cbor_decref(&protected_map);
+  cbor_serialize_alloc(protected_map.get(), &prot_buf, &prot_size);
 
-  auto protected_bstr = cbor_build_bytestring(prot_buf, prot_size);
+  auto protected_bstr = CborItemPtr(cbor_build_bytestring(prot_buf, prot_size));
   free(prot_buf);
-  (void)cbor_array_push(cose_array, protected_bstr);
+  (void)cbor_array_push(cose_array.get(), protected_bstr.get());
 
   // Unprotected header (empty map)
-  (void)cbor_array_push(cose_array, cbor_new_definite_map(0));
+  auto unprotected_hdr = CborItemPtr(cbor_new_definite_map(0));
+  (void)cbor_array_push(cose_array.get(), unprotected_hdr.get());
 
   // Payload (CBOR-encoded claims)
   auto cbor_payload = create_signing_input();
-  (void)cbor_array_push(cose_array, cbor_build_bytestring(cbor_payload.data(),
-                                                          cbor_payload.size()));
+  auto payload_bstr = CborItemPtr(
+      cbor_build_bytestring(cbor_payload.data(), cbor_payload.size()));
+  (void)cbor_array_push(cose_array.get(), payload_bstr.get());
 
   // Signature
-  (void)cbor_array_push(
-      cose_array, cbor_build_bytestring(signature_.data(), signature_.size()));
+  auto sig_bstr =
+      CborItemPtr(cbor_build_bytestring(signature_.data(), signature_.size()));
+  (void)cbor_array_push(cose_array.get(), sig_bstr.get());
 
   unsigned char* buffer = nullptr;
   size_t buffer_size = 0;
-  size_t length = cbor_serialize_alloc(cose_array, &buffer, &buffer_size);
-  cbor_decref(&cose_array);
+  size_t length = cbor_serialize_alloc(cose_array.get(), &buffer, &buffer_size);
 
   if (length == 0) {
     throw CryptoError("Failed to serialize DPoP CWT");
@@ -474,34 +471,32 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   auto cose_bytes = base64UrlDecode(std::string(cwt_data));
 
   cbor_load_result result;
-  cbor_item_t* cose_array =
-      cbor_load(cose_bytes.data(), cose_bytes.size(), &result);
+  auto cose_array_ptr =
+      cbor_load_owned(reinterpret_cast<const uint8_t*>(cose_bytes.data()),
+                      cose_bytes.size(), result);
 
-  if (!cose_array || !cbor_isa_array(cose_array) ||
-      cbor_array_size(cose_array) != 4) {
-    if (cose_array) cbor_decref(&cose_array);
+  if (!cose_array_ptr || !cbor_isa_array(cose_array_ptr.get()) ||
+      cbor_array_size(cose_array_ptr.get()) != 4) {
     throw InvalidTokenFormatError{};
   }
 
-  // Use RAII wrapper for main array
-  CborItemPtr cose_array_ptr(cose_array);
+  cbor_item_t* cose_array = cose_array_ptr.get();
 
   DpopHeader header;
   header.set_encoding(DpopEncoding::CWT);
 
   // Parse protected header
-  cbor_item_t* protected_bstr = cbor_array_get(cose_array, 0);
+  auto protected_bstr = cbor_array_get_owned(cose_array, 0);
   if (!protected_bstr) {
     throw InvalidTokenFormatError{};
   }
-  if (cbor_isa_bytestring(protected_bstr)) {
-    size_t prot_len = cbor_bytestring_length(protected_bstr);
+  if (cbor_isa_bytestring(protected_bstr.get())) {
+    size_t prot_len = cbor_bytestring_length(protected_bstr.get());
     if (prot_len > 0) {
       cbor_load_result prot_result;
-      cbor_item_t* prot_map_raw = cbor_load(
-          cbor_bytestring_handle(protected_bstr), prot_len, &prot_result);
-      if (prot_map_raw && cbor_isa_map(prot_map_raw)) {
-        CborItemPtr prot_map(prot_map_raw);
+      auto prot_map = cbor_load_owned(
+          cbor_bytestring_handle(protected_bstr.get()), prot_len, prot_result);
+      if (prot_map && cbor_isa_map(prot_map.get())) {
         size_t map_size = cbor_map_size(prot_map.get());
         cbor_pair* pairs = cbor_map_handle(prot_map.get());
         if (!pairs) {
@@ -523,26 +518,23 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
             }
           }
         }
-      } else if (prot_map_raw) {
-        cbor_decref(&prot_map_raw);
       }
     }
   }
 
   // Parse payload
-  cbor_item_t* payload_bstr = cbor_array_get(cose_array, 2);
+  auto payload_bstr = cbor_array_get_owned(cose_array, 2);
   DpopPayload payload(0, "", "");
 
   if (!payload_bstr) {
     throw InvalidTokenFormatError{};
   }
-  if (cbor_isa_bytestring(payload_bstr)) {
-    size_t pay_len = cbor_bytestring_length(payload_bstr);
+  if (cbor_isa_bytestring(payload_bstr.get())) {
+    size_t pay_len = cbor_bytestring_length(payload_bstr.get());
     cbor_load_result pay_result;
-    cbor_item_t* pay_map_raw =
-        cbor_load(cbor_bytestring_handle(payload_bstr), pay_len, &pay_result);
-    if (pay_map_raw && cbor_isa_map(pay_map_raw)) {
-      CborItemPtr pay_map(pay_map_raw);
+    auto pay_map = cbor_load_owned(cbor_bytestring_handle(payload_bstr.get()),
+                                   pay_len, pay_result);
+    if (pay_map && cbor_isa_map(pay_map.get())) {
       size_t map_size = cbor_map_size(pay_map.get());
       cbor_pair* pairs = cbor_map_handle(pay_map.get());
       if (!pairs) {
@@ -607,21 +599,19 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
           }
         }
       }
-    } else if (pay_map_raw) {
-      cbor_decref(&pay_map_raw);
     }
   }
 
   // Get signature
-  cbor_item_t* sig_bstr = cbor_array_get(cose_array, 3);
+  auto sig_bstr = cbor_array_get_owned(cose_array, 3);
   std::vector<uint8_t> signature;
   if (!sig_bstr) {
     throw InvalidTokenFormatError{};
   }
-  if (cbor_isa_bytestring(sig_bstr)) {
-    size_t sig_len = cbor_bytestring_length(sig_bstr);
-    signature.assign(cbor_bytestring_handle(sig_bstr),
-                     cbor_bytestring_handle(sig_bstr) + sig_len);
+  if (cbor_isa_bytestring(sig_bstr.get())) {
+    size_t sig_len = cbor_bytestring_length(sig_bstr.get());
+    signature.assign(cbor_bytestring_handle(sig_bstr.get()),
+                     cbor_bytestring_handle(sig_bstr.get()) + sig_len);
   }
 
   return DpopProof{std::move(header), std::move(payload), signature,

@@ -18,6 +18,7 @@
 
 #include "catapult/base64.hpp"
 #include "catapult/cwt.hpp"
+#include "catapult/internal/cbor_owned.hpp"
 #include "catapult/logging.hpp"
 
 namespace catapult {
@@ -91,14 +92,14 @@ class SigStructureBuilder {
 
   void addString(CborItemPtr& array, const std::string& value) {
     auto item = CborItemPtr(cbor_build_string(value.c_str()));
-    if (!item || !cbor_array_push(array.get(), item.release())) {
+    if (!item || !cbor_array_push(array.get(), item.get())) {
       throw InvalidCborError("Failed to add string to Sig_structure");
     }
   }
 
   void addByteString(CborItemPtr& array, const std::vector<uint8_t>& data) {
-    auto item = CborItemPtr(cbor_build_bytestring(data.data(), data.size()));
-    if (!item || !cbor_array_push(array.get(), item.release())) {
+    auto item = cbor_build_bytestring_owned(data.data(), data.size());
+    if (!item || !cbor_array_push(array.get(), item.get())) {
       throw InvalidCborError("Failed to add bytestring to Sig_structure");
     }
   }

@@ -19,7 +19,7 @@
 namespace catapult {
 
 // Forward declarations for MOQT Claims
-class ExtendedCatClaims;
+struct ExtendedCatClaims;
 
 /**
  * @brief Main CAT token class containing all claim groups
