@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(catapult VERSION 1.2.0 LANGUAGES CXX)
+project(catapult VERSION 1.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,6 +14,7 @@ find_package(OpenSSL REQUIRED)
 # Add submodules
 # Align libcbor's sanitizer option with ours
 set(SANITIZE ${CATAPULT_ENABLE_SANITIZERS} CACHE BOOL "" FORCE)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 add_subdirectory(external/libcbor)
 
 if(CATAPULT_ENABLE_JSON)
