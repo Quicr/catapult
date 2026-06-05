@@ -37,24 +37,17 @@ namespace catapult {
 
 namespace {
 
-/**
- * @brief Helper to safely add a CBOR map pair with proper cleanup on failure
- */
-bool safeCborMapAdd(cbor_item_t* map, cbor_item_t* key, cbor_item_t* value) {
+bool safeCborMapAdd(cbor_item_t* map, cbor_item_t* raw_key,
+                    cbor_item_t* raw_value) {
+  auto key = CborItemPtr(raw_key);
+  auto value = CborItemPtr(raw_value);
   if (!key || !value) {
-    if (key) cbor_decref(&key);
-    if (value) cbor_decref(&value);
     return false;
   }
-  struct cbor_pair pair = {key, value};
+  struct cbor_pair pair = {key.get(), value.get()};
   if (!cbor_map_add(map, pair)) {
-    cbor_decref(&pair.key);
-    cbor_decref(&pair.value);
     return false;
   }
-  // cbor_map_add calls cbor_incref on both key and value, so balance both
-  cbor_decref(&key);
-  cbor_decref(&value);
   return true;
 }
 
@@ -376,22 +369,22 @@ std::string DpopProof::serialize_cwt() const {
   }
 
   // Protected header with alg and typ
-  auto protected_map = cbor_new_definite_map(3);
+  auto protected_map = CborItemPtr(cbor_new_definite_map(3));
   (void)safeCborMapAdd(
-      protected_map, cbor_build_uint8(dpop_labels::ALG),
+      protected_map.get(), cbor_build_uint8(dpop_labels::ALG),
       cbor_build_negint8(static_cast<uint8_t>(-header_.alg_id - 1)));
-  (void)safeCborMapAdd(protected_map, cbor_build_uint8(dpop_labels::TYP),
+  (void)safeCborMapAdd(protected_map.get(), cbor_build_uint8(dpop_labels::TYP),
                        cbor_build_string("dpop-proof+cwt"));
   if (!header_.cose_key.empty()) {
-    (void)safeCborMapAdd(protected_map, cbor_build_uint8(dpop_labels::COSE_KEY),
+    (void)safeCborMapAdd(protected_map.get(),
+                         cbor_build_uint8(dpop_labels::COSE_KEY),
                          cbor_build_bytestring(header_.cose_key.data(),
                                                header_.cose_key.size()));
   }
 
   unsigned char* prot_buf = nullptr;
   size_t prot_size = 0;
-  cbor_serialize_alloc(protected_map, &prot_buf, &prot_size);
-  cbor_decref(&protected_map);
+  cbor_serialize_alloc(protected_map.get(), &prot_buf, &prot_size);
 
   auto protected_bstr = CborItemPtr(cbor_build_bytestring(prot_buf, prot_size));
   free(prot_buf);
