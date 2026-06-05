@@ -99,7 +99,7 @@ class CborMapBuilder {
 
     for (const auto& val : values) {
       auto str_item = CborItemPtr(cbor_build_string(val.c_str()));
-      if (!cbor_array_push(array.get(), str_item.release())) {
+      if (!cbor_array_push(array.get(), str_item.get())) {
         throw InvalidCborError("Failed to add string to array");
       }
     }
@@ -266,14 +266,12 @@ class ClaimProcessor {
     if (!cbor_array_push(arr.get(), type_val.get())) {
       throw InvalidCborError("Failed to push match type");
     }
-    type_val.release();
 
     auto bstr =
         cbor_build_bytestring_owned(match.pattern.data(), match.pattern.size());
     if (!cbor_array_push(arr.get(), bstr.get())) {
       throw InvalidCborError("Failed to push match pattern");
     }
-    bstr.release();
 
     return arr;
   }
@@ -300,10 +298,11 @@ class ClaimProcessor {
       auto actions_array =
           CborItemPtr(cbor_new_definite_array(scope.actions.size()));
       for (int action : scope.actions) {
-        (void)cbor_array_push(actions_array.get(),
-                              cbor_build_uint8(static_cast<uint8_t>(action)));
+        auto action_item =
+            CborItemPtr(cbor_build_uint8(static_cast<uint8_t>(action)));
+        (void)cbor_array_push(actions_array.get(), action_item.get());
       }
-      (void)cbor_array_push(scope_array.get(), actions_array.release());
+      (void)cbor_array_push(scope_array.get(), actions_array.get());
 
       if (scope_len >= 2) {
         const auto& ns_conditions = scope.namespace_match.conditions();
@@ -312,12 +311,13 @@ class ClaimProcessor {
         for (const auto& cond : ns_conditions) {
           auto ns_item = serializeBinaryMatch(cond);
           if (ns_item) {
-            (void)cbor_array_push(ns_matches.get(), ns_item.release());
+            (void)cbor_array_push(ns_matches.get(), ns_item.get());
           } else {
-            (void)cbor_array_push(ns_matches.get(), cbor_new_null());
+            auto null_item = CborItemPtr(cbor_new_null());
+            (void)cbor_array_push(ns_matches.get(), null_item.get());
           }
         }
-        (void)cbor_array_push(scope_array.get(), ns_matches.release());
+        (void)cbor_array_push(scope_array.get(), ns_matches.get());
       }
 
       if (scope_len >= 3) {
@@ -325,9 +325,10 @@ class ClaimProcessor {
         if (tr_conditions.size() == 1) {
           auto track_item = serializeBinaryMatch(tr_conditions[0]);
           if (track_item) {
-            (void)cbor_array_push(scope_array.get(), track_item.release());
+            (void)cbor_array_push(scope_array.get(), track_item.get());
           } else {
-            (void)cbor_array_push(scope_array.get(), cbor_new_null());
+            auto null_item = CborItemPtr(cbor_new_null());
+            (void)cbor_array_push(scope_array.get(), null_item.get());
           }
         } else {
           auto tr_matches =
@@ -335,16 +336,17 @@ class ClaimProcessor {
           for (const auto& cond : tr_conditions) {
             auto tr_item = serializeBinaryMatch(cond);
             if (tr_item) {
-              (void)cbor_array_push(tr_matches.get(), tr_item.release());
+              (void)cbor_array_push(tr_matches.get(), tr_item.get());
             } else {
-              (void)cbor_array_push(tr_matches.get(), cbor_new_null());
+              auto null_item = CborItemPtr(cbor_new_null());
+              (void)cbor_array_push(tr_matches.get(), null_item.get());
             }
           }
-          (void)cbor_array_push(scope_array.get(), tr_matches.release());
+          (void)cbor_array_push(scope_array.get(), tr_matches.get());
         }
       }
 
-      (void)cbor_array_push(moqt_array.get(), scope_array.release());
+      (void)cbor_array_push(moqt_array.get(), scope_array.get());
     }
 
     std::vector<uint8_t> result;
@@ -980,14 +982,14 @@ std::vector<uint8_t> Cwt::createCwt(
       // Add protected header (encoded as bstr)
       auto protectedHeader = CborItemPtr(
           cbor_build_bytestring(coseHeader.data(), coseHeader.size()));
-      if (!cbor_array_push(coseStructure.get(), protectedHeader.release())) {
+      if (!cbor_array_push(coseStructure.get(), protectedHeader.get())) {
         throw InvalidCborError(
             "Failed to add protected header to COSE_Sign structure");
       }
 
       // Add empty unprotected header (map)
       auto unprotectedHeader = CborItemPtr(cbor_new_definite_map(0));
-      if (!cbor_array_push(coseStructure.get(), unprotectedHeader.release())) {
+      if (!cbor_array_push(coseStructure.get(), unprotectedHeader.get())) {
         throw InvalidCborError(
             "Failed to add unprotected header to COSE_Sign structure");
       }
@@ -995,7 +997,7 @@ std::vector<uint8_t> Cwt::createCwt(
       // Add payload (encoded as bstr)
       auto payloadBstr =
           CborItemPtr(cbor_build_bytestring(payload.data(), payload.size()));
-      if (!cbor_array_push(coseStructure.get(), payloadBstr.release())) {
+      if (!cbor_array_push(coseStructure.get(), payloadBstr.get())) {
         throw InvalidCborError("Failed to add payload to COSE_Sign structure");
       }
 
@@ -1009,33 +1011,31 @@ std::vector<uint8_t> Cwt::createCwt(
         // Add signature protected header
         auto sigProtectedHeader = CborItemPtr(cbor_build_bytestring(
             sig.protectedHeader.data(), sig.protectedHeader.size()));
-        if (!cbor_array_push(sigStructure.get(),
-                             sigProtectedHeader.release())) {
+        if (!cbor_array_push(sigStructure.get(), sigProtectedHeader.get())) {
           throw InvalidCborError("Failed to add signature protected header");
         }
 
         // Add empty signature unprotected header
         auto sigUnprotectedHeader = CborItemPtr(cbor_new_definite_map(0));
-        if (!cbor_array_push(sigStructure.get(),
-                             sigUnprotectedHeader.release())) {
+        if (!cbor_array_push(sigStructure.get(), sigUnprotectedHeader.get())) {
           throw InvalidCborError("Failed to add signature unprotected header");
         }
 
         // Add signature bytes
         auto sigBytes = CborItemPtr(
             cbor_build_bytestring(sig.signature.data(), sig.signature.size()));
-        if (!cbor_array_push(sigStructure.get(), sigBytes.release())) {
+        if (!cbor_array_push(sigStructure.get(), sigBytes.get())) {
           throw InvalidCborError("Failed to add signature bytes");
         }
 
         // Add this signature to the signatures array
-        if (!cbor_array_push(signaturesArray.get(), sigStructure.release())) {
+        if (!cbor_array_push(signaturesArray.get(), sigStructure.get())) {
           throw InvalidCborError("Failed to add signature to signatures array");
         }
       }
 
       // Add signatures array to main structure
-      if (!cbor_array_push(coseStructure.get(), signaturesArray.release())) {
+      if (!cbor_array_push(coseStructure.get(), signaturesArray.get())) {
         throw InvalidCborError(
             "Failed to add signatures array to COSE_Sign structure");
       }
@@ -1046,7 +1046,7 @@ std::vector<uint8_t> Cwt::createCwt(
       // Add protected header (encoded as bstr)
       auto protectedHeader = CborItemPtr(
           cbor_build_bytestring(coseHeader.data(), coseHeader.size()));
-      if (!cbor_array_push(coseStructure.get(), protectedHeader.release())) {
+      if (!cbor_array_push(coseStructure.get(), protectedHeader.get())) {
         throw InvalidCborError(
             "Failed to add protected header to COSE_Encrypt0 structure");
       }
@@ -1061,7 +1061,7 @@ std::vector<uint8_t> Cwt::createCwt(
         throw InvalidCborError("Failed to add IV to unprotected header");
       }
 
-      if (!cbor_array_push(coseStructure.get(), unprotectedHeader.release())) {
+      if (!cbor_array_push(coseStructure.get(), unprotectedHeader.get())) {
         throw InvalidCborError(
             "Failed to add unprotected header to COSE_Encrypt0 structure");
       }
@@ -1069,7 +1069,7 @@ std::vector<uint8_t> Cwt::createCwt(
       // Add encrypted payload (encoded as bstr)
       auto ciphertextBstr = CborItemPtr(cbor_build_bytestring(
           encryptedPayload.data(), encryptedPayload.size()));
-      if (!cbor_array_push(coseStructure.get(), ciphertextBstr.release())) {
+      if (!cbor_array_push(coseStructure.get(), ciphertextBstr.get())) {
         throw InvalidCborError(
             "Failed to add ciphertext to COSE_Encrypt0 structure");
       }
@@ -1081,14 +1081,14 @@ std::vector<uint8_t> Cwt::createCwt(
       // Add protected header (encoded as bstr)
       auto protectedHeader = CborItemPtr(
           cbor_build_bytestring(coseHeader.data(), coseHeader.size()));
-      if (!cbor_array_push(coseStructure.get(), protectedHeader.release())) {
+      if (!cbor_array_push(coseStructure.get(), protectedHeader.get())) {
         throw InvalidCborError(
             "Failed to add protected header to COSE structure");
       }
 
       // Add empty unprotected header (map)
       auto unprotectedHeader = CborItemPtr(cbor_new_definite_map(0));
-      if (!cbor_array_push(coseStructure.get(), unprotectedHeader.release())) {
+      if (!cbor_array_push(coseStructure.get(), unprotectedHeader.get())) {
         throw InvalidCborError(
             "Failed to add unprotected header to COSE structure");
       }
@@ -1096,14 +1096,14 @@ std::vector<uint8_t> Cwt::createCwt(
       // Add payload (encoded as bstr)
       auto payloadBstr =
           CborItemPtr(cbor_build_bytestring(payload.data(), payload.size()));
-      if (!cbor_array_push(coseStructure.get(), payloadBstr.release())) {
+      if (!cbor_array_push(coseStructure.get(), payloadBstr.get())) {
         throw InvalidCborError("Failed to add payload to COSE structure");
       }
 
       // Add signature (encoded as bstr)
       auto signatureBstr = CborItemPtr(
           cbor_build_bytestring(signature.data(), signature.size()));
-      if (!cbor_array_push(coseStructure.get(), signatureBstr.release())) {
+      if (!cbor_array_push(coseStructure.get(), signatureBstr.get())) {
         throw InvalidCborError("Failed to add signature to COSE structure");
       }
     }
