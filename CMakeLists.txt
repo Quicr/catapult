@@ -15,9 +15,6 @@ find_package(OpenSSL REQUIRED)
 # Align libcbor's sanitizer option with ours
 set(SANITIZE ${CATAPULT_ENABLE_SANITIZERS} CACHE BOOL "" FORCE)
 add_subdirectory(external/libcbor)
-if(TARGET cbor)
-    set_property(TARGET cbor PROPERTY INTERPROCEDURAL_OPTIMIZATION OFF)
-endif()
 
 if(CATAPULT_ENABLE_JSON)
     if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND NOT TARGET nlohmann_json::nlohmann_json)
