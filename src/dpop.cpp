@@ -370,7 +370,7 @@ std::string DpopProof::serialize() const {
 
 std::string DpopProof::serialize_cwt() const {
   // Create COSE_Sign1 structure: [protected, unprotected, payload, signature]
-  auto cose_array = cbor_new_definite_array(4);
+  auto cose_array = CborItemPtr(cbor_new_definite_array(4));
   if (!cose_array) {
     throw CryptoError("Failed to create COSE_Sign1 array");
   }
@@ -393,26 +393,28 @@ std::string DpopProof::serialize_cwt() const {
   cbor_serialize_alloc(protected_map, &prot_buf, &prot_size);
   cbor_decref(&protected_map);
 
-  auto protected_bstr = cbor_build_bytestring(prot_buf, prot_size);
+  auto protected_bstr = CborItemPtr(cbor_build_bytestring(prot_buf, prot_size));
   free(prot_buf);
-  (void)cbor_array_push(cose_array, protected_bstr);
+  (void)cbor_array_push(cose_array.get(), protected_bstr.get());
 
   // Unprotected header (empty map)
-  (void)cbor_array_push(cose_array, cbor_new_definite_map(0));
+  auto unprotected_hdr = CborItemPtr(cbor_new_definite_map(0));
+  (void)cbor_array_push(cose_array.get(), unprotected_hdr.get());
 
   // Payload (CBOR-encoded claims)
   auto cbor_payload = create_signing_input();
-  (void)cbor_array_push(cose_array, cbor_build_bytestring(cbor_payload.data(),
-                                                          cbor_payload.size()));
+  auto payload_bstr = CborItemPtr(
+      cbor_build_bytestring(cbor_payload.data(), cbor_payload.size()));
+  (void)cbor_array_push(cose_array.get(), payload_bstr.get());
 
   // Signature
-  (void)cbor_array_push(
-      cose_array, cbor_build_bytestring(signature_.data(), signature_.size()));
+  auto sig_bstr =
+      CborItemPtr(cbor_build_bytestring(signature_.data(), signature_.size()));
+  (void)cbor_array_push(cose_array.get(), sig_bstr.get());
 
   unsigned char* buffer = nullptr;
   size_t buffer_size = 0;
-  size_t length = cbor_serialize_alloc(cose_array, &buffer, &buffer_size);
-  cbor_decref(&cose_array);
+  size_t length = cbor_serialize_alloc(cose_array.get(), &buffer, &buffer_size);
 
   if (length == 0) {
     throw CryptoError("Failed to serialize DPoP CWT");
