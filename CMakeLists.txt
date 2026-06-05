@@ -1,16 +1,20 @@
 cmake_minimum_required(VERSION 3.16)
-project(catapult VERSION 1.1.0 LANGUAGES CXX)
+project(catapult VERSION 1.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(ENABLE_LOGGING "Enable logging with spdlog" ON)
 option(CATAPULT_ENABLE_JSON "Enable JSON serialization support (requires nlohmann_json)" ON)
+option(CATAPULT_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
 # Dependency management
 find_package(OpenSSL REQUIRED)
 
 # Add submodules
+# Align libcbor's sanitizer option with ours
+set(SANITIZE ${CATAPULT_ENABLE_SANITIZERS} CACHE BOOL "" FORCE)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 add_subdirectory(external/libcbor)
 
 if(CATAPULT_ENABLE_JSON)
@@ -88,6 +92,17 @@ target_compile_options(catapult PRIVATE
 )
 
 
+if(CATAPULT_ENABLE_SANITIZERS)
+    set(CATAPULT_SANITIZER_FLAGS
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+        -fno-sanitize-recover=all
+        -fno-sanitize=nonnull-attribute
+    )
+    target_compile_options(catapult PUBLIC ${CATAPULT_SANITIZER_FLAGS})
+    target_link_options(catapult PUBLIC ${CATAPULT_SANITIZER_FLAGS})
+endif()
+
 if(ENABLE_LOGGING)
     target_compile_definitions(catapult PRIVATE ENABLE_LOGGING)
 endif()
@@ -113,7 +128,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     endif()
 
     # Create test executable
-    add_executable(catapult_tests
+    set(CATAPULT_TEST_SOURCES
         tests/main.cpp
         tests/base64.cpp
         tests/claims.cpp
@@ -127,12 +142,17 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         tests/memory_pool.cpp
         tests/moqt_claims.cpp
         tests/secure_vector.cpp
-        tests/test_vectors.cpp
         tests/token.cpp
         tests/token_factory.cpp
         tests/trie.cpp
         tests/validator.cpp
     )
+
+    if(CATAPULT_ENABLE_JSON)
+        list(APPEND CATAPULT_TEST_SOURCES tests/test_vectors.cpp)
+    endif()
+
+    add_executable(catapult_tests ${CATAPULT_TEST_SOURCES})
 
     target_link_libraries(catapult_tests
         catapult

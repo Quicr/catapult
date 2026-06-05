@@ -3,6 +3,7 @@
 ![Catapult Icon](catapult-icon.svg)
 
 [![CI](https://github.com/Quicr/catapult/actions/workflows/ci.yml/badge.svg)](https://github.com/Quicr/catapult/actions/workflows/ci.yml)
+[![Sanitizers](https://github.com/Quicr/catapult/actions/workflows/sanitizers.yml/badge.svg)](https://github.com/Quicr/catapult/actions/workflows/sanitizers.yml)
 [![Code Formatting](https://github.com/Quicr/catapult/actions/workflows/format.yml/badge.svg)](https://github.com/Quicr/catapult/actions/workflows/format.yml)
 [![License](https://img.shields.io/badge/License-BSD_2--Clause-blue.svg)](BSD-2-Clause.txt)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
@@ -131,6 +132,24 @@ Run tests:
 ./docker-test.sh raspberrypi all
 
 ```
+
+## Sanitizer Testing (ASan/UBSan)
+
+```bash
+cmake -S . -B build-san \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCATAPULT_ENABLE_SANITIZERS=ON \
+  -DENABLE_LOGGING=OFF
+
+cmake --build build-san -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+# Run tests under sanitizers
+ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
+UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1" \
+ctest --test-dir build-san --output-on-failure --timeout 600
+```
+
+On macOS, remove `detect_leaks=1` as it is not supported.
 
 ## Benchmarks
 
