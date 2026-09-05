@@ -40,12 +40,16 @@ constexpr int64_t CLAIM_MOQT_REVAL =
 namespace moqt_actions {
 constexpr int CLIENT_SETUP = 0;
 constexpr int SERVER_SETUP = 1;
-constexpr int PUBLISH_NAMESPACE = 2;  ///< Per spec naming
-constexpr int ANNOUNCE = 2;           ///< Alias for backward compatibility
+constexpr int PUBLISH_NAMESPACE = 2;
+// Legacy names retained for source compatibility with pre-draft-04
+// consumers. New code should use the spec names above.
+[[deprecated("use moqt_actions::PUBLISH_NAMESPACE")]]
+constexpr int ANNOUNCE = 2;
 constexpr int SUBSCRIBE_NAMESPACE = 3;
 constexpr int SUBSCRIBE = 4;
-constexpr int REQUEST_UPDATE = 5;    ///< Per spec naming
-constexpr int SUBSCRIBE_UPDATE = 5;  ///< Alias for backward compatibility
+constexpr int REQUEST_UPDATE = 5;
+[[deprecated("use moqt_actions::REQUEST_UPDATE")]]
+constexpr int SUBSCRIBE_UPDATE = 5;
 constexpr int PUBLISH = 6;
 constexpr int FETCH = 7;
 constexpr int TRACK_STATUS = 8;
@@ -389,9 +393,10 @@ class CompileTimeActionSet {
  * @brief Predefined compile-time action sets for common roles
  */
 namespace role_actions {
-// Publisher role: can publish content and announce namespaces
+// Publisher role: can publish content and claim namespaces
 constexpr auto publisher =
-    CompileTimeActionSet<moqt_actions::PUBLISH, moqt_actions::ANNOUNCE>{};
+    CompileTimeActionSet<moqt_actions::PUBLISH,
+                         moqt_actions::PUBLISH_NAMESPACE>{};
 
 // Subscriber role: can subscribe to content and fetch data
 constexpr auto subscriber =
@@ -400,8 +405,8 @@ constexpr auto subscriber =
 // Full access role: all available actions
 constexpr auto full_access = CompileTimeActionSet<
     moqt_actions::CLIENT_SETUP, moqt_actions::SERVER_SETUP,
-    moqt_actions::ANNOUNCE, moqt_actions::SUBSCRIBE_NAMESPACE,
-    moqt_actions::SUBSCRIBE, moqt_actions::SUBSCRIBE_UPDATE,
+    moqt_actions::PUBLISH_NAMESPACE, moqt_actions::SUBSCRIBE_NAMESPACE,
+    moqt_actions::SUBSCRIBE, moqt_actions::REQUEST_UPDATE,
     moqt_actions::PUBLISH, moqt_actions::FETCH, moqt_actions::TRACK_STATUS>{};
 
 // Read-only role: can only subscribe and fetch

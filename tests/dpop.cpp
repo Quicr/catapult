@@ -142,6 +142,52 @@ TEST_SUITE("DPoP CWT wire format") {
                                    keys->get_public_key_thumbprint()));
   }
 
+  TEST_CASE("construct_moqt_uri emits the CAT-4-MOQT query-parameter form") {
+    // Endpoint-only (setup actions): no query string.
+    CHECK(moqt_dpop::construct_moqt_uri("relay:4433") == "moqt://relay:4433");
+
+    // Namespace-scoped actions: only `tns` present.
+    CHECK(moqt_dpop::construct_moqt_uri("relay:4433", "ns.example") ==
+          "moqt://relay:4433?tns=ns.example");
+
+    // Track-level actions: both `tns` and `tn` present, ampersand-joined.
+    CHECK(moqt_dpop::construct_moqt_uri("relay:4433", "ns.example",
+                                        "track-1") ==
+          "moqt://relay:4433?tns=ns.example&tn=track-1");
+
+    // Reserved characters in the components must be percent-encoded so a
+    // namespace containing `&` or `=` cannot smuggle in extra query
+    // parameters that the verifier would then compare against.
+    CHECK(moqt_dpop::construct_moqt_uri("relay:4433", "ns/with=eq&amp",
+                                        "trk?") ==
+          "moqt://relay:4433?tns=ns%2Fwith%3Deq%26amp&tn=trk%3F");
+  }
+
+  TEST_CASE("AuthorizationContext validity gates on the action class") {
+    // Setup actions have no namespace or track.
+    AuthorizationContext setup{moqt_actions::CLIENT_SETUP,
+                               "moqt://relay:4433"};
+    CHECK(setup.is_valid());
+
+    // Namespace-scoped actions require `tns` but not `tn`.
+    AuthorizationContext ns_scoped{moqt_actions::PUBLISH_NAMESPACE,
+                                   "ns.example", "",
+                                   "moqt://relay:4433?tns=ns.example"};
+    CHECK(ns_scoped.is_valid());
+    AuthorizationContext ns_missing{moqt_actions::PUBLISH_NAMESPACE,
+                                    "moqt://relay:4433"};
+    CHECK_FALSE(ns_missing.is_valid());
+
+    // Track-level actions require both.
+    AuthorizationContext track_full{moqt_actions::PUBLISH, "ns.example",
+                                    "trk-1", "moqt://relay:4433"};
+    CHECK(track_full.is_valid());
+    AuthorizationContext track_missing_tn{moqt_actions::PUBLISH,
+                                          "ns.example", "",
+                                          "moqt://relay:4433"};
+    CHECK_FALSE(track_missing_tn.is_valid());
+  }
+
   TEST_CASE(
       "DpopProofValidator rejects a proof signed by a different key") {
     auto real_keys = makeEs256KeyPair();

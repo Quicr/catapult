@@ -137,11 +137,30 @@ struct AuthorizationContext {
         tns(track_namespace),
         tn(track_name) {}
 
-  /**
-   * @brief Validate context
-   */
+  // MOQT actions differ in what portion of the resource identifier is
+  // meaningful:
+  //   - CLIENT_SETUP / SERVER_SETUP address the endpoint itself; there is
+  //     no namespace or track to bind to.
+  //   - PUBLISH_NAMESPACE / SUBSCRIBE_NAMESPACE authorize an entire
+  //     namespace and have no per-track identity.
+  //   - SUBSCRIBE / REQUEST_UPDATE / PUBLISH / FETCH / TRACK_STATUS act on
+  //     a specific track and require both.
+  // A single "tns and tn are required" rule would reject correct proofs
+  // for setup and namespace-scoped actions.
   [[nodiscard]] bool is_valid() const noexcept {
-    return !type.empty() && action >= 0 && !tns.empty() && !tn.empty();
+    if (type.empty() || action < 0) {
+      return false;
+    }
+    switch (action) {
+      case 0:  // CLIENT_SETUP
+      case 1:  // SERVER_SETUP
+        return true;
+      case 2:  // PUBLISH_NAMESPACE
+      case 3:  // SUBSCRIBE_NAMESPACE
+        return !tns.empty();
+      default:
+        return !tns.empty() && !tn.empty();
+    }
   }
 };
 
@@ -446,13 +465,13 @@ template <MoqtActionType ActionT>
     case 1:
       return "SERVER_SETUP";
     case 2:
-      return "ANNOUNCE";
+      return "PUBLISH_NAMESPACE";
     case 3:
       return "SUBSCRIBE_NAMESPACE";
     case 4:
       return "SUBSCRIBE";
     case 5:
-      return "SUBSCRIBE_UPDATE";
+      return "REQUEST_UPDATE";
     case 6:
       return "PUBLISH";
     case 7:
@@ -464,8 +483,47 @@ template <MoqtActionType ActionT>
   }
 }
 
+// CAT-4-MOQT (draft-jennings-moq-cat-04) §DPoP resource identifiers: the
+// resource URI is `moqt://<endpoint>` with the track namespace and track
+// name carried as `tns` / `tn` query parameters. The earlier path form
+// (`moqt://endpoint/ns/track`) is ambiguous — a slash inside a
+// namespace segment is indistinguishable from a namespace / track
+// separator — and is not what the draft actually specifies.
+//
+// Percent-encode any character that is not unreserved per RFC 3986 §2.3.
+// This is intentionally narrow: we only need enough encoding to survive
+// the query string, not full IRI treatment.
+namespace detail {
+[[nodiscard]] inline std::string percent_encode_query_component(
+    std::string_view v) {
+  auto is_unreserved = [](unsigned char c) noexcept -> bool {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+           (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
+           c == '~';
+  };
+  std::string out;
+  out.reserve(v.size());
+  for (unsigned char c : v) {
+    if (is_unreserved(c)) {
+      out.push_back(static_cast<char>(c));
+    } else {
+      static constexpr char hex[] = "0123456789ABCDEF";
+      out.push_back('%');
+      out.push_back(hex[c >> 4]);
+      out.push_back(hex[c & 0x0f]);
+    }
+  }
+  return out;
+}
+}  // namespace detail
+
 /**
- * @brief Construct MOQT resource URI
+ * @brief Construct a MOQT resource URI in the CAT-4-MOQT draft form.
+ *
+ * Output is `moqt://<endpoint>` optionally followed by `?tns=<...>` and
+ * `&tn=<...>` when the caller supplies those components. Setup actions
+ * (CLIENT_SETUP / SERVER_SETUP) pass empty namespace and track and get an
+ * endpoint-only URI back.
  */
 [[nodiscard]] inline std::string construct_moqt_uri(
     std::string_view endpoint, std::string_view namespace_name = {},
@@ -473,14 +531,25 @@ template <MoqtActionType ActionT>
   std::string uri = "moqt://";
   uri += endpoint;
 
-  if (!namespace_name.empty()) {
-    uri += "/";
-    uri += namespace_name;
+  const bool has_ns = !namespace_name.empty();
+  const bool has_tn = !track_name.empty();
+  if (!has_ns && !has_tn) {
+    return uri;
+  }
 
-    if (!track_name.empty()) {
-      uri += "/";
-      uri += track_name;
+  uri += '?';
+  bool needs_amp = false;
+  if (has_ns) {
+    uri += "tns=";
+    uri += detail::percent_encode_query_component(namespace_name);
+    needs_amp = true;
+  }
+  if (has_tn) {
+    if (needs_amp) {
+      uri += '&';
     }
+    uri += "tn=";
+    uri += detail::percent_encode_query_component(track_name);
   }
 
   return uri;
