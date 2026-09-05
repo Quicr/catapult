@@ -32,7 +32,7 @@ struct DestructorCounter {
 std::atomic<int> DestructorCounter::counter{0};
 
 TEST_CASE("MemoryPool: BasicAllocationDeallocation") {
-    LockFreeMemoryPool<TestObject, 8> pool;
+    BoundedObjectPool<TestObject, 8> pool;
     
     // Test basic allocation
     auto ptr = pool.make(42, 3.14);
@@ -48,8 +48,8 @@ TEST_CASE("MemoryPool: BasicAllocationDeallocation") {
 }
 
 TEST_CASE("MemoryPool: PoolExhaustion") {
-    LockFreeMemoryPool<TestObject, 4> pool;
-    std::vector<typename LockFreeMemoryPool<TestObject, 4>::PoolPtr> ptrs;
+    BoundedObjectPool<TestObject, 4> pool;
+    std::vector<typename BoundedObjectPool<TestObject, 4>::PoolPtr> ptrs;
     
     // Allocate all pool objects
     for (int i = 0; i < 4; ++i) {
@@ -71,7 +71,7 @@ TEST_CASE("MemoryPool: PoolExhaustion") {
 }
 
 TEST_CASE("MemoryPool: PoolReuse") {
-    LockFreeMemoryPool<TestObject, 4> pool;
+    BoundedObjectPool<TestObject, 4> pool;
     
     {
         // Allocate and deallocate
@@ -94,7 +94,7 @@ TEST_CASE("MemoryPool: ProperDestruction") {
     DestructorCounter::counter = 0;
     
     {
-        LockFreeMemoryPool<DestructorCounter, 4> pool;
+        BoundedObjectPool<DestructorCounter, 4> pool;
         
         {
             auto ptr1 = pool.make();
@@ -109,7 +109,7 @@ TEST_CASE("MemoryPool: ProperDestruction") {
 }
 
 TEST_CASE("MemoryPool: MoveSemantics") {
-    LockFreeMemoryPool<TestObject, 4> pool;
+    BoundedObjectPool<TestObject, 4> pool;
     
     auto ptr1 = pool.make(42, 3.14);
     REQUIRE(ptr1);
@@ -129,7 +129,7 @@ TEST_CASE("MemoryPool: MoveSemantics") {
 }
 
 TEST_CASE("MemoryPool: Release") {
-    LockFreeMemoryPool<TestObject, 4> pool;
+    BoundedObjectPool<TestObject, 4> pool;
     
     auto ptr = pool.make(42, 3.14);
     REQUIRE(ptr);
@@ -145,7 +145,7 @@ TEST_CASE("MemoryPool: Release") {
 }
 
 TEST_CASE("MemoryPool: Statistics") {
-    LockFreeMemoryPool<TestObject, 2> pool;
+    BoundedObjectPool<TestObject, 2> pool;
     
     auto stats = pool.get_stats();
     CHECK(stats.pool_hits == 0);
@@ -162,7 +162,7 @@ TEST_CASE("MemoryPool: Statistics") {
 }
 
 TEST_CASE("MemoryPool: AvailableCount") {
-    LockFreeMemoryPool<TestObject, 4> pool;
+    BoundedObjectPool<TestObject, 4> pool;
     
     CHECK(pool.available() == 4);
     
@@ -172,12 +172,12 @@ TEST_CASE("MemoryPool: AvailableCount") {
     auto ptr2 = pool.make();
     CHECK(pool.available() == 2); // Two nodes removed from free list
     
-    ptr1 = typename LockFreeMemoryPool<TestObject, 4>::PoolPtr();
+    ptr1 = typename BoundedObjectPool<TestObject, 4>::PoolPtr();
     CHECK(pool.available() == 3); // One node returned to free list
 }
 
 TEST_CASE("MemoryPool: ThreadSafety") {
-    LockFreeMemoryPool<TestObject, 1000> pool;
+    BoundedObjectPool<TestObject, 1000> pool;
     constexpr int num_threads = 8;
     constexpr int allocations_per_thread = 100;
     
@@ -186,7 +186,7 @@ TEST_CASE("MemoryPool: ThreadSafety") {
     
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back([&pool, &successful_allocations]() {
-            std::vector<typename LockFreeMemoryPool<TestObject, 1000>::PoolPtr> ptrs;
+            std::vector<typename BoundedObjectPool<TestObject, 1000>::PoolPtr> ptrs;
             
             for (int i = 0; i < allocations_per_thread; ++i) {
                 auto ptr = pool.make(i, i * 1.5);
@@ -251,7 +251,7 @@ struct ThrowingConstructor {
 };
 
 TEST_CASE("MemoryPool: ExceptionSafety") {
-    LockFreeMemoryPool<ThrowingConstructor, 4> pool;
+    BoundedObjectPool<ThrowingConstructor, 4> pool;
     
     // Normal construction should work
     ThrowingConstructor::should_throw = false;
@@ -279,7 +279,7 @@ TEST_CASE("MemoryPool: AlignmentRequirements") {
         AlignedStruct(double d = 0.0) : data(d) {}
     };
     
-    LockFreeMemoryPool<AlignedStruct, 4> pool;
+    BoundedObjectPool<AlignedStruct, 4> pool;
     auto ptr = pool.make(3.14159);
     
     REQUIRE(ptr);
@@ -293,7 +293,7 @@ TEST_CASE("MemoryPool: LargeObjects") {
         LargeObject() { data.fill(0xDEADBEEF); }
     };
     
-    LockFreeMemoryPool<LargeObject, 2> pool;
+    BoundedObjectPool<LargeObject, 2> pool;
     
     auto ptr = pool.make();
     REQUIRE(ptr);
@@ -302,8 +302,8 @@ TEST_CASE("MemoryPool: LargeObjects") {
 }
 
 TEST_CASE("MemoryPool: PointerArithmetic") {
-    LockFreeMemoryPool<TestObject, 8> pool;
-    std::vector<typename LockFreeMemoryPool<TestObject, 8>::PoolPtr> ptrs;
+    BoundedObjectPool<TestObject, 8> pool;
+    std::vector<typename BoundedObjectPool<TestObject, 8>::PoolPtr> ptrs;
     
     // Allocate several objects
     for (int i = 0; i < 4; ++i) {

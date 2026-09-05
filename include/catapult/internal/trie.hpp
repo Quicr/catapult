@@ -19,7 +19,7 @@ namespace catapult {
 
 // Forward declarations for the pool types
 template <typename T, size_t PoolSize>
-class LockFreeMemoryPool;
+class BoundedObjectPool;
 
 /**
  * @brief Pool-aware deleter for TrieNode unique_ptr
@@ -84,7 +84,7 @@ struct TrieNode {
 };
 
 // Now that TrieNode is complete, define pool types
-using TrieNodePool = LockFreeMemoryPool<TrieNode, 1024>;
+using TrieNodePool = BoundedObjectPool<TrieNode, 1024>;
 using TrieNodePoolPtr = TrieNodePool::PoolPtr;
 
 // Type alias for pool-aware unique_ptr (matches TrieNode::TrieNodePtr)
@@ -93,8 +93,8 @@ using TrieNodePtr = TrieNode::TrieNodePtr;
 /**
  * @brief Get shared MemoryPool for TrieNode allocations
  */
-inline LockFreeMemoryPool<TrieNode, 1024>& getTrieNodePool() {
-  static LockFreeMemoryPool<TrieNode, 1024>
+inline BoundedObjectPool<TrieNode, 1024>& getTrieNodePool() {
+  static BoundedObjectPool<TrieNode, 1024>
       pool;  // RAII - properly destroyed at program exit
   return pool;
 }

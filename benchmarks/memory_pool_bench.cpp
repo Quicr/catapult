@@ -33,7 +33,7 @@ struct LargeObject {
 
 // Benchmark pool allocation vs standard allocation
 static void BM_PoolAllocation_Small(benchmark::State& state) {
-  LockFreeMemoryPool<SmallObject, 1024> pool;
+  BoundedObjectPool<SmallObject, 1024> pool;
 
   for (auto _ : state) {
     auto ptr = pool.make(42, 3.14);
@@ -56,7 +56,7 @@ static void BM_StandardAllocation_Small(benchmark::State& state) {
 BENCHMARK(BM_StandardAllocation_Small);
 
 static void BM_PoolAllocation_Medium(benchmark::State& state) {
-  LockFreeMemoryPool<MediumObject, 1024> pool;
+  BoundedObjectPool<MediumObject, 1024> pool;
 
   for (auto _ : state) {
     auto ptr = pool.make(42);
@@ -77,7 +77,7 @@ static void BM_StandardAllocation_Medium(benchmark::State& state) {
 BENCHMARK(BM_StandardAllocation_Medium);
 
 static void BM_PoolAllocation_Large(benchmark::State& state) {
-  LockFreeMemoryPool<LargeObject, 512> pool;
+  BoundedObjectPool<LargeObject, 512> pool;
 
   for (auto _ : state) {
     auto ptr = pool.make(42);
@@ -99,8 +99,8 @@ BENCHMARK(BM_StandardAllocation_Large);
 
 // Benchmark allocation/deallocation patterns
 static void BM_Pool_AllocDealloc_Pattern(benchmark::State& state) {
-  LockFreeMemoryPool<SmallObject, 1024> pool;
-  std::vector<typename LockFreeMemoryPool<SmallObject, 1024>::PoolPtr> ptrs;
+  BoundedObjectPool<SmallObject, 1024> pool;
+  std::vector<typename BoundedObjectPool<SmallObject, 1024>::PoolPtr> ptrs;
   ptrs.reserve(100);
 
   std::mt19937 rng(42);
@@ -148,14 +148,14 @@ BENCHMARK(BM_Standard_AllocDealloc_Pattern);
 
 // Multithreaded benchmarks
 static void BM_Pool_Multithreaded(benchmark::State& state) {
-  LockFreeMemoryPool<SmallObject, 2048> pool;
+  BoundedObjectPool<SmallObject, 2048> pool;
 
   if (state.thread_index() == 0) {
     // Setup code here if needed
   }
 
   for (auto _ : state) {
-    std::vector<typename LockFreeMemoryPool<SmallObject, 2048>::PoolPtr> ptrs;
+    std::vector<typename BoundedObjectPool<SmallObject, 2048>::PoolPtr> ptrs;
     ptrs.reserve(50);
 
     // Allocate batch
@@ -216,8 +216,8 @@ BENCHMARK(BM_ThreadLocal_Pool)
 
 // Cache behavior benchmarks
 static void BM_Pool_Cache_Friendly(benchmark::State& state) {
-  LockFreeMemoryPool<SmallObject, 1024> pool;
-  std::vector<typename LockFreeMemoryPool<SmallObject, 1024>::PoolPtr> ptrs;
+  BoundedObjectPool<SmallObject, 1024> pool;
+  std::vector<typename BoundedObjectPool<SmallObject, 1024>::PoolPtr> ptrs;
 
   // Pre-allocate and deallocate to warm up pool
   for (int i = 0; i < 100; ++i) {
@@ -227,7 +227,7 @@ static void BM_Pool_Cache_Friendly(benchmark::State& state) {
 
   for (auto _ : state) {
     // Allocate objects that will likely reuse recently freed memory
-    std::vector<typename LockFreeMemoryPool<SmallObject, 1024>::PoolPtr> batch;
+    std::vector<typename BoundedObjectPool<SmallObject, 1024>::PoolPtr> batch;
     for (int i = 0; i < 10; ++i) {
       batch.push_back(pool.make(i, i * 2.2));
     }
@@ -265,8 +265,8 @@ BENCHMARK(BM_Standard_Cache_Test);
 
 // Pool exhaustion behavior
 static void BM_Pool_Exhaustion(benchmark::State& state) {
-  LockFreeMemoryPool<SmallObject, 64> pool;  // Small pool size
-  std::vector<typename LockFreeMemoryPool<SmallObject, 64>::PoolPtr> ptrs;
+  BoundedObjectPool<SmallObject, 64> pool;  // Small pool size
+  std::vector<typename BoundedObjectPool<SmallObject, 64>::PoolPtr> ptrs;
 
   for (auto _ : state) {
     // Fill pool completely
@@ -291,8 +291,8 @@ BENCHMARK(BM_Pool_Exhaustion);
 
 // Fragmentation resistance test
 static void BM_Pool_Fragmentation_Resistance(benchmark::State& state) {
-  LockFreeMemoryPool<SmallObject, 1024> pool;
-  std::vector<typename LockFreeMemoryPool<SmallObject, 1024>::PoolPtr> ptrs;
+  BoundedObjectPool<SmallObject, 1024> pool;
+  std::vector<typename BoundedObjectPool<SmallObject, 1024>::PoolPtr> ptrs;
 
   std::mt19937 rng(42);
   std::uniform_int_distribution<int> dist(0, 9);

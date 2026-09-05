@@ -4,11 +4,10 @@
  *
  * The pool serves TrieNode allocations during URI-matcher construction. It is
  * intentionally simple: a mutex-guarded singly linked free list of pre-allocated
- * cache-line-aligned slots, with heap fallback when exhausted. The name
- * `LockFreeMemoryPool` is retained for source compatibility, but this
- * implementation is lock-based — the previous atomic Treiber free list was
- * susceptible to ABA under node reuse and used ownership inference from a
- * pointer-in-range check that is unsafe under sanitizers.
+ * cache-line-aligned slots, with heap fallback when exhausted. Ownership on
+ * release is resolved by an exact `offsetof` conversion from the returned slot
+ * back to its enclosing node, so the pool never has to infer membership from a
+ * pointer-in-range comparison.
  */
 
 #pragma once
@@ -33,7 +32,7 @@
 namespace catapult {
 
 template <typename T, size_t PoolSize = 1024>
-class LockFreeMemoryPool {
+class BoundedObjectPool {
   static_assert(PoolSize > 0, "PoolSize must be positive");
 
  private:
@@ -56,12 +55,12 @@ class LockFreeMemoryPool {
   class PoolPtr {
    private:
     T* ptr_ = nullptr;
-    LockFreeMemoryPool* pool_ = nullptr;
+    BoundedObjectPool* pool_ = nullptr;
 
    public:
     PoolPtr() = default;
 
-    PoolPtr(T* ptr, LockFreeMemoryPool* pool) noexcept
+    PoolPtr(T* ptr, BoundedObjectPool* pool) noexcept
         : ptr_(ptr), pool_(pool) {}
 
     ~PoolPtr() {
@@ -107,7 +106,7 @@ class LockFreeMemoryPool {
     }
   };
 
-  LockFreeMemoryPool() {
+  BoundedObjectPool() {
     for (size_t i = 0; i + 1 < PoolSize; ++i) {
       pool_[i].next = &pool_[i + 1];
     }
@@ -115,7 +114,7 @@ class LockFreeMemoryPool {
     free_head_ = &pool_[0];
   }
 
-  ~LockFreeMemoryPool() {
+  ~BoundedObjectPool() {
     for (auto& node : pool_) {
       if (node.in_use) {
         std::destroy_at(reinterpret_cast<T*>(node.storage));
@@ -123,10 +122,10 @@ class LockFreeMemoryPool {
     }
   }
 
-  LockFreeMemoryPool(const LockFreeMemoryPool&) = delete;
-  LockFreeMemoryPool& operator=(const LockFreeMemoryPool&) = delete;
-  LockFreeMemoryPool(LockFreeMemoryPool&&) = delete;
-  LockFreeMemoryPool& operator=(LockFreeMemoryPool&&) = delete;
+  BoundedObjectPool(const BoundedObjectPool&) = delete;
+  BoundedObjectPool& operator=(const BoundedObjectPool&) = delete;
+  BoundedObjectPool(BoundedObjectPool&&) = delete;
+  BoundedObjectPool& operator=(BoundedObjectPool&&) = delete;
 
   template <typename... Args>
   [[nodiscard]] PoolPtr make(Args&&... args) noexcept(
@@ -271,10 +270,10 @@ class LockFreeMemoryPool {
 template <typename T, size_t PoolSize = 1024>
 class ThreadLocalMemoryPool {
  private:
-  thread_local static LockFreeMemoryPool<T, PoolSize> pool_;
+  thread_local static BoundedObjectPool<T, PoolSize> pool_;
 
  public:
-  using PoolPtr = typename LockFreeMemoryPool<T, PoolSize>::PoolPtr;
+  using PoolPtr = typename BoundedObjectPool<T, PoolSize>::PoolPtr;
 
   template <typename... Args>
   [[nodiscard]] static PoolPtr make(Args&&... args) noexcept(
@@ -286,7 +285,7 @@ class ThreadLocalMemoryPool {
 };
 
 template <typename T, size_t PoolSize>
-thread_local LockFreeMemoryPool<T, PoolSize>
+thread_local BoundedObjectPool<T, PoolSize>
     ThreadLocalMemoryPool<T, PoolSize>::pool_;
 
 }  // namespace catapult
