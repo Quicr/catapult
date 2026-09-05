@@ -18,16 +18,15 @@
 #include <chrono>
 #include <concepts>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 
 #include "crypto.hpp"
 #include "error.hpp"
 #include "moqt_claims.hpp"
+#include "replay_store.hpp"
 
 namespace catapult {
 
@@ -496,14 +495,16 @@ template <MoqtActionType ActionT>
 
 /**
  * @brief DPoP proof validator
- * @note Thread-safe: JTI tracking is protected by mutex
+ *
+ * Replay detection is delegated to a pluggable `ReplayStore`. By default
+ * the validator instantiates an in-memory store sized from `settings`; to
+ * share state across processes or to survive restarts, construct the
+ * validator with an external store implementation.
  */
 class DpopProofValidator {
  private:
-  mutable std::mutex jti_mutex_;  ///< Mutex for thread-safe JTI tracking
-  std::unordered_map<std::string, std::chrono::system_clock::time_point>
-      used_jtis_;
   DpopValidationSettings settings_;
+  std::shared_ptr<ReplayStore> replay_store_;
   // Optional external verifier used for CWT-encoded proofs (which do not
   // carry an algorithm resolvable from their protected header alone). Set
   // via `set_cwt_verifier()`. When null and the proof is CWT-encoded, the
@@ -512,10 +513,34 @@ class DpopProofValidator {
 
  public:
   /**
-   * @brief Constructor with settings
+   * @brief Construct with settings and a default in-memory replay store.
+   *
+   * The store is sized from `settings.get_max_jti_entries()` and its
+   * cleanup interval from `settings.get_jti_cleanup_interval()`.
    */
   explicit DpopProofValidator(DpopValidationSettings settings = {})
-      : settings_(std::move(settings)) {}
+      : settings_(std::move(settings)),
+        replay_store_(std::make_shared<InMemoryReplayStore>(
+            settings_.get_max_jti_entries(),
+            settings_.get_jti_cleanup_interval())) {}
+
+  /**
+   * @brief Construct with settings and a caller-supplied replay store.
+   *
+   * Use this overload to plug in an external backend (Redis, database,
+   * etc.) that persists replay state across process restarts or shares it
+   * across relay instances. The store must be non-null; a null pointer
+   * would silently disable replay protection and is rejected as a
+   * programming error.
+   */
+  DpopProofValidator(DpopValidationSettings settings,
+                     std::shared_ptr<ReplayStore> store)
+      : settings_(std::move(settings)), replay_store_(std::move(store)) {
+    if (!replay_store_) {
+      throw InvalidClaimValueError(
+          "DpopProofValidator requires a non-null replay store");
+    }
+  }
 
   /**
    * @brief Register the verifier used for CWT-encoded DPoP proofs.
@@ -574,9 +599,16 @@ class DpopProofValidator {
   }
 
   /**
-   * @brief Clean up expired JTIs (acquires lock)
+   * @brief Drop expired jtis from the replay store.
    */
   void cleanup_expired_jtis();
+
+  /**
+   * @brief Access the underlying replay store (for observability / tests).
+   */
+  [[nodiscard]] ReplayStore& replay_store() const noexcept {
+    return *replay_store_;
+  }
 
   /**
    * @brief Get current settings
@@ -591,12 +623,6 @@ class DpopProofValidator {
   void update_settings(DpopValidationSettings new_settings) {
     settings_ = std::move(new_settings);
   }
-
- private:
-  /**
-   * @brief Clean up expired JTIs (must be called with lock held)
-   */
-  void cleanup_expired_jtis_locked();
 };
 
 /**

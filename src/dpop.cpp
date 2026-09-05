@@ -893,35 +893,21 @@ bool DpopProofValidator::validate_proof(
     return false;
   }
 
-  // Check JTI if enabled and present (thread-safe)
+  // Check JTI if enabled and present. All bookkeeping — TOCTOU-safe
+  // check-and-record, size cap, expiry, cross-process sharing — is the
+  // replay store's responsibility. Exhaustion is treated as a replay
+  // (fail closed) so a full store cannot be turned into an admit oracle.
   if (settings_.get_jti_processing() && proof.get_payload().jti.has_value()) {
     const auto& jti = proof.get_payload().jti.value();
     auto now = std::chrono::system_clock::now();
-
-    std::lock_guard<std::mutex> lock(jti_mutex_);
-
-    // Atomic check-and-insert to prevent TOCTOU race
-    auto [it, inserted] = used_jtis_.try_emplace(jti, now);
-    if (!inserted) {
-      // JTI already exists - check if within replay window
-      auto diff = now - it->second;
-      if (diff < settings_.get_effective_window()) {
-        return false;  // Replay attack detected
+    auto result = replay_store_->admit(jti, now,
+                                       settings_.get_effective_window());
+    if (result != ReplayAdmitResult::Admitted) {
+      if (result == ReplayAdmitResult::StoreExhausted) {
+        CAT_LOG_WARN(
+            "DPoP replay store exhausted; rejecting proof to fail closed");
       }
-      // Update timestamp for expired entry being reused
-      it->second = now;
-    }
-
-    // Periodic cleanup to prevent unbounded memory growth
-    const size_t max_entries = settings_.get_max_jti_entries();
-    const size_t cleanup_interval = settings_.get_jti_cleanup_interval();
-    if (used_jtis_.size() >= max_entries ||
-        (used_jtis_.size() > 0 && used_jtis_.size() % cleanup_interval == 0)) {
-      cleanup_expired_jtis_locked();
-      // If still too large after cleanup, reject to prevent DoS
-      if (used_jtis_.size() >= max_entries) {
-        return false;
-      }
+      return false;
     }
   }
 
@@ -950,22 +936,8 @@ bool DpopProofValidator::validate_proof(
 }
 
 void DpopProofValidator::cleanup_expired_jtis() {
-  std::lock_guard<std::mutex> lock(jti_mutex_);
-  cleanup_expired_jtis_locked();
-}
-
-void DpopProofValidator::cleanup_expired_jtis_locked() {
-  auto now = std::chrono::system_clock::now();
-  auto window = settings_.get_effective_window();
-
-  auto it = used_jtis_.begin();
-  while (it != used_jtis_.end()) {
-    if (now - it->second > window) {
-      it = used_jtis_.erase(it);
-    } else {
-      ++it;
-    }
-  }
+  replay_store_->purgeExpired(std::chrono::system_clock::now(),
+                              settings_.get_effective_window());
 }
 
 // DpopKeyPair implementation
