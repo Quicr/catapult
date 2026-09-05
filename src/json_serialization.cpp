@@ -150,14 +150,11 @@ static void to_json(nlohmann::json& j, const CatConfirmation& cnf) {
 
 static void to_json(nlohmann::json& j, const CatDpopSettings& dp) {
   j = nlohmann::json::object();
-  if (dp.critical.has_value()) {
-    j["critical"] = dp.critical.value();
+  if (dp.window_seconds.has_value()) {
+    j["window_seconds"] = dp.window_seconds.value();
   }
-  if (dp.proof_lifetime_seconds.has_value()) {
-    j["proof_lifetime_seconds"] = dp.proof_lifetime_seconds.value();
-  }
-  if (dp.jti_challenge.has_value()) {
-    j["jti_challenge_b64"] = bytes_to_b64(dp.jti_challenge.value());
+  if (dp.honor_jti.has_value()) {
+    j["honor_jti"] = dp.honor_jti.value();
   }
   if (dp.raw.has_value()) {
     j["raw_b64"] = bytes_to_b64(dp.raw.value());
@@ -661,18 +658,11 @@ void from_json(const nlohmann::json& j, CatToken& token) {
     if (dpop_json.contains("catdpop") && dpop_json["catdpop"].is_object()) {
       const auto& d = dpop_json["catdpop"];
       CatDpopSettings dp;
-      if (d.contains("critical") && d["critical"].is_array()) {
-        dp.critical = d["critical"].get<std::vector<int64_t>>();
+      if (d.contains("window_seconds") && d["window_seconds"].is_number()) {
+        dp.window_seconds = d["window_seconds"].get<int64_t>();
       }
-      if (d.contains("proof_lifetime_seconds") &&
-          d["proof_lifetime_seconds"].is_number()) {
-        dp.proof_lifetime_seconds =
-            d["proof_lifetime_seconds"].get<int64_t>();
-      }
-      if (d.contains("jti_challenge_b64") &&
-          d["jti_challenge_b64"].is_string()) {
-        dp.jti_challenge =
-            b64_to_bytes(d["jti_challenge_b64"].get<std::string>());
+      if (d.contains("honor_jti") && d["honor_jti"].is_boolean()) {
+        dp.honor_jti = d["honor_jti"].get<bool>();
       }
       if (d.contains("raw_b64") && d["raw_b64"].is_string()) {
         dp.raw = b64_to_bytes(d["raw_b64"].get<std::string>());

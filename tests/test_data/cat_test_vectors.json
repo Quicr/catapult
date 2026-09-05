@@ -135,7 +135,7 @@
             "window_seconds": 60
           },
           "id": "dpop_jwk_binding",
-          "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a1035820a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1190141a200183c0101",
+          "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a1035820a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1190141a200183c01f5",
           "token": "ogEjEGNDQVQ.pAF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaZVVCgAihA1ggoLHC0-T1prfI2eDxorPE1eb3qLnA0eLzpLXG1-j5oLEZAUGiABg8AQE.sN9kLIp64zIN9zDXoTLYC0xsJU_1FNF3kaO0CbdA_3M"
         },
         {
@@ -147,7 +147,7 @@
             "window_seconds": 300
           },
           "id": "dpop_no_jti",
-          "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a10358203c82dfd6358ba804bd90879c34e743bbe13aeab7980664944f37a0ec0063fe95190141a20019012c0100",
+          "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a10358203c82dfd6358ba804bd90879c34e743bbe13aeab7980664944f37a0ec0063fe95190141a20019012c01f4",
           "token": "ogEjEGNDQVQ.pAF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaZVVCgAihA1ggPILf1jWLqAS9kIecNOdDu-E66reYBmSUTzeg7ABj_pUZAUGiABkBLAEA.M4lF5pQdxav6eIWqDjbchDkijVYOM7xa3oJR2IwWt9g"
         },
         {

@@ -128,7 +128,7 @@ TEST_CASE("RoundtripEncodingDecoding") {
                            .withIssuer("https://test.com")
                            .withAudience({"api1", "api2"})
                            .withCwtIdString("test-id-123")
-                           .withVersion(2)
+                           .withVersion(1)
                            .withUriMatch(makeCatu())
                            .withGeoCoordinate(40.7128, -74.0060)
                            .withGeohash(GeohashClaimValue{std::string{"dr5reg"}})
@@ -281,4 +281,101 @@ TEST_CASE("CompoundMatchRoundtripSingleConditionBackcompat") {
       moqt->isAuthorized(moqt_actions::FETCH, "cdn.example", "/audio/clip1"));
   CHECK_FALSE(
       moqt->isAuthorized(moqt_actions::FETCH, "other.example", "/video/clip1"));
+}
+
+// C-01: catv is closed at version 1; higher/lower values MUST be rejected so
+// a future-version producer cannot pass a token past a validator that has no
+// semantics for that version.
+TEST_CASE("CatvRejectsUnsupportedVersion") {
+  auto token = CatToken().withIssuer("https://test.com").withVersion(2);
+  Cwt cwt(ALG_HMAC256_256, token);
+  auto encoded = cwt.encodePayload();
+  CHECK_THROWS_AS(Cwt::decodePayload(encoded), InvalidClaimValueError);
+}
+
+// C-01: catgeoiso3166 wire shape (alpha-2 / alpha-3 / numeric-3). Reject any
+// free-form label so the geographic gate isn't bypassable by a garbage code
+// that happens to survive a string decode.
+TEST_CASE("CatgeoIso3166RejectsMalformedCodes") {
+  auto make = [](std::vector<std::string> codes) {
+    auto token = CatToken().withIssuer("https://test.com").withVersion(1);
+    token.cat.catgeoiso3166 = std::move(codes);
+    Cwt cwt(ALG_HMAC256_256, token);
+    return cwt.encodePayload();
+  };
+
+  // Lowercase alpha-2 — rejected.
+  CHECK_THROWS_AS(Cwt::decodePayload(make({"us"})), InvalidClaimValueError);
+  // Length 4 — rejected.
+  CHECK_THROWS_AS(Cwt::decodePayload(make({"USAA"})), InvalidClaimValueError);
+  // Digits with alpha in a 3-char code — rejected.
+  CHECK_THROWS_AS(Cwt::decodePayload(make({"U1S"})), InvalidClaimValueError);
+  // Well-formed shapes accepted.
+  REQUIRE_NOTHROW(Cwt::decodePayload(make({"US", "USA", "840"})));
+}
+
+// C-01: cnf.jkt is a 32-byte SHA-256 JWK thumbprint (RFC 7638). A shorter or
+// longer thumbprint cannot bind a proof of possession — reject at decode
+// rather than accept a bogus binding.
+TEST_CASE("CnfJktMustBe32Bytes") {
+  auto make = [](std::vector<uint8_t> jkt) {
+    auto token = CatToken().withIssuer("https://test.com").withVersion(1);
+    CatConfirmation cnf;
+    cnf.jkt = std::move(jkt);
+    token.dpop.cnf = cnf;
+    Cwt cwt(ALG_HMAC256_256, token);
+    return cwt.encodePayload();
+  };
+
+  std::vector<uint8_t> short_jkt(20, 0xAA);
+  CHECK_THROWS_AS(Cwt::decodePayload(make(short_jkt)),
+                  InvalidClaimValueError);
+  std::vector<uint8_t> long_jkt(48, 0xAA);
+  CHECK_THROWS_AS(Cwt::decodePayload(make(long_jkt)),
+                  InvalidClaimValueError);
+  std::vector<uint8_t> good_jkt(32, 0xAA);
+  REQUIRE_NOTHROW(Cwt::decodePayload(make(good_jkt)));
+}
+
+// C-01: catdpop is a CBOR map with integer labels 0 (window_seconds, uint)
+// and 1 (honor_jti, bool). A malformed subfield is a fail-closed condition:
+// silently dropping it would fall back to the caller's defaults and defeat
+// the issuer's override.
+TEST_CASE("CatdpopFailsClosedOnMalformedSubfields") {
+  // Well-formed catdpop round-trips.
+  {
+    auto token = CatToken().withIssuer("https://test.com").withVersion(1);
+    CatDpopSettings dpop;
+    dpop.window_seconds = 60;
+    dpop.honor_jti = true;
+    token.dpop.catdpop = dpop;
+    Cwt cwt(ALG_HMAC256_256, token);
+    auto encoded = cwt.encodePayload();
+    auto decoded = Cwt::decodePayload(encoded);
+    REQUIRE(decoded.dpop.catdpop.has_value());
+    CHECK(decoded.dpop.catdpop->window_seconds == 60);
+    CHECK(decoded.dpop.catdpop->honor_jti == true);
+  }
+
+  // Directly craft a catdpop with a text-string label — decoder must reject.
+  {
+    // Payload: { 321: { "bad": 60 } }  — catdpop (id 321 = 0x141) with a
+    // text-string key inside its inner map.
+    // a1               map(1)
+    //   19 01 41       uint 321  (claim id catdpop)
+    //   a1             map(1)
+    //     63 62 61 64  tstr(3) "bad"
+    //     18 3c        uint 60
+    std::vector<uint8_t> payload = {0xa1, 0x19, 0x01, 0x41, 0xa1, 0x63,
+                                    'b',  'a',  'd',  0x18, 0x3c};
+    CHECK_THROWS_AS(Cwt::decodePayload(payload), InvalidClaimValueError);
+  }
+
+  // catdpop.honor_jti as a uint instead of a bool — rejected.
+  {
+    // { 321: { 1: 1 } }
+    // a1 19 01 41 a1 01 01
+    std::vector<uint8_t> payload = {0xa1, 0x19, 0x01, 0x41, 0xa1, 0x01, 0x01};
+    CHECK_THROWS_AS(Cwt::decodePayload(payload), InvalidClaimValueError);
+  }
 }

@@ -41,8 +41,8 @@ static CatToken CreateComplexToken() {
     cnf.jkt = {0xAA, 0xBB, 0xCC, 0xDD};
 
     CatDpopSettings dpop;
-    dpop.critical = std::vector<int64_t>{1, 3};
-    dpop.proof_lifetime_seconds = 300;
+    dpop.window_seconds = 300;
+    dpop.honor_jti = true;
 
     CatRequestDirective iface_claim;
     iface_claim.raw = {'i', 'f', 'a', 'c', 'e'};

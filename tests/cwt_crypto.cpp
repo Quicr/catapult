@@ -26,7 +26,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
             .withExpiration(std::chrono::system_clock::from_time_t(1735689600)) // Jan 1, 2025
             .withNotBefore(std::chrono::system_clock::from_time_t(1704067200))  // Jan 1, 2024
             .withCwtIdString("test-cwt-id-12345")
-            .withVersion(2)
+            .withVersion(1)
             .withReplayProtection(CatReplayMode::RejectOnReplay)
             .withGeoCoordinate(37.7749, -122.4194, 15.5)
             .withGeohash(GeohashClaimValue{std::string{"9q8yy9n"}});
@@ -238,7 +238,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
             .withIssuer("https://large-token-issuer.example.com/with/very/long/path")
             .withAudience(largeAudience)
             .withCwtIdString("very-long-cwt-id-with-lots-of-characters-to-test-large-data-handling")
-            .withVersion(3)
+            .withVersion(1)
             .withReplayProtection(CatReplayMode::RevokeOnReplay);
         
         Cwt largeCwt(ALG_ES256, largeToken);

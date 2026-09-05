@@ -115,7 +115,7 @@ TEST_SUITE("CWT Encode/Decode Tests") {
             .withIssuer("test-issuer")
             .withAudience({"test-aud"})
             .withExpiration(std::chrono::system_clock::from_time_t(2147483647))
-            .withVersion(7)
+            .withVersion(1)
             .withReplayProtection(CatReplayMode::RevokeOnReplay);
 
         Cwt cwt(ALG_HMAC256_256, token);
@@ -126,7 +126,7 @@ TEST_SUITE("CWT Encode/Decode Tests") {
         CHECK(decoded.core.aud.value().size() == 1);
         CHECK(decoded.core.aud.value()[0] == "test-aud");
         CHECK(decoded.core.exp.value() == 2147483647);
-        CHECK(decoded.cat.catv.value() == 7u);
+        CHECK(decoded.cat.catv.value() == 1u);
         CHECK(decoded.cat.catreplay.value() == CatReplayMode::RevokeOnReplay);
     }
 

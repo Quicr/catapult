@@ -318,14 +318,21 @@ struct CatConfirmation {
 // ---------------------------------------------------------------------------
 
 /**
- * @brief CTA-5007-B `catdpop` — DPoP proof requirements delivered inside a
- *        CAT token. Fields correspond to the map keys in the draft.
+ * @brief draft-ietf-moq-c4m-01 `catdpop` — DPoP proof requirements delivered
+ *        inside a CAT token. Wire form is a CBOR map with integer labels:
+ *
+ *        - `0`: window-seconds (uint) — DPoP proof acceptance window.
+ *        - `1`: honor_jti (bool)     — whether the resource server MUST
+ *          track replay of the proof `jti` for the duration of the window.
+ *
+ *        See draft-ietf-moq-c4m-01 §"CAT-DPoP Claim" for authoritative
+ *        semantics. Additional map labels are reserved for future draft
+ *        revisions; unknown labels are ignored on decode.
  */
 struct CatDpopSettings {
-  std::optional<std::vector<int64_t>> critical;      ///< required proof fields
-  std::optional<int64_t> proof_lifetime_seconds;     ///< acceptance window
-  std::optional<std::vector<uint8_t>> jti_challenge; ///< server challenge
-  std::optional<std::vector<uint8_t>> raw;           ///< opaque residual bytes
+  std::optional<int64_t> window_seconds;  ///< label 0: DPoP acceptance window
+  std::optional<bool> honor_jti;          ///< label 1: replay-track the jti
+  std::optional<std::vector<uint8_t>> raw;  ///< opaque residual bytes
 };
 
 // ---------------------------------------------------------------------------

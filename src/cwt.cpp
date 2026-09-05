@@ -396,51 +396,37 @@ class CborMapBuilder {
     addPair(std::move(key), std::move(m));
   }
 
-  // CTA-5007-B `catdpop`: structured settings map (critical, lifetime, jti).
+  // draft-ietf-moq-c4m-01 `catdpop`: CBOR map with labels
+  //   0 -> window-seconds (uint)
+  //   1 -> honor_jti (bool)
   void addClaimImpl(int64_t claim_id, const CatDpopSettings& d) {
     auto key = CborItemPtr(cbor_build_uint64(claim_id));
-    // If we only have raw pass-through bytes, emit them directly as a byte
-    // string (issuer opaque form).
-    const bool has_typed = d.critical.has_value() ||
-                           d.proof_lifetime_seconds.has_value() ||
-                           d.jti_challenge.has_value();
+    // If only the raw pass-through bytes are present, emit them directly as
+    // a byte string (issuer opaque form for future or unknown map labels).
+    const bool has_typed =
+        d.window_seconds.has_value() || d.honor_jti.has_value();
     if (!has_typed && d.raw.has_value()) {
       auto val = cbor_build_bytestring_owned(d.raw->data(), d.raw->size());
       addPair(std::move(key), std::move(val));
       return;
     }
     size_t entries = 0;
-    if (d.critical.has_value()) ++entries;
-    if (d.proof_lifetime_seconds.has_value()) ++entries;
-    if (d.jti_challenge.has_value()) ++entries;
+    if (d.window_seconds.has_value()) ++entries;
+    if (d.honor_jti.has_value()) ++entries;
     auto m = cbor_new_definite_map_owned(entries);
-    // Labels are integer-keyed per the draft; use a small stable mapping
-    // until the draft assigns final numbers: 1=critical, 2=lifetime, 3=jti.
-    if (d.critical.has_value()) {
-      auto lbl = CborItemPtr(cbor_build_uint64(1));
-      auto arr = cbor_new_definite_array_owned(d.critical->size());
-      for (int64_t v : *d.critical) {
-        auto item = v >= 0 ? CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(v)))
-                           : CborItemPtr(cbor_build_negint64(
-                                 static_cast<uint64_t>(-(v + 1))));
-        if (!cbor_array_push(arr.get(), item.get())) {
-          throw InvalidCborError("Failed to push catdpop critical entry");
-        }
+    if (d.window_seconds.has_value()) {
+      auto lbl = CborItemPtr(cbor_build_uint64(0));
+      const int64_t v = *d.window_seconds;
+      if (v < 0) {
+        throw InvalidClaimValueError(
+            "'catdpop' window-seconds must be non-negative");
       }
-      addPairToMap(m.get(), std::move(lbl), std::move(arr));
-    }
-    if (d.proof_lifetime_seconds.has_value()) {
-      auto lbl = CborItemPtr(cbor_build_uint64(2));
-      const int64_t v = *d.proof_lifetime_seconds;
-      auto val = v >= 0 ? CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(v)))
-                        : CborItemPtr(cbor_build_negint64(
-                              static_cast<uint64_t>(-(v + 1))));
+      auto val = CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(v)));
       addPairToMap(m.get(), std::move(lbl), std::move(val));
     }
-    if (d.jti_challenge.has_value()) {
-      auto lbl = CborItemPtr(cbor_build_uint64(3));
-      auto val = cbor_build_bytestring_owned(
-          d.jti_challenge->data(), d.jti_challenge->size());
+    if (d.honor_jti.has_value()) {
+      auto lbl = CborItemPtr(cbor_build_uint64(1));
+      auto val = CborItemPtr(cbor_build_bool(*d.honor_jti));
       addPairToMap(m.get(), std::move(lbl), std::move(val));
     }
     addPair(std::move(key), std::move(m));
@@ -1039,6 +1025,11 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         break;
 
       case CLAIM_CATV:
+        // CTA-5007-B §4.6: the only currently defined CAT version is 1. A
+        // token that carries any other value is either a forward-version
+        // token that this validator cannot understand or a producer bug;
+        // in either case fail closed rather than accept an authorisation
+        // the version semantics were meant to gate.
         if (!cbor_isa_uint(value_item)) {
           throw InvalidClaimValueError("'catv' must be an unsigned integer");
         }
@@ -1046,6 +1037,10 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
           uint64_t v = cbor_get_int(value_item);
           if (v > std::numeric_limits<uint32_t>::max()) {
             throw InvalidClaimValueError("'catv' exceeds uint32 range");
+          }
+          if (v != 1) {
+            throw InvalidClaimValueError(
+                "'catv' value is not a supported CAT version (only 1)");
           }
           token.cat.catv = static_cast<uint32_t>(v);
         }
@@ -1254,6 +1249,12 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         break;
 
       case CLAIM_CATGEOISO3166:
+        // CTA-5007-B `catgeoiso3166`: array of ISO 3166 country/subdivision
+        // codes. Enforce the wire shape (alpha-2, alpha-3, or numeric-3) at
+        // decode time so a caller can't smuggle a free-form label past a
+        // geographic gate. Runtime membership against the full ISO registry
+        // is a policy concern for the embedder; here we reject anything that
+        // is not syntactically well-formed.
         if (!cbor_isa_array(value_item)) {
           throw InvalidClaimValueError("'catgeoiso3166' must be an array");
         }
@@ -1266,12 +1267,37 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
           cbor_item_t** arr = cbor_array_handle(value_item);
           std::vector<std::string> codes;
           codes.reserve(n);
+          auto check_iso_shape = [](const std::string& s) {
+            const size_t len = s.size();
+            if (len == 2) {
+              for (char c : s) {
+                if (c < 'A' || c > 'Z') return false;
+              }
+              return true;
+            }
+            if (len == 3) {
+              bool all_alpha = true;
+              bool all_digit = true;
+              for (char c : s) {
+                if (c < 'A' || c > 'Z') all_alpha = false;
+                if (c < '0' || c > '9') all_digit = false;
+              }
+              return all_alpha || all_digit;
+            }
+            return false;
+          };
           for (size_t j = 0; j < n; ++j) {
             if (!cbor_isa_string(arr[j])) {
               throw InvalidClaimValueError(
                   "'catgeoiso3166' entries must be text strings");
             }
-            codes.emplace_back(extract_string(arr[j]));
+            std::string code = extract_string(arr[j]);
+            if (!check_iso_shape(code)) {
+              throw InvalidClaimValueError(
+                  "'catgeoiso3166' entry is not a well-formed ISO 3166 code "
+                  "(expected 2 uppercase, 3 uppercase, or 3 digits)");
+            }
+            codes.emplace_back(std::move(code));
           }
           token.cat.catgeoiso3166 = std::move(codes);
         }
@@ -1454,11 +1480,26 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
                     "'cnf' jkt must be a byte string");
               }
               size_t l = cbor_bytestring_length(val);
+              // RFC 7638 JWK thumbprint using SHA-256 is exactly 32 bytes.
+              // A shorter or longer value cannot be a well-formed thumbprint
+              // and cannot be used to bind a proof of possession — reject
+              // rather than accept a bogus binding.
+              if (l != 32) {
+                throw InvalidClaimValueError(
+                    "'cnf' jkt must be a 32-byte SHA-256 thumbprint");
+              }
               const unsigned char* d = cbor_bytestring_handle(val);
               cnf.jkt = std::vector<uint8_t>(d, d + l);
             } else if (cbor_isa_string(lbl)) {
               std::string key = extract_string(lbl);
-              if (key == "kid" && cbor_isa_string(val)) {
+              if (key == "kid") {
+                // Fail closed: an issuer that emits a `kid` label with a
+                // non-string value has produced a malformed `cnf` — silently
+                // dropping it would let the token be treated as unbound.
+                if (!cbor_isa_string(val)) {
+                  throw InvalidClaimValueError(
+                      "'cnf' kid must be a text string");
+                }
                 cnf.kid = extract_string(val);
               }
               // Unknown text labels: ignore — the typed model preserves
@@ -1471,7 +1512,14 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         break;
 
       case CLAIM_CATDPOP:
-        // CTA-5007-B `catdpop`: CBOR map with labeled fields.
+        // draft-ietf-moq-c4m-01 `catdpop`: CBOR map with integer labels.
+        //   0 -> window-seconds (uint, MUST be present when catdpop is)
+        //   1 -> honor_jti (bool)
+        // Every recognised label carries authorization semantics, so a
+        // malformed subfield must fail the decode rather than be silently
+        // dropped: treating a bogus window-seconds as absent would fall
+        // back to the caller's default acceptance window, which is
+        // precisely the setting the issuer meant to override.
         if (!cbor_isa_map(value_item)) {
           throw InvalidClaimValueError("'catdpop' must be a CBOR map");
         }
@@ -1482,46 +1530,38 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
           for (size_t k = 0; k < dp_size; ++k) {
             cbor_item_t* lbl = dp_pairs[k].key;
             cbor_item_t* val = dp_pairs[k].value;
-            if (!cbor_isa_uint(lbl)) continue;
+            if (!cbor_isa_uint(lbl)) {
+              throw InvalidClaimValueError(
+                  "'catdpop' label must be an unsigned integer");
+            }
             uint64_t label = cbor_get_int(lbl);
             switch (label) {
-              case 1:  // critical
-                if (cbor_isa_array(val)) {
-                  size_t cn = cbor_array_size(val);
-                  cbor_item_t** carr = cbor_array_handle(val);
-                  std::vector<int64_t> crit;
-                  crit.reserve(cn);
-                  for (size_t j = 0; j < cn; ++j) {
-                    if (cbor_isa_uint(carr[j])) {
-                      crit.push_back(
-                          static_cast<int64_t>(cbor_get_int(carr[j])));
-                    } else if (cbor_isa_negint(carr[j])) {
-                      uint64_t mag = cbor_get_int(carr[j]);
-                      crit.push_back(-static_cast<int64_t>(mag) - 1);
-                    } else {
-                      throw InvalidClaimValueError(
-                          "'catdpop' critical entries must be integers");
-                    }
+              case 0:  // window-seconds
+                if (!cbor_isa_uint(val)) {
+                  throw InvalidClaimValueError(
+                      "'catdpop' window-seconds must be an unsigned integer");
+                }
+                {
+                  uint64_t w = cbor_get_int(val);
+                  if (w > static_cast<uint64_t>(
+                             std::numeric_limits<int64_t>::max())) {
+                    throw InvalidClaimValueError(
+                        "'catdpop' window-seconds exceeds int64");
                   }
-                  settings.critical = std::move(crit);
+                  settings.window_seconds = static_cast<int64_t>(w);
                 }
                 break;
-              case 2:  // proof_lifetime_seconds
-                if (cbor_isa_uint(val)) {
-                  settings.proof_lifetime_seconds =
-                      static_cast<int64_t>(cbor_get_int(val));
+              case 1:  // honor_jti
+                if (!cbor_isa_float_ctrl(val) ||
+                    !cbor_is_bool(val)) {
+                  throw InvalidClaimValueError(
+                      "'catdpop' honor_jti must be a boolean");
                 }
-                break;
-              case 3:  // jti_challenge (byte string)
-                if (cbor_isa_bytestring(val)) {
-                  size_t l = cbor_bytestring_length(val);
-                  const unsigned char* d = cbor_bytestring_handle(val);
-                  settings.jti_challenge =
-                      std::vector<uint8_t>(d, d + l);
-                }
+                settings.honor_jti = cbor_get_bool(val);
                 break;
               default:
-                // Ignore unknown labels — they carry no authorization value.
+                // Ignore unknown labels — they carry no authorization
+                // value in the current draft; retain forward-compat room.
                 break;
             }
           }

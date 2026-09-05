@@ -208,7 +208,7 @@ TEST_CASE("ValidatorPositiveTests - Basic Functionality") {
             .withExpiration(exp)
             .withNotBefore(nbf)
             .withCwtIdString("test-token-123")
-            .withVersion(2)
+            .withVersion(1)
             .withGeoCoordinate(37.7749, -122.4194, 100.0)
             .withGeohash(GeohashClaimValue{std::string{"9q8yy"}});
             

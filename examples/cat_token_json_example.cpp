@@ -83,8 +83,8 @@ CatToken create_sample_token() {
   token.dpop.cnf = cnf;
 
   CatDpopSettings dpop;
-  dpop.critical = std::vector<int64_t>{1, 3};
-  dpop.proof_lifetime_seconds = 300;
+  dpop.window_seconds = 300;
+  dpop.honor_jti = true;
   token.dpop.catdpop = dpop;
 
   // Request claims
@@ -218,7 +218,7 @@ CatToken create_nested_composite_token() {
   auto service_token = CatToken{};
   service_token.core.iss = "service-authority.example.com";
   service_token.informational.sub = "service-account";
-  service_token.cat.catv = 2u;
+  service_token.cat.catv = 1u;
 
   auto blocked_token = CatToken{};
   blocked_token.core.iss = "blocked-authority.example.com";
@@ -441,7 +441,7 @@ void show_claim_type_examples() {
   }
   {
     CatDpopSettings dpop2;
-    dpop2.proof_lifetime_seconds = 600;
+    dpop2.window_seconds = 600;
     dpop_token.dpop.catdpop = dpop2;
   }
 

@@ -407,7 +407,7 @@ TEST_SUITE("CWT Signing Integration Tests") {
     token.core.aud = {"service1", "service2"};
     token.core.exp = 1234567890;
     token.core.nbf = 1234500000;
-    token.cat.catv = 2u;
+    token.cat.catv = 1u;
     {
       CatUriMatchMap catu;
       catu.components[3] =
@@ -449,7 +449,7 @@ TEST_SUITE("CWT Signing Integration Tests") {
     CHECK(caValidated.payload.core.aud->size() == 2);
     CHECK(caValidated.payload.core.exp == 1234567890);
     CHECK(caValidated.payload.core.nbf == 1234500000);
-    CHECK(caValidated.payload.cat.catv == 2u);
+    CHECK(caValidated.payload.cat.catv == 1u);
     REQUIRE(caValidated.payload.cat.catu.has_value());
     CHECK(caValidated.payload.cat.catu->components.size() == 1);
     CHECK(caValidated.signatures.size() == 3);

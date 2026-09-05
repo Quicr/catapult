@@ -124,7 +124,7 @@ CatToken create_composite_cat_token() {
   service_token.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + std::chrono::hours{1});
   service_token.informational.sub = "service-account";
-  service_token.cat.catv = 2u;
+  service_token.cat.catv = 1u;
 
   // Create OR composite: (User OR Service)
   std::vector<ClaimSet> or_claim_sets;

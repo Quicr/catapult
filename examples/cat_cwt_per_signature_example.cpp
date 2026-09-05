@@ -27,7 +27,7 @@ int main() {
     token.core.iss = "multi-alg-authority";
     token.core.aud = {"service-a", "service-b"};
     token.core.exp = 1234567890;
-    token.cat.catv = 2u;
+    token.cat.catv = 1u;
     {
       CatUriMatchMap catu;
       catu.components[3] =
