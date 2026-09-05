@@ -5,14 +5,20 @@
 
 #include "catapult/moqt_claims.hpp"
 
+#include <cbor.h>
 #include <doctest/doctest.h>
 
 #include <array>
 #include <chrono>
+#include <cstdint>
+#include <cstring>
 #include <ranges>
 #include <string_view>
+#include <vector>
 
+#include "catapult/cwt.hpp"
 #include "catapult/dpop.hpp"
+#include "catapult/error.hpp"
 #include "catapult/token.hpp"
 
 using namespace catapult;
@@ -543,3 +549,135 @@ TEST_SUITE("Integration Tests") {
   }
 
 }  // TEST_SUITE("Integration Tests")
+
+namespace {
+
+// Build a minimal CWT payload map { 1: "iss", 3: "aud", CLAIM_MOQT: <moqt> }
+// so we can hand `Cwt::decodePayload` a well-formed token that only differs
+// in the shape of the `moqt` claim under test.
+std::vector<uint8_t> serialize_item_owned(cbor_item_t* root) {
+  unsigned char* buf = nullptr;
+  size_t buf_size = 0;
+  size_t len = cbor_serialize_alloc(root, &buf, &buf_size);
+  std::vector<uint8_t> out(buf, buf + len);
+  free(buf);
+  return out;
+}
+
+std::vector<uint8_t> wrap_moqt_claim_bytes(cbor_item_t* moqt_value_owned) {
+  cbor_item_t* map = cbor_new_definite_map(3);
+
+  cbor_item_t* iss_key = cbor_build_uint8(1);
+  cbor_item_t* iss_val = cbor_build_string("issuer");
+  cbor_map_add(map,
+               cbor_pair{.key = cbor_move(iss_key), .value = cbor_move(iss_val)});
+
+  // `aud` claim (label 3) is an array of text strings.
+  cbor_item_t* aud_key = cbor_build_uint8(3);
+  cbor_item_t* aud_arr = cbor_new_definite_array(1);
+  cbor_array_push(aud_arr, cbor_move(cbor_build_string("aud")));
+  cbor_map_add(map,
+               cbor_pair{.key = cbor_move(aud_key), .value = cbor_move(aud_arr)});
+
+  cbor_item_t* moqt_key = cbor_build_uint64(catapult::CLAIM_MOQT);
+  cbor_map_add(
+      map, cbor_pair{.key = cbor_move(moqt_key), .value = cbor_move(moqt_value_owned)});
+
+  auto out = serialize_item_owned(map);
+  cbor_decref(&map);
+  return out;
+}
+
+// scope = [ [action], [ <bin_match> ] ] — namespace list carrying one entry.
+cbor_item_t* build_scope_with_ns_match(int action, cbor_item_t* bin_match_owned) {
+  cbor_item_t* scope = cbor_new_definite_array(2);
+  cbor_item_t* actions = cbor_new_definite_array(1);
+  cbor_array_push(actions, cbor_move(cbor_build_uint8(static_cast<uint8_t>(action))));
+  cbor_array_push(scope, cbor_move(actions));
+
+  cbor_item_t* ns_list = cbor_new_definite_array(1);
+  cbor_array_push(ns_list, cbor_move(bin_match_owned));
+  cbor_array_push(scope, cbor_move(ns_list));
+
+  return scope;
+}
+
+}  // namespace
+
+TEST_SUITE("MOQT wire-format hardening (C-05)") {
+  TEST_CASE("Decoder rejects nil in bin-match position (fail-closed)") {
+    // A `nil` in the bin-match list has a specific "exact zero-length"
+    // meaning in the current CAT-4-MOQT draft. The internal model cannot
+    // yet represent that distinctly from "wildcard", so admitting it as
+    // "any" would silently widen authorization to every namespace. We
+    // must fail closed.
+    cbor_item_t* moqt_arr = cbor_new_definite_array(1);
+    cbor_array_push(moqt_arr, cbor_move(build_scope_with_ns_match(
+                                  catapult::moqt_actions::PUBLISH,
+                                  cbor_new_null())));
+
+    auto payload = wrap_moqt_claim_bytes(moqt_arr);
+    CHECK_THROWS_AS(catapult::Cwt::decodePayload(payload),
+                    catapult::InvalidClaimValueError);
+  }
+
+  TEST_CASE("Decoder rejects CONTAINS (type 3) as an unsupported extension") {
+    // Type 3 (contains) is not part of the CAT-4-MOQT bin-match CDDL.
+    // Accepting an unknown extension would let an issuer smuggle in a
+    // broader authorization by relabelling a scope entry.
+    cbor_item_t* tuple = cbor_new_definite_array(2);
+    cbor_array_push(tuple, cbor_move(cbor_build_uint8(3)));  // type=CONTAINS
+    cbor_array_push(tuple, cbor_move(cbor_build_bytestring(
+                               reinterpret_cast<const unsigned char*>("live"),
+                               4)));
+
+    cbor_item_t* moqt_arr = cbor_new_definite_array(1);
+    cbor_array_push(moqt_arr,
+                    cbor_move(build_scope_with_ns_match(
+                        catapult::moqt_actions::PUBLISH, tuple)));
+
+    auto payload = wrap_moqt_claim_bytes(moqt_arr);
+    CHECK_THROWS_AS(catapult::Cwt::decodePayload(payload),
+                    catapult::InvalidClaimValueError);
+  }
+
+  TEST_CASE("Decoder accepts type 0 (exact), 1 (prefix), 2 (suffix)") {
+    // Sanity check that the negative fixtures above aren't rejecting the
+    // shape for reasons unrelated to the type discriminator.
+    for (uint8_t match_type : {uint8_t{0}, uint8_t{1}, uint8_t{2}}) {
+      cbor_item_t* tuple = cbor_new_definite_array(2);
+      cbor_array_push(tuple, cbor_move(cbor_build_uint8(match_type)));
+      cbor_array_push(tuple, cbor_move(cbor_build_bytestring(
+                                 reinterpret_cast<const unsigned char*>("ns"),
+                                 2)));
+
+      cbor_item_t* moqt_arr = cbor_new_definite_array(1);
+      cbor_array_push(moqt_arr,
+                      cbor_move(build_scope_with_ns_match(
+                          catapult::moqt_actions::PUBLISH, tuple)));
+
+      auto payload = wrap_moqt_claim_bytes(moqt_arr);
+      CHECK_NOTHROW(catapult::Cwt::decodePayload(payload));
+    }
+  }
+
+  TEST_CASE("Encoder refuses to emit a CONTAINS bin-match") {
+    // The encoder must not produce a wire form the decoder is required
+    // to reject; otherwise a well-intentioned issuer could ship
+    // tokens that no relay could parse.
+    auto token =
+        catapult::CatToken()
+            .withIssuer("issuer")
+            .withAudience({"aud"})
+            .withMoqtActionsDynamic(
+                std::array{catapult::moqt_actions::PUBLISH},
+                catapult::MoqtBinaryMatch::contains("live"),
+                catapult::MoqtBinaryMatch::any());
+
+    catapult::Cwt cwt(catapult::ALG_ES256, token);
+    // The encoder wraps semantic failures raised by claim builders into
+    // an InvalidCborError. Assert the outer error type rather than the
+    // inner InvalidClaimValueError.
+    CHECK_THROWS_AS(cwt.encodePayload(), catapult::InvalidCborError);
+  }
+}

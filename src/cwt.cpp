@@ -600,6 +600,14 @@ class ClaimProcessor {
     if (match.is_empty()) {
       return nullptr;
     }
+    // Refuse to emit an unsupported extension: our decoder rejects
+    // `CONTAINS`, so allowing an encoder to produce it would create a
+    // token this library itself cannot round-trip.
+    if (match.match_type == BinaryMatchType::CONTAINS) {
+      throw InvalidClaimValueError(
+          "MOQT match type 3 (contains) is not a CAT-4-MOQT bin-match "
+          "and must not be encoded");
+    }
     if (match.match_type == BinaryMatchType::EXACT) {
       return cbor_build_bytestring_owned(match.pattern.data(),
                                          match.pattern.size());
@@ -1610,7 +1618,18 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
             }
 
             auto parse_bin_match = [](cbor_item_t* item) -> MoqtBinaryMatch {
-              if (!item || cbor_is_null(item)) return MoqtBinaryMatch::any();
+              // CAT-4-MOQT (draft-jennings-moq-cat-04) assigns `nil` in a
+              // bin-match position a specific "exact zero-length" meaning.
+              // Silently returning `any()` would widen authorization to
+              // every namespace, which is exactly the failure mode that
+              // led to C-05. Until the internal model can distinguish
+              // "exact empty" from "wildcard", fail closed rather than
+              // pick the more permissive interpretation.
+              if (!item || cbor_is_null(item)) {
+                throw InvalidClaimValueError(
+                    "MOQT match element must not be nil; use exact byte "
+                    "string or (type, bytestring) tuple");
+              }
               if (cbor_isa_bytestring(item)) {
                 std::string_view sv(reinterpret_cast<const char*>(
                                         cbor_bytestring_handle(item)),
@@ -1631,21 +1650,28 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
                         cbor_bytestring_handle(val_item.get())),
                     cbor_bytestring_length(val_item.get()));
                 switch (type) {
+                  case 0:
+                    return MoqtBinaryMatch::exact(sv);
                   case 1:
                     return MoqtBinaryMatch::prefix(sv);
                   case 2:
                     return MoqtBinaryMatch::suffix(sv);
                   case 3:
-                    return MoqtBinaryMatch::contains(sv);
-                  case 0:
-                    return MoqtBinaryMatch::exact(sv);
+                    // CONTAINS is not part of the CAT-4-MOQT bin-match
+                    // CDDL. Accepting an unknown extension can silently
+                    // broaden a token's authorization scope; refuse it
+                    // unless the deployment has negotiated the
+                    // extension out of band.
+                    throw InvalidClaimValueError(
+                        "MOQT match type 3 (contains) is an unsupported "
+                        "extension");
                   default:
                     throw InvalidClaimValueError(
                         "MOQT match tuple has unknown type");
                 }
               }
               throw InvalidClaimValueError(
-                  "MOQT match element must be a bytestring, null, or (uint, "
+                  "MOQT match element must be a byte string or (type, "
                   "bytestring) tuple");
             };
 
