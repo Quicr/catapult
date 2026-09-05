@@ -48,6 +48,12 @@ CatTokenValidator& CatTokenValidator::withClockSkewTolerance(
   return *this;
 }
 
+CatTokenValidator& CatTokenValidator::withRevalidationCallback(
+    RevalidationCallback* callback) {
+  revalidation_callback_ = callback;
+  return *this;
+}
+
 /**
  * @brief Template-based claim validation helper
  */
@@ -200,7 +206,32 @@ void CatTokenValidator::validateMoqtRevalidation(
     throw InvalidClaimValueError(
         "'iat + moqt-reval + skew' overflows int64_t");
   }
-  if (now_epoch_seconds > deadline_with_skew) {
+  const bool expired = now_epoch_seconds > deadline_with_skew;
+
+  // Fire the observability hook before the authorization outcome so a
+  // callback that queues an async refresh gets the signal even when we
+  // are about to throw. `time_to_reval` is signed: negative when we are
+  // already past the deadline, so callbacks can distinguish "just now"
+  // from "expired long ago".
+  if (revalidation_callback_) {
+    const int64_t time_to_reval_seconds =
+        deadline_with_skew - now_epoch_seconds;
+    // `cti` is a bytestring per CTA-5007-B. Callbacks that want to log it
+    // are free to encode however they need; we hand it over as-is so we
+    // do not paper over non-UTF-8 bytes with lossy conversion.
+    std::string_view token_id;
+    if (token.core.cti.has_value() && !token.core.cti->empty()) {
+      token_id = std::string_view(
+          reinterpret_cast<const char*>(token.core.cti->data()),
+          token.core.cti->size());
+    }
+    revalidation_callback_->onRevalidationCheck(
+        expired ? RevalidationStatus::Expired : RevalidationStatus::Fresh,
+        token_id, iat, std::chrono::seconds(reval),
+        std::chrono::seconds(time_to_reval_seconds));
+  }
+
+  if (expired) {
     throw TokenRevalidationRequiredError();
   }
 }

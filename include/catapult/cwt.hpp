@@ -24,6 +24,7 @@ namespace catapult {
 
 // Forward declarations
 struct AuthorizationContext;
+class KeyResolver;
 
 /**
  * @brief RAII wrapper for CBOR items
@@ -193,6 +194,22 @@ class Cwt {
                          const class CryptographicAlgorithm& algorithm);
 
   /**
+   * @brief Validate a COSE_Sign1 CWT with a KeyResolver.
+   *
+   * Extracts (`kid`, `alg`) from the protected header before any
+   * cryptographic work and asks the resolver for the matching verifier.
+   * The resolver's `resolve()` MUST throw on unknown routing metadata;
+   * this overload never falls back to a default key.
+   *
+   * @throws MissingKeyError (via the resolver) if the key set does not
+   *         cover the presented (kid, alg).
+   * @throws CryptoError, InvalidCborError, InvalidTokenFormatError as with
+   *         the algorithm-taking overload above.
+   */
+  static Cwt validateCwt(std::span<const uint8_t> cwtBytes,
+                         const class KeyResolver& resolver);
+
+  /**
    * @brief Validate a multi-signed CWT with per-signature algorithms
    * @param cwtBytes Raw CBOR-encoded CWT bytes
    * @param algorithms Map of algorithm ID to cryptographic algorithm
@@ -218,6 +235,14 @@ class Cwt {
    */
   static Cwt validateCwtBase64(const std::string& encodedCwt,
                                const class CryptographicAlgorithm& algorithm);
+
+  /**
+   * @brief Validate a base64url-encoded CWT string with a KeyResolver.
+   *
+   * Convenience overload; see the raw-bytes variant for contract details.
+   */
+  static Cwt validateCwtBase64(const std::string& encodedCwt,
+                               const class KeyResolver& resolver);
 
   /**
    * @brief Validate a base64url-encoded multi-signed CWT

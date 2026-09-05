@@ -12,6 +12,7 @@
 
 #include "crypto.hpp"
 #include "error.hpp"
+#include "revalidation_callback.hpp"
 #include "token.hpp"
 
 namespace catapult {
@@ -83,6 +84,11 @@ class CatTokenValidator {
   std::optional<std::unordered_set<std::string>>
       expectedAudiences_;       ///< Expected token audiences
   int64_t clockSkewTolerance_;  ///< Clock skew tolerance in seconds
+  RevalidationCallback* revalidation_callback_ = nullptr;
+      ///< Observability hook fired during moqt-reval enforcement.
+      ///< Non-owning; the caller is responsible for lifetime. A nullptr
+      ///< means "do nothing" — equivalent to installing a
+      ///< NoopRevalidationCallback but without the vtable dispatch.
 
  public:
   /**
@@ -112,6 +118,20 @@ class CatTokenValidator {
    * @return Reference to this validator for chaining
    */
   CatTokenValidator& withClockSkewTolerance(int64_t toleranceSeconds);
+
+  /**
+   * @brief Install an observability callback for moqt-reval enforcement.
+   *
+   * The callback fires on every token whose payload carries `moqt-reval`,
+   * both when the token is still within its interval (`Fresh`) and when
+   * it has crossed the deadline (`Expired`, immediately before the
+   * validator throws `TokenRevalidationRequiredError`).
+   *
+   * Ownership is not transferred — the callback must outlive the
+   * validator. Pass `nullptr` to disable (equivalent to the default).
+   * See RevalidationCallback docs for the on-hot-path contract.
+   */
+  CatTokenValidator& withRevalidationCallback(RevalidationCallback* callback);
 
   /**
    * @brief Validate a CAT token

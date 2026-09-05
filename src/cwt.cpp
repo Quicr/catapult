@@ -11,6 +11,7 @@
 #include "catapult/internal/cbor_owned.hpp"
 #include "catapult/internal/parse_limits.hpp"
 #include "catapult/internal/strict_cbor.hpp"
+#include "catapult/key_resolver.hpp"
 #include "catapult/logging.hpp"
 
 namespace catapult {
@@ -2496,6 +2497,33 @@ Cwt Cwt::validateCwtBase64(const std::string& encodedCwt,
     throw InvalidTokenFormatError();
   }
   return validateCwt(cwtBytes, algorithm);
+}
+
+// Resolver-based overloads. Extract routing metadata from the protected
+// header before touching the payload; any resolver failure short-circuits
+// with a MissingKeyError before we spend crypto work on an untrusted key.
+Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
+                     const KeyResolver& resolver) {
+  const auto header = decodeHeader(cwtBytes);
+  const auto& algorithm =
+      resolver.resolve(header.kid.value_or(std::string{}), header.alg);
+  return validateCwt(cwtBytes, algorithm);
+}
+
+Cwt Cwt::validateCwtBase64(const std::string& encodedCwt,
+                           const KeyResolver& resolver) {
+  if (encodedCwt.size() > internal::kMaxEncodedTokenBytes) {
+    CAT_LOG_ERROR("Encoded CWT exceeds CTA-5007-B recommended maximum ({} > {})",
+                  encodedCwt.size(), internal::kMaxEncodedTokenBytes);
+    throw InvalidTokenFormatError();
+  }
+  auto cwtBytes = base64UrlDecode(encodedCwt);
+  if (cwtBytes.size() > internal::kMaxDecodedCborBytes) {
+    CAT_LOG_ERROR("Decoded CWT exceeds internal ceiling ({} > {} bytes)",
+                  cwtBytes.size(), internal::kMaxDecodedCborBytes);
+    throw InvalidTokenFormatError();
+  }
+  return validateCwt(cwtBytes, resolver);
 }
 
 Cwt Cwt::validateMultiSignedCwt(

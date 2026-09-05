@@ -49,7 +49,9 @@ set(CATAPULT_SOURCES
     src/cwt.cpp
     src/dpop.cpp
     src/error.cpp
+    src/key_resolver.cpp
     src/moqt_claims.cpp
+    src/policy_cache.cpp
     src/replay_store.cpp
     src/strict_cbor.cpp
     src/token.cpp
@@ -227,11 +229,14 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         tests/cwt_encode_decode.cpp
         tests/cwt_signing.cpp
         tests/dpop.cpp
+        tests/key_resolver.cpp
         tests/rfc8152_compliance.cpp
         tests/memory_pool.cpp
         tests/moqt_claims.cpp
         tests/parse_limits.cpp
+        tests/policy_cache.cpp
         tests/replay_store.cpp
+        tests/revalidation_callback.cpp
         tests/uri_catu.cpp
         tests/secure_vector.cpp
         tests/strict_cbor.cpp
