@@ -317,6 +317,31 @@ ValidatedCatToken CatTokenValidator::intoValidated(CatToken token) const {
   return ValidatedCatToken(std::move(token));
 }
 
+CatErrorCode CatTokenValidator::tryValidate(const CatToken& token) const noexcept {
+  try {
+    validate(token);
+    return CatErrorCode::SUCCESS;
+  } catch (const CatError& e) {
+    return e.errorCode();
+  } catch (...) {
+    // A non-CatError escape from validate() would be a bug: every
+    // internal failure mode is expected to map to a CatError subclass.
+    // Fall back to a generic "invalid claim" code so the caller still
+    // fails closed rather than propagating an unknown exception.
+    return CatErrorCode::INVALID_CLAIM_VALUE;
+  }
+}
+
+Result<ValidatedCatToken, CatErrorCode>
+CatTokenValidator::tryIntoValidated(CatToken token) const noexcept {
+  auto code = tryValidate(token);
+  if (code != CatErrorCode::SUCCESS) {
+    return Result<ValidatedCatToken, CatErrorCode>::error(code);
+  }
+  return Result<ValidatedCatToken, CatErrorCode>::success(
+      ValidatedCatToken(std::move(token)));
+}
+
 bool CatTokenValidator::validateTypedOrClaim(const OrClaim& orClaim) const {
   return validateTypedCompositeClaim(orClaim, *this);
 }

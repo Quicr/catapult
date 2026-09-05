@@ -1015,3 +1015,69 @@ TEST_CASE("MoqtReval - claim absent leaves validation untouched") {
     CatTokenValidator validator;
     REQUIRE_NOTHROW(validator.validate(token));
 }
+
+TEST_SUITE("tryValidate — non-throwing hot-path surface") {
+    TEST_CASE("Returns SUCCESS for a valid token") {
+        auto token = createValidToken();
+        CatTokenValidator validator;
+        CHECK(validator.tryValidate(token) == CatErrorCode::SUCCESS);
+    }
+
+    TEST_CASE("Reports TOKEN_EXPIRED without throwing") {
+        auto now = std::chrono::system_clock::now();
+        auto token = CatToken()
+                         .withIssuer("iss")
+                         .withAudience({"aud"})
+                         .withExpiration(now - std::chrono::hours(1));
+        CatTokenValidator validator;
+        CHECK(validator.tryValidate(token) == CatErrorCode::TOKEN_EXPIRED);
+    }
+
+    TEST_CASE("Reports INVALID_ISSUER without throwing") {
+        auto token = createValidToken();
+        CatTokenValidator validator;
+        validator.withExpectedIssuers({"https://other-issuer.example"});
+        CHECK(validator.tryValidate(token) == CatErrorCode::INVALID_ISSUER);
+    }
+
+    TEST_CASE("Reports INVALID_AUDIENCE without throwing") {
+        auto token = createValidToken();
+        CatTokenValidator validator;
+        validator.withExpectedAudiences({"https://other-service.example"});
+        CHECK(validator.tryValidate(token) == CatErrorCode::INVALID_AUDIENCE);
+    }
+
+    TEST_CASE(
+        "Reports GEOGRAPHIC_VALIDATION_FAILED for out-of-range coordinates") {
+        auto now = std::chrono::system_clock::now();
+        auto token = CatToken()
+                         .withIssuer("iss")
+                         .withAudience({"aud"})
+                         .withExpiration(now + std::chrono::hours(1))
+                         .withGeoCoordinate(200.0, 0.0);
+        CatTokenValidator validator;
+        CHECK(validator.tryValidate(token) ==
+              CatErrorCode::GEOGRAPHIC_VALIDATION_FAILED);
+    }
+
+    TEST_CASE("tryIntoValidated yields ValidatedCatToken on success") {
+        auto token = createValidToken();
+        CatTokenValidator validator;
+        auto result = validator.tryIntoValidated(token);
+        REQUIRE(result.isSuccess());
+        auto validated = std::move(result).value();
+        CHECK(validated.core().iss.value() == "https://trusted-issuer.com");
+    }
+
+    TEST_CASE("tryIntoValidated surfaces the same error code on failure") {
+        auto now = std::chrono::system_clock::now();
+        auto token = CatToken()
+                         .withIssuer("iss")
+                         .withAudience({"aud"})
+                         .withExpiration(now - std::chrono::hours(1));
+        CatTokenValidator validator;
+        auto result = validator.tryIntoValidated(token);
+        REQUIRE(result.isError());
+        CHECK(result.error() == CatErrorCode::TOKEN_EXPIRED);
+    }
+}

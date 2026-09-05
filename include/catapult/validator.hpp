@@ -121,6 +121,25 @@ class CatTokenValidator {
   void validate(const CatToken& token) const;
 
   /**
+   * @brief Non-throwing validation for the relay hot path.
+   *
+   * Runs the same checks as `validate()` but reports failure through a
+   * `CatErrorCode` return value rather than an exception. Returns
+   * `CatErrorCode::SUCCESS` when the token passes every check.
+   *
+   * The relay admission path should prefer this entry point: exception
+   * unwinding across a per-request boundary is the largest single source
+   * of latency variance on this code path, and validation failure is an
+   * expected outcome for untrusted input, not an exceptional condition.
+   *
+   * @note The underlying validation still allocates internally. A future
+   *   change is expected to introduce an allocation-lean verifier for
+   *   pre-parsed input; this method provides the exception-free surface
+   *   that verifier will export.
+   */
+  [[nodiscard]] CatErrorCode tryValidate(const CatToken& token) const noexcept;
+
+  /**
    * @brief Validate a token and consume it into an immutable
    *        `ValidatedCatToken`.
    *
@@ -132,6 +151,17 @@ class CatTokenValidator {
    * @throws Various CatError subclasses on validation failure
    */
   [[nodiscard]] ValidatedCatToken intoValidated(CatToken token) const;
+
+  /**
+   * @brief Non-throwing companion to `intoValidated`.
+   *
+   * Returns a `Result` carrying either an immutable `ValidatedCatToken`
+   * or the `CatErrorCode` describing why validation failed. On failure
+   * the input `token` is dropped (see `intoValidated` for rationale) but
+   * no exception is raised.
+   */
+  [[nodiscard]] Result<ValidatedCatToken, CatErrorCode> tryIntoValidated(
+      CatToken token) const noexcept;
 
   /**
    * @brief Validate multiple typed composite claims using CompositeClaimType
