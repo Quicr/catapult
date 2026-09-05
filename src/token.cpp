@@ -145,6 +145,58 @@ void CatTokenValidator::validate(const CatToken& token) const {
   validateGeographicRestrictions(token);
   validateUsageLimits(token);
   validateCompositeClaims(token);
+  validateMoqtRevalidation(token, now);
+}
+
+// CAT-4-MOQT (draft-jennings-moq-cat-04): if `moqt-reval` is present the
+// resource server MUST reject the token when
+// `iat + moqt-reval < now (adjusted by clock skew tolerance)`. The client
+// is then required to obtain a fresh token from the issuer.
+//
+// Two constraints follow from the draft:
+//  - `moqt-reval` is only meaningful when `moqt` scopes are present. That
+//    invariant is enforced by the decoder, so we don't re-check it here.
+//  - The reval anchor is `iat`. A token that carries `moqt-reval` but
+//    omits `iat` cannot be authoritatively measured against the interval,
+//    which is exactly the failure mode the reval mechanism exists to
+//    prevent — treat this as a required-claim violation.
+void CatTokenValidator::validateMoqtRevalidation(
+    const CatToken& token, int64_t now_epoch_seconds) const {
+  if (!token.extended.hasMoqtClaims()) {
+    return;
+  }
+  const auto* moqt = token.extended.getMoqtClaimsReadOnly();
+  auto interval = moqt->getRevalidationInterval();
+  if (!interval.has_value()) {
+    return;
+  }
+  if (!token.informational.iat.has_value()) {
+    throw MissingRequiredClaimError("iat (required when moqt-reval is set)");
+  }
+  const int64_t iat = *token.informational.iat;
+  const int64_t reval = interval->count();
+
+  // Guard the deadline arithmetic against signed overflow: an issuer that
+  // encodes a huge `moqt-reval` should be rejected rather than silently
+  // wrapping to a small deadline (which would masquerade as a valid,
+  // near-future revalidation window).
+  int64_t deadline;
+  if (__builtin_add_overflow(iat, reval, &deadline)) {
+    throw InvalidClaimValueError(
+        "'iat + moqt-reval' overflows int64_t");
+  }
+  // Apply the operator-configured clock skew tolerance in the same
+  // direction as `exp`: extend the acceptance window forward. Overflow
+  // here is again treated as invalid rather than wrapping.
+  int64_t deadline_with_skew;
+  if (__builtin_add_overflow(deadline, clockSkewTolerance_,
+                             &deadline_with_skew)) {
+    throw InvalidClaimValueError(
+        "'iat + moqt-reval + skew' overflows int64_t");
+  }
+  if (now_epoch_seconds > deadline_with_skew) {
+    throw TokenRevalidationRequiredError();
+  }
 }
 
 void CatTokenValidator::validateGeographicRestrictions(

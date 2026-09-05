@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include "catapult/claims.hpp"
+#include "catapult/moqt_claims.hpp"
 #include "catapult/validator.hpp"
 #include <chrono>
 
@@ -801,4 +802,99 @@ TEST_CASE("ValidatedCatToken is move-only") {
                   "ValidatedCatToken must be move-constructible");
     static_assert(std::is_move_assignable_v<ValidatedCatToken>,
                   "ValidatedCatToken must be move-assignable");
+}
+
+// CAT-4-MOQT (draft-jennings-moq-cat-04): `moqt-reval` bounds how long a
+// relay may cache the authorization decision without re-checking with the
+// issuer. The validator must reject a token once `iat + moqt-reval` is in
+// the past, must require `iat`, and must fold in the clock-skew tolerance
+// consistently with `exp`/`nbf`.
+TEST_CASE("MoqtReval - within window accepts token") {
+    auto now_tp = std::chrono::system_clock::now();
+    CatToken token;
+    token.withIssuer("https://issuer.example")
+        .withAudience({"https://relay.example"})
+        .withExpiration(now_tp + std::chrono::hours(1))
+        .withIssuedAt(now_tp - std::chrono::seconds(30));
+    MoqtClaims moqt;
+    std::vector<int> actions = {moqt_actions::PUBLISH};
+    moqt.addScope(actions, MoqtBinaryMatch::any(), MoqtBinaryMatch::any());
+    moqt.setRevalidationInterval(std::chrono::seconds(300));
+    token.extended.setMoqtClaims(std::move(moqt));
+
+    CatTokenValidator validator;
+    REQUIRE_NOTHROW(validator.validate(token));
+}
+
+TEST_CASE("MoqtReval - past deadline rejects with TokenRevalidationRequiredError") {
+    auto now_tp = std::chrono::system_clock::now();
+    CatToken token;
+    token.withIssuer("https://issuer.example")
+        .withAudience({"https://relay.example"})
+        .withExpiration(now_tp + std::chrono::hours(1))
+        .withIssuedAt(now_tp - std::chrono::seconds(600));
+    MoqtClaims moqt;
+    std::vector<int> actions = {moqt_actions::PUBLISH};
+    moqt.addScope(actions, MoqtBinaryMatch::any(), MoqtBinaryMatch::any());
+    moqt.setRevalidationInterval(std::chrono::seconds(300));
+    token.extended.setMoqtClaims(std::move(moqt));
+
+    CatTokenValidator validator;
+    CHECK_THROWS_AS(validator.validate(token), TokenRevalidationRequiredError);
+}
+
+TEST_CASE("MoqtReval - missing iat is rejected as missing required claim") {
+    auto now_tp = std::chrono::system_clock::now();
+    CatToken token;
+    token.withIssuer("https://issuer.example")
+        .withAudience({"https://relay.example"})
+        .withExpiration(now_tp + std::chrono::hours(1));
+    MoqtClaims moqt;
+    std::vector<int> actions = {moqt_actions::PUBLISH};
+    moqt.addScope(actions, MoqtBinaryMatch::any(), MoqtBinaryMatch::any());
+    moqt.setRevalidationInterval(std::chrono::seconds(300));
+    token.extended.setMoqtClaims(std::move(moqt));
+
+    CatTokenValidator validator;
+    CHECK_THROWS_AS(validator.validate(token), MissingRequiredClaimError);
+}
+
+TEST_CASE("MoqtReval - clock skew tolerance extends the reval window") {
+    // Deadline is exactly 60s in the past; a 90s tolerance must rescue it.
+    auto now_tp = std::chrono::system_clock::now();
+    CatToken token;
+    token.withIssuer("https://issuer.example")
+        .withAudience({"https://relay.example"})
+        .withExpiration(now_tp + std::chrono::hours(1))
+        .withIssuedAt(now_tp - std::chrono::seconds(360));
+    MoqtClaims moqt;
+    std::vector<int> actions = {moqt_actions::PUBLISH};
+    moqt.addScope(actions, MoqtBinaryMatch::any(), MoqtBinaryMatch::any());
+    moqt.setRevalidationInterval(std::chrono::seconds(300));
+    token.extended.setMoqtClaims(std::move(moqt));
+
+    CatTokenValidator strict;
+    CHECK_THROWS_AS(strict.validate(token), TokenRevalidationRequiredError);
+
+    CatTokenValidator lenient;
+    lenient.withClockSkewTolerance(90);
+    REQUIRE_NOTHROW(lenient.validate(token));
+}
+
+TEST_CASE("MoqtReval - claim absent leaves validation untouched") {
+    // Same shape as the passing test but with no reval interval — must
+    // not fabricate a deadline out of `iat` alone.
+    auto now_tp = std::chrono::system_clock::now();
+    CatToken token;
+    token.withIssuer("https://issuer.example")
+        .withAudience({"https://relay.example"})
+        .withExpiration(now_tp + std::chrono::hours(1))
+        .withIssuedAt(now_tp - std::chrono::hours(24));
+    MoqtClaims moqt;
+    std::vector<int> actions = {moqt_actions::PUBLISH};
+    moqt.addScope(actions, MoqtBinaryMatch::any(), MoqtBinaryMatch::any());
+    token.extended.setMoqtClaims(std::move(moqt));
+
+    CatTokenValidator validator;
+    REQUIRE_NOTHROW(validator.validate(token));
 }

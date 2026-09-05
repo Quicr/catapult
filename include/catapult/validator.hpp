@@ -168,6 +168,13 @@ class CatTokenValidator {
   void validateGeographicRestrictions(const CatToken& token) const;
   void validateUsageLimits(const CatToken& token) const;
   void validateCompositeClaims(const CatToken& token) const;
+
+  // CAT-4-MOQT (draft-jennings-moq-cat-04) §`moqt-reval`: enforce that
+  // `iat + moqt-reval` has not elapsed. `now_epoch_seconds` is passed in
+  // from `validate()` so that a single time snapshot is applied
+  // consistently across `exp`, `nbf`, and reval checks.
+  void validateMoqtRevalidation(const CatToken& token,
+                                int64_t now_epoch_seconds) const;
 };
 
 #ifdef CATAPULT_ENABLE_LEGACY_JWT_TOKEN

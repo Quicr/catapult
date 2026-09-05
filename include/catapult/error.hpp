@@ -31,6 +31,7 @@ enum class CatErrorCode : uint32_t {
   INVALID_ISSUER = 2004,
   MISSING_REQUIRED_CLAIM = 2005,
   INVALID_CLAIM_VALUE = 2006,
+  TOKEN_REVALIDATION_REQUIRED = 2007,
   UNSUPPORTED_ALGORITHM = 3000,
   CRYPTO_OPERATION_FAILED = 3001,
   GEOGRAPHIC_VALIDATION_FAILED = 4000,
@@ -71,6 +72,8 @@ constexpr std::string_view errorCodeToString(CatErrorCode code) noexcept {
       return "Missing required claim";
     case CatErrorCode::INVALID_CLAIM_VALUE:
       return "Invalid claim value";
+    case CatErrorCode::TOKEN_REVALIDATION_REQUIRED:
+      return "Token requires MOQT revalidation";
     case CatErrorCode::UNSUPPORTED_ALGORITHM:
       return "Unsupported algorithm";
     case CatErrorCode::CRYPTO_OPERATION_FAILED:
@@ -168,6 +171,25 @@ class TokenExpiredError : public CatError {
 class TokenNotYetValidError : public CatError {
  public:
   TokenNotYetValidError() : CatError(CatErrorCode::TOKEN_NOT_YET_VALID) {}
+};
+
+/**
+ * @brief The `moqt-reval` revalidation interval has elapsed.
+ *
+ * CAT-4-MOQT (draft-jennings-moq-cat-04) requires that when a token
+ * carries `moqt-reval`, the resource server (relay) MUST reject the
+ * token once (`iat` + `moqt-reval`) is in the past. The client is
+ * expected to obtain a fresh token from the issuer.
+ *
+ * This is distinct from `TokenExpiredError`: `exp` bounds the useful
+ * lifetime of the token, whereas `moqt-reval` bounds how long a MOQT
+ * relay may cache the authorization decision without re-checking with
+ * the issuer's policy.
+ */
+class TokenRevalidationRequiredError : public CatError {
+ public:
+  TokenRevalidationRequiredError()
+      : CatError(CatErrorCode::TOKEN_REVALIDATION_REQUIRED) {}
 };
 
 class InvalidAudienceError : public CatError {
