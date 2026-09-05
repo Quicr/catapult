@@ -171,6 +171,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 
     if(CATAPULT_ENABLE_JSON)
         list(APPEND CATAPULT_TEST_SOURCES tests/test_vectors.cpp)
+        list(APPEND CATAPULT_TEST_SOURCES tests/test_vectors_c4m.cpp)
     endif()
 
     # Tests exercise the legacy JWT-shaped token API for regression coverage.
