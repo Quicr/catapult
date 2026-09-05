@@ -16,8 +16,8 @@ static CatToken CreateSimpleToken() {
         .withAudience({"client1", "client2"})
         .withExpiration(exp)
         .withNotBefore(now)
-        .withCwtId("token-12345")
-        .withVersion("1.0.0")
+        .withCwtIdString("token-12345")
+        .withVersion(1)
         .withSubject("user@example.com")
         .withIssuedAt(now);
 }
@@ -26,36 +26,53 @@ static CatToken CreateComplexToken() {
     auto now = std::chrono::system_clock::now();
     auto exp = now + std::chrono::hours(1);
     auto iat = now - std::chrono::minutes(1);
-    
-    std::vector<std::string> uriPatterns = {
-        "https://api.example.com",
-        "https://secure.*",
-        "*/api/v1",
-        "^https://.*\\.test\\.com$",
-        "abcdef123456"
-    };
-    
+
+    CatUriMatchMap catu;
+    catu.components[1] = UriComponentMatch{UriMatchType::Prefix,
+                                           {'h', 't', 't', 'p', 's', ':', '/', '/'}};
+    catu.components[3] = UriComponentMatch{UriMatchType::Exact,
+                                           {'/', 'a', 'p', 'i', '/', 'v', '1'}};
+
+    CatProofOfPossession por;
+    por.probability = 1.0;
+    por.identifier = {0x0A, 0x0B, 0x0C, 0x0D};
+
+    CatConfirmation cnf;
+    cnf.jkt = {0xAA, 0xBB, 0xCC, 0xDD};
+
+    CatDpopSettings dpop;
+    dpop.critical = std::vector<int64_t>{1, 3};
+    dpop.proof_lifetime_seconds = 300;
+
+    CatRequestDirective iface_claim;
+    iface_claim.raw = {'i', 'f', 'a', 'c', 'e'};
+
+    CatRequestDirective req_claim;
+    req_claim.raw = {'r', 'e', 'q'};
+
+    CatNipEntry nip_a{.tag = 260, .value = {0xC0, 0xA8, 0x01, 0x64}};
+    CatNipEntry nip_b{.tag = 260, .value = {0x0A, 0x00, 0x00, 0x00}};
+
     return CatToken()
         .withIssuer("https://auth.example.com")
         .withAudience({"client1", "client2", "mobile-app"})
         .withExpiration(exp)
         .withNotBefore(now)
-        .withCwtId("token-12345")
-        .withVersion("1.2.0")
-        .withUsageLimit(500)
-        .withReplayProtection("nonce-67890")
-        .withProofOfPossession(true)
+        .withCwtIdString("token-12345")
+        .withVersion(1)
+        .withUriMatch(catu)
+        .withReplayProtection(CatReplayMode::RejectOnReplay)
+        .withProofOfPossession(por)
         .withGeoCoordinate(40.7128, -74.0060, 100.0)
-        .withGeohash("dr5regw")
-        .withUriPatterns(uriPatterns)
+        .withGeohash(GeohashClaimValue{std::string{"dr5regw"}})
         .withSubject("user@example.com")
         .withIssuedAt(iat)
-        .withInterfaceData("mobile-interface-v2")
-        .withConfirmation("jwk-thumbprint-xyz")
-        .withDpopClaim("dpop-proof-token")
-        .withInterfaceClaim("auth-interface")
-        .withRequestClaim("login-request-abc")
-        .withNetworkInterfaces({"192.168.1.100", "10.0.0.0/8"});
+        .withInterfaceData(CatIfData{std::string{"mobile-interface-v2"}})
+        .withConfirmation(cnf)
+        .withDpopClaim(dpop)
+        .withInterfaceClaim(iface_claim)
+        .withRequestClaim(req_claim)
+        .withNetworkInterfaces({nip_a, nip_b});
 }
 
 static void BM_CreateSimpleToken(benchmark::State& state) {
@@ -83,8 +100,7 @@ static void BM_TokenBuilderChaining(benchmark::State& state) {
             .withIssuer("https://auth.example.com")
             .withAudience({"client1"})
             .withExpiration(exp)
-            .withVersion("1.0")
-            .withUsageLimit(100)
+            .withVersion(1)
             .withSubject("user@example.com");
         benchmark::DoNotOptimize(token);
     }
@@ -163,7 +179,7 @@ static void BM_TokenCreationSize(benchmark::State& state) {
             .withIssuer("https://auth.example.com")
             .withAudience(audiences)
             .withExpiration(exp)
-            .withVersion("1.0");
+            .withVersion(1);
         benchmark::DoNotOptimize(token);
     }
 }

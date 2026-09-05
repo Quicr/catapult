@@ -107,8 +107,10 @@ AuthorizationResult validate_moqt_authorization(
     return result;
   }
 
-  // Step 4: Validate DPoP proof (also received as bytes from network)
-  if (!token.dpop.cnf.has_value()) {
+  // Step 4: Validate DPoP proof (also received as bytes from network).
+  // CTA-5007-B §4.6.9 binds the token to the client key via `cnf`; the hex
+  // thumbprint is carried in the `kid` field.
+  if (!token.dpop.cnf.has_value() || !token.dpop.cnf->kid.has_value()) {
     result.reason = "Token missing DPoP confirmation";
     return result;
   }
@@ -117,7 +119,7 @@ AuthorizationResult validate_moqt_authorization(
   std::string dpop_proof_str(dpop_proof_bytes.begin(), dpop_proof_bytes.end());
   DpopProof proof = DpopProof::deserialize(dpop_proof_str);
 
-  CatDpopSettings dpop_settings;
+  DpopValidationSettings dpop_settings;
   dpop_settings.set_window(std::chrono::seconds{300});
   DpopProofValidator validator(dpop_settings);
 
@@ -125,7 +127,7 @@ AuthorizationResult validate_moqt_authorization(
       relay_endpoint, requested_namespace, requested_track);
 
   if (!validator.validate_proof(proof, requested_action, expected_uri,
-                                *token.dpop.cnf)) {
+                                token.dpop.cnf->kid.value())) {
     result.reason = "DPoP proof validation failed";
     return result;
   }
@@ -155,13 +157,18 @@ int main() {
   auto client_algo = std::make_unique<Es256Algorithm>();
   DpopKeyPair client_keys(std::move(client_algo));
 
-  // Auth server creates the token
+  // Auth server creates the token. Bind the client's thumbprint (hex string)
+  // via `cnf.kid` per CTA-5007-B §4.6.9 / RFC 8747 §3.4.
   auto token = CatToken::builder()
                    .issuer("auth.moqt-cdn.example.com")
                    .audience("relay.moqt-cdn.example.com")
                    .expiresIn(std::chrono::hours{1})
-                   .dpopThumbprint(client_keys.get_public_key_thumbprint())
                    .build();
+  {
+    CatConfirmation cnf;
+    cnf.kid = client_keys.get_public_key_thumbprint();
+    token.dpop.cnf = std::move(cnf);
+  }
 
   MoqtClaims moqt;
   std::vector<int> publish_actions = {moqt_actions::PUBLISH};

@@ -186,7 +186,7 @@ TEST_CASE("DPoP proof validation throughput", "[performance][dpop]") {
     DpopKeyPair keys(std::move(algo));
     std::string thumbprint = keys.get_public_key_thumbprint();
 
-    CatDpopSettings settings;
+    DpopValidationSettings settings;
     settings.set_window(std::chrono::seconds{300});
     settings.set_jti_processing(false);  // Disable JTI replay check for throughput test
     DpopProofValidator validator(settings);
@@ -268,13 +268,17 @@ TEST_CASE("End-to-end relay validation throughput", "[performance][e2e]") {
     auto client_algo = std::make_unique<Es256Algorithm>();
     DpopKeyPair client_keys(std::move(client_algo));
 
-    // Create token
+    // Create token. Thumbprint is a hex string; bind via cnf.kid (§4.6.9).
     auto token = CatToken::builder()
         .issuer("auth.example.com")
         .audience("relay.example.com")
         .expiresIn(std::chrono::hours{1})
-        .dpopThumbprint(client_keys.get_public_key_thumbprint())
         .build();
+    {
+        CatConfirmation cnf;
+        cnf.kid = client_keys.get_public_key_thumbprint();
+        token.dpop.cnf = std::move(cnf);
+    }
 
     MoqtClaims moqt;
     std::vector<int> pub = {moqt_actions::PUBLISH};
@@ -284,7 +288,7 @@ TEST_CASE("End-to-end relay validation throughput", "[performance][e2e]") {
     Cwt cwt(ALG_ES256, token);
     std::string token_str = cwt.createCwtBase64(CwtMode::Signed, auth_signer);
 
-    CatDpopSettings dpop_settings;
+    DpopValidationSettings dpop_settings;
     dpop_settings.set_window(std::chrono::seconds{300});
     DpopProofValidator dpop_validator(dpop_settings);
     dpop_validator.set_cwt_verifier(&client_keys.get_algorithm());
@@ -310,8 +314,10 @@ TEST_CASE("End-to-end relay validation throughput", "[performance][e2e]") {
         if (validated.payload.extended.hasMoqtClaims()) {
             const auto* moqt_claims = validated.payload.extended.getMoqtClaimsReadOnly();
             if (moqt_claims->isAuthorized(moqt_actions::PUBLISH, "ns", "track")) {
-                if (dpop_validator.validate_proof(proofs[i], moqt_actions::PUBLISH, expected_uri,
-                        *validated.payload.dpop.cnf)) {
+                const auto& cnf = validated.payload.dpop.cnf;
+                if (cnf.has_value() && cnf->kid.has_value() &&
+                    dpop_validator.validate_proof(proofs[i], moqt_actions::PUBLISH, expected_uri,
+                            cnf->kid.value())) {
                     ++authorized;
                 }
             }
@@ -340,13 +346,17 @@ TEST_CASE("End-to-end relay validation with token cache", "[performance][e2e][ca
     auto client_algo = std::make_unique<Es256Algorithm>();
     DpopKeyPair client_keys(std::move(client_algo));
 
-    // Create token
+    // Create token. Thumbprint is a hex string; bind via cnf.kid (§4.6.9).
     auto token = CatToken::builder()
         .issuer("auth.example.com")
         .audience("relay.example.com")
         .expiresIn(std::chrono::hours{1})
-        .dpopThumbprint(client_keys.get_public_key_thumbprint())
         .build();
+    {
+        CatConfirmation cnf;
+        cnf.kid = client_keys.get_public_key_thumbprint();
+        token.dpop.cnf = std::move(cnf);
+    }
 
     MoqtClaims moqt;
     std::vector<int> pub = {moqt_actions::PUBLISH};
@@ -356,7 +366,7 @@ TEST_CASE("End-to-end relay validation with token cache", "[performance][e2e][ca
     Cwt cwt(ALG_ES256, token);
     std::string token_str = cwt.createCwtBase64(CwtMode::Signed, auth_signer);
 
-    CatDpopSettings dpop_settings;
+    DpopValidationSettings dpop_settings;
     dpop_settings.set_window(std::chrono::seconds{300});
     DpopProofValidator dpop_validator(dpop_settings);
     dpop_validator.set_cwt_verifier(&client_keys.get_algorithm());
@@ -373,7 +383,7 @@ TEST_CASE("End-to-end relay validation with token cache", "[performance][e2e][ca
     // Simulate token cache: validate once, reuse the result
     auto cached_token = Cwt::validateCwtBase64(token_str, auth_verifier);
     const auto* cached_moqt = cached_token.payload.extended.getMoqtClaimsReadOnly();
-    const std::string& cached_thumbprint = *cached_token.payload.dpop.cnf;
+    const std::string& cached_thumbprint = cached_token.payload.dpop.cnf->kid.value();
 
     size_t authorized = 0;
     std::string expected_uri = moqt_dpop::construct_moqt_uri("relay:4433", "ns", "track");

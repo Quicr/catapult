@@ -15,10 +15,10 @@ static auto createValidToken() {
         .withAudience({"https://my-service.com"})
         .withExpiration(exp)
         .withNotBefore(nbf)
-        .withCwtId("valid-token")
-        .withVersion("1.0")
+        .withCwtIdString("valid-token")
+        .withVersion(1)
         .withGeoCoordinate(40.7128, -74.0060, 50.0)
-        .withGeohash("dr5reg");
+        .withGeohash(GeohashClaimValue{std::string{"dr5reg"}});
         
 }
 
@@ -80,7 +80,7 @@ TEST_CASE("MultipleExpectedIssuers") {
         .withIssuer("https://unknown-issuer.com")
         .withAudience({"https://my-service.com"})
         .withExpiration(exp)
-        .withCwtId("different-issuer-token");
+        .withCwtIdString("different-issuer-token");
         
 
     // Should fail due to invalid issuer
@@ -108,7 +108,7 @@ TEST_CASE("MultipleExpectedAudiences") {
         .withIssuer("https://trusted-issuer.com")
         .withAudience({"https://other-service.com", "https://my-service.com"})
         .withExpiration(exp)
-        .withCwtId("multi-audience-token");
+        .withCwtIdString("multi-audience-token");
         
 
     // Should pass since one audience matches
@@ -123,7 +123,7 @@ TEST_CASE("ValidatorWithVeryStrictTolerance") {
         .withIssuer("https://trusted-issuer.com")
         .withAudience({"https://my-service.com"})
         .withExpiration(shortExp)
-        .withCwtId("short-lived-token");
+        .withCwtIdString("short-lived-token");
         
     
     CatTokenValidator strictValidator;
@@ -149,7 +149,7 @@ TEST_CASE("ValidatorWithPermissiveTolerance") {
         .withIssuer("https://trusted-issuer.com")
         .withAudience({"https://my-service.com"})
         .withExpiration(expiredTime)
-        .withCwtId("expired-token");
+        .withCwtIdString("expired-token");
         
 
     // Should pass with permissive tolerance
@@ -182,14 +182,14 @@ TEST_CASE("GeographicValidationEdgeCases") {
     REQUIRE_NOTHROW(validator.validate(tokenAtAntiMeridian));
     
     // Test valid geohash lengths
-    auto tokenWithShortGeohash = CatToken().withGeohash("u");
+    auto tokenWithShortGeohash = CatToken().withGeohash(GeohashClaimValue{std::string{"u"}});
     REQUIRE_NOTHROW(validator.validate(tokenWithShortGeohash));
     
-    auto tokenWithLongGeohash = CatToken().withGeohash("u4pruydqqvj"); // 12 characters
+    auto tokenWithLongGeohash = CatToken().withGeohash(GeohashClaimValue{std::string{"u4pruydqqvj"}}); // 12 characters
     REQUIRE_NOTHROW(validator.validate(tokenWithLongGeohash));
     
     // Test invalid geohash length
-    auto tokenWithTooLongGeohash = CatToken().withGeohash("u4pruydqqvjkl"); // 13 characters
+    auto tokenWithTooLongGeohash = CatToken().withGeohash(GeohashClaimValue{std::string{"u4pruydqqvjkl"}}); // 13 characters
     REQUIRE_THROWS_AS(validator.validate(tokenWithTooLongGeohash), GeographicValidationError);
 }
 
@@ -206,10 +206,10 @@ TEST_CASE("ValidatorPositiveTests - Basic Functionality") {
             .withAudience({"https://test-service.com"})
             .withExpiration(exp)
             .withNotBefore(nbf)
-            .withCwtId("test-token-123")
-            .withVersion("2.0")
+            .withCwtIdString("test-token-123")
+            .withVersion(2)
             .withGeoCoordinate(37.7749, -122.4194, 100.0)
-            .withGeohash("9q8yy");
+            .withGeohash(GeohashClaimValue{std::string{"9q8yy"}});
             
             
         REQUIRE_NOTHROW(validator.validate(token));
@@ -220,7 +220,7 @@ TEST_CASE("ValidatorPositiveTests - Basic Functionality") {
             .withIssuer("https://minimal-issuer.com")
             .withAudience({"https://minimal-service.com"})
             .withExpiration(exp)
-            .withCwtId("minimal-token");
+            .withCwtIdString("minimal-token");
             
             
         REQUIRE_NOTHROW(validator.validate(minimalToken));
@@ -231,7 +231,7 @@ TEST_CASE("ValidatorPositiveTests - Basic Functionality") {
             .withIssuer("https://multi-issuer.com")
             .withAudience({"https://service1.com", "https://service2.com", "https://service3.com"})
             .withExpiration(exp)
-            .withCwtId("multi-aud-token");
+            .withCwtIdString("multi-aud-token");
             
             
         REQUIRE_NOTHROW(validator.validate(multiAudToken));
@@ -244,7 +244,7 @@ TEST_CASE("ValidatorPositiveTests - Basic Functionality") {
             .withAudience({"https://future-service.com"})
             .withExpiration(exp)
             .withNotBefore(futureNbf)
-            .withCwtId("future-token");
+            .withCwtIdString("future-token");
             
             
         validator.withClockSkewTolerance(300); // 5 minutes tolerance
@@ -264,7 +264,7 @@ TEST_CASE("ValidatorPositiveTests - Geographic Claims") {
             .withAudience({"https://geo-service.com"})
             .withExpiration(exp)
             .withGeoCoordinate(35.6762, 139.6503, 10.0)
-            .withCwtId("tokyo-token");
+            .withCwtIdString("tokyo-token");
             
         REQUIRE_NOTHROW(validator.validate(tokyoToken));
         
@@ -274,7 +274,7 @@ TEST_CASE("ValidatorPositiveTests - Geographic Claims") {
             .withAudience({"https://geo-service.com"})
             .withExpiration(exp)
             .withGeoCoordinate(51.5074, -0.1278, 25.0)
-            .withCwtId("london-token");
+            .withCwtIdString("london-token");
             
         REQUIRE_NOTHROW(validator.validate(londonToken));
         
@@ -284,7 +284,7 @@ TEST_CASE("ValidatorPositiveTests - Geographic Claims") {
             .withAudience({"https://geo-service.com"})
             .withExpiration(exp)
             .withGeoCoordinate(-33.8688, 151.2093, 50.0)
-            .withCwtId("sydney-token");
+            .withCwtIdString("sydney-token");
             
         REQUIRE_NOTHROW(validator.validate(sydneyToken));
     }
@@ -297,8 +297,8 @@ TEST_CASE("ValidatorPositiveTests - Geographic Claims") {
                 .withIssuer("https://hash-issuer.com")
                 .withAudience({"https://hash-service.com"})
                 .withExpiration(exp)
-                .withGeohash(hash)
-                .withCwtId("hash-token-" + hash);
+                .withGeohash(GeohashClaimValue{hash})
+                .withCwtIdString(std::string("hash-token-") + hash);
                 
             REQUIRE_NOTHROW(validator.validate(token));
         }
@@ -310,8 +310,8 @@ TEST_CASE("ValidatorPositiveTests - Geographic Claims") {
             .withAudience({"https://geo-combo-service.com"})
             .withExpiration(exp)
             .withGeoCoordinate(40.7128, -74.0060, 30.0)
-            .withGeohash("dr5reg")
-            .withCwtId("geo-combo-token");
+            .withGeohash(GeohashClaimValue{std::string{"dr5reg"}})
+            .withCwtIdString("geo-combo-token");
             
         REQUIRE_NOTHROW(validator.validate(geoToken));
     }
@@ -326,7 +326,7 @@ TEST_CASE("ValidatorPositiveTests - Flexible Configuration") {
             .withIssuer("https://any-issuer.com")
             .withAudience({"https://test-service.com"})
             .withExpiration(exp)
-            .withCwtId("wildcard-issuer-token");
+            .withCwtIdString("wildcard-issuer-token");
             
             
         CatTokenValidator permissiveValidator;
@@ -340,7 +340,7 @@ TEST_CASE("ValidatorPositiveTests - Flexible Configuration") {
             .withIssuer("https://test-issuer.com")
             .withAudience({"https://any-service.com"})
             .withExpiration(exp)
-            .withCwtId("wildcard-audience-token");
+            .withCwtIdString("wildcard-audience-token");
             
             
         CatTokenValidator permissiveValidator;
@@ -354,7 +354,7 @@ TEST_CASE("ValidatorPositiveTests - Flexible Configuration") {
             .withIssuer("https://expired-issuer.com")
             .withAudience({"https://expired-service.com"})
             .withExpiration(now - std::chrono::minutes(30)) // Expired 30 minutes ago
-            .withCwtId("expired-but-tolerated-token");
+            .withCwtIdString("expired-but-tolerated-token");
             
             
         CatTokenValidator tolerantValidator;
@@ -369,7 +369,7 @@ TEST_CASE("ValidatorPositiveTests - Flexible Configuration") {
             .withIssuer("https://complex-issuer-3.com")
             .withAudience({"https://complex-service-2.com", "https://complex-service-5.com"})
             .withExpiration(exp)
-            .withCwtId("complex-lists-token");
+            .withCwtIdString("complex-lists-token");
             
             
         CatTokenValidator complexValidator;
@@ -400,7 +400,7 @@ TEST_CASE("ValidatorNegativeTests - Invalid Issuers and Audiences") {
             .withIssuer("https://untrusted-issuer.com")
             .withAudience({"https://test-service.com"})
             .withExpiration(exp)
-            .withCwtId("invalid-issuer-token");
+            .withCwtIdString("invalid-issuer-token");
             
             
         CatTokenValidator validator;
@@ -415,7 +415,7 @@ TEST_CASE("ValidatorNegativeTests - Invalid Issuers and Audiences") {
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"https://untrusted-service.com"})
             .withExpiration(exp)
-            .withCwtId("invalid-audience-token");
+            .withCwtIdString("invalid-audience-token");
             
             
         CatTokenValidator validator;
@@ -430,7 +430,7 @@ TEST_CASE("ValidatorNegativeTests - Invalid Issuers and Audiences") {
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"https://service1.com", "https://service2.com"})
             .withExpiration(exp)
-            .withCwtId("no-matching-audience-token");
+            .withCwtIdString("no-matching-audience-token");
             
             
         CatTokenValidator validator;
@@ -445,7 +445,7 @@ TEST_CASE("ValidatorNegativeTests - Invalid Issuers and Audiences") {
             .withIssuer("")
             .withAudience({"https://test-service.com"})
             .withExpiration(exp)
-            .withCwtId("empty-issuer-token");
+            .withCwtIdString("empty-issuer-token");
             
             
         CatTokenValidator validator;
@@ -459,7 +459,7 @@ TEST_CASE("ValidatorNegativeTests - Invalid Issuers and Audiences") {
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"", "https://valid-service.com"})
             .withExpiration(exp)
-            .withCwtId("empty-audience-token");
+            .withCwtIdString("empty-audience-token");
             
             
         CatTokenValidator validator;
@@ -474,7 +474,7 @@ TEST_CASE("ValidatorNegativeTests - Invalid Issuers and Audiences") {
             .withIssuer("https://trusted-issuer.com")
             .withAudience({""})
             .withExpiration(exp)
-            .withCwtId("only-empty-audience-token");
+            .withCwtIdString("only-empty-audience-token");
             
             
         validator.withExpectedAudiences({"https://valid-service.com"});
@@ -490,7 +490,7 @@ TEST_CASE("ValidatorNegativeTests - Time-based Validation") {
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"https://trusted-service.com"})
             .withExpiration(now - std::chrono::hours(2)) // Expired 2 hours ago
-            .withCwtId("expired-token");
+            .withCwtIdString("expired-token");
             
             
         CatTokenValidator strictValidator;
@@ -507,7 +507,7 @@ TEST_CASE("ValidatorNegativeTests - Time-based Validation") {
             .withAudience({"https://trusted-service.com"})
             .withExpiration(now + std::chrono::hours(2))
             .withNotBefore(now + std::chrono::hours(1)) // Valid 1 hour from now
-            .withCwtId("future-token");
+            .withCwtIdString("future-token");
             
             
         CatTokenValidator strictValidator;
@@ -527,7 +527,7 @@ TEST_CASE("ValidatorNegativeTests - Time-based Validation") {
             .withAudience({"https://trusted-service.com"})
             .withExpiration(now + std::chrono::minutes(30))
             .withNotBefore(now + std::chrono::hours(1)) // NBF after EXP
-            .withCwtId("invalid-time-token");
+            .withCwtIdString("invalid-time-token");
 
         CatTokenValidator validator;
         validator.withExpectedIssuers({"https://trusted-issuer.com"})
@@ -548,7 +548,7 @@ TEST_CASE("ValidatorNegativeTests - Geographic Validation") {
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
             .withGeoCoordinate(95.0, 0.0, 10.0) // Latitude > 90
-            .withCwtId("invalid-lat-token");
+            .withCwtIdString("invalid-lat-token");
             
             
         CatTokenValidator validator;
@@ -559,7 +559,7 @@ TEST_CASE("ValidatorNegativeTests - Geographic Validation") {
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
             .withGeoCoordinate(-95.0, 0.0, 10.0) // Latitude < -90
-            .withCwtId("invalid-lat-token-2");
+            .withCwtIdString("invalid-lat-token-2");
             
             
         REQUIRE_THROWS_AS(validator.validate(invalidLatToken2), GeographicValidationError);
@@ -572,7 +572,7 @@ TEST_CASE("ValidatorNegativeTests - Geographic Validation") {
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
             .withGeoCoordinate(0.0, 185.0, 10.0) // Longitude > 180
-            .withCwtId("invalid-lon-token");
+            .withCwtIdString("invalid-lon-token");
             
             
         CatTokenValidator validator;
@@ -583,7 +583,7 @@ TEST_CASE("ValidatorNegativeTests - Geographic Validation") {
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
             .withGeoCoordinate(0.0, -185.0, 10.0) // Longitude < -180
-            .withCwtId("invalid-lon-token-2");
+            .withCwtIdString("invalid-lon-token-2");
             
             
         REQUIRE_THROWS_AS(validator.validate(invalidLonToken2), GeographicValidationError);
@@ -597,7 +597,7 @@ TEST_CASE("ValidatorNegativeTests - Geographic Validation") {
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
             .withGeoCoordinate(0.0, 0.0, -20000.0) // Extreme negative altitude
-            .withCwtId("negative-alt-token");
+            .withCwtIdString("negative-alt-token");
             
             
         CatTokenValidator validator;
@@ -611,8 +611,8 @@ TEST_CASE("ValidatorNegativeTests - Geographic Validation") {
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
-            .withGeohash("")
-            .withCwtId("empty-geohash-token");
+            .withGeohash(GeohashClaimValue{std::string{""}})
+            .withCwtIdString("empty-geohash-token");
             
             
         CatTokenValidator validator;
@@ -623,8 +623,8 @@ TEST_CASE("ValidatorNegativeTests - Geographic Validation") {
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
-            .withGeohash("abcdefghijklm") // 13 characters
-            .withCwtId("too-long-geohash-token");
+            .withGeohash(GeohashClaimValue{std::string{"abcdefghijklm"}}) // 13 characters
+            .withCwtIdString("too-long-geohash-token");
             
             
         REQUIRE_THROWS_AS(validator.validate(tooLongGeohashToken), GeographicValidationError);
@@ -634,8 +634,8 @@ TEST_CASE("ValidatorNegativeTests - Geographic Validation") {
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
-            .withGeohash("invalid@hash") // Invalid chars
-            .withCwtId("invalid-chars-token");
+            .withGeohash(GeohashClaimValue{std::string{"invalid@hash"}}) // Invalid chars
+            .withCwtIdString("invalid-chars-token");
 
         // This now throws because validator checks character set
         REQUIRE_THROWS_AS(validator.validate(invalidCharSetToken), GeographicValidationError);
@@ -650,7 +650,7 @@ TEST_CASE("ValidatorNegativeTests - Missing Claims") {
         auto token = CatToken()
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
-            .withCwtId("no-issuer-token");
+            .withCwtIdString("no-issuer-token");
             
             
         CatTokenValidator validator;
@@ -663,7 +663,7 @@ TEST_CASE("ValidatorNegativeTests - Missing Claims") {
         auto token = CatToken()
             .withIssuer("https://trusted-issuer.com")
             .withExpiration(exp)
-            .withCwtId("no-audience-token");
+            .withCwtIdString("no-audience-token");
             
             
         CatTokenValidator validator;
@@ -676,7 +676,7 @@ TEST_CASE("ValidatorNegativeTests - Missing Claims") {
         auto token = CatToken()
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"https://trusted-service.com"})
-            .withCwtId("no-exp-token");
+            .withCwtIdString("no-exp-token");
             
             
         CatTokenValidator validator;
@@ -711,7 +711,7 @@ TEST_CASE("ValidatorNegativeTests - Edge Cases and Error Conditions") {
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
-            .withCwtId("large-skew-token");
+            .withCwtIdString("large-skew-token");
             
             
         CatTokenValidator validator;
@@ -735,7 +735,7 @@ TEST_CASE("ValidatorNegativeTests - Edge Cases and Error Conditions") {
                 .withIssuer(url)
                 .withAudience({"https://trusted-service.com"})
                 .withExpiration(exp)
-                .withCwtId("malformed-issuer-token");
+                .withCwtIdString("malformed-issuer-token");
                 
                 
             CatTokenValidator validator;
@@ -752,8 +752,8 @@ TEST_CASE("ValidatorNegativeTests - Edge Cases and Error Conditions") {
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
             .withGeoCoordinate(40.7128, -74.0060, 10.0) // NYC coordinates
-            .withGeohash("9q8yy") // San Francisco geohash
-            .withCwtId("conflicting-geo-token");
+            .withGeohash(GeohashClaimValue{std::string{"9q8yy"}}) // San Francisco geohash
+            .withCwtIdString("conflicting-geo-token");
             
             
         CatTokenValidator validator;

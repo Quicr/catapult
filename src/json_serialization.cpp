@@ -1,6 +1,13 @@
 /**
  * @file json_serialization.cpp
  * @brief JSON serialization implementation for CAT tokens
+ *
+ * JSON is a debugging/interop surface only — the wire form is CBOR per
+ * CTA-5007-B. Byte-string typed fields (cti, catalpn entries, jkt, catnip
+ * value, cattpk, catpor identifier, catif/catr raw bytes, UriComponentMatch
+ * value, catdpop opaque fields) are encoded as base64url strings to preserve
+ * type information across the JSON boundary. Typed enums serialise as their
+ * numeric value so JSON round-trips are unambiguous.
  */
 
 #include "catapult/json_serialization.hpp"
@@ -10,6 +17,36 @@
 
 namespace catapult {
 namespace json_serialization {
+
+namespace {
+
+std::string bytes_to_b64(const std::vector<uint8_t>& bytes) {
+  return base64UrlEncode(bytes);
+}
+
+std::vector<uint8_t> b64_to_bytes(const std::string& s) {
+  return base64UrlDecode(s);
+}
+
+nlohmann::json component_match_to_json(const UriComponentMatch& m) {
+  nlohmann::json out = nlohmann::json::object();
+  out["type"] = static_cast<uint32_t>(m.type);
+  out["value_b64"] = bytes_to_b64(m.value);
+  return out;
+}
+
+UriComponentMatch component_match_from_json(const nlohmann::json& j) {
+  UriComponentMatch m;
+  if (j.contains("type") && j["type"].is_number_unsigned()) {
+    m.type = static_cast<UriMatchType>(j["type"].get<uint32_t>());
+  }
+  if (j.contains("value_b64") && j["value_b64"].is_string()) {
+    m.value = b64_to_bytes(j["value_b64"].get<std::string>());
+  }
+  return m;
+}
+
+}  // namespace
 
 void to_json(nlohmann::json& j, const CoreClaims& claims) {
   j = nlohmann::json::object();
@@ -27,7 +64,9 @@ void to_json(nlohmann::json& j, const CoreClaims& claims) {
     j["nbf"] = claims.nbf.value();
   }
   if (claims.cti.has_value()) {
-    j["cti"] = claims.cti.value();
+    // cti is a CBOR byte string (RFC 8392 §3.1.7). Emit base64url so JSON
+    // round-trips preserve the byte-string typing.
+    j["cti_b64"] = bytes_to_b64(claims.cti.value());
   }
 }
 
@@ -35,9 +74,99 @@ void to_json(nlohmann::json& j, const GeoCoordinate& coord) {
   j = nlohmann::json::object();
   j["lat"] = coord.lat;
   j["lon"] = coord.lon;
-  if (coord.accuracy.has_value()) {
-    j["accuracy"] = coord.accuracy.value();
+  if (coord.radius.has_value()) {
+    j["radius"] = coord.radius.value();
   }
+}
+
+static void to_json(nlohmann::json& j, const CatProofOfPossession& por) {
+  j = nlohmann::json::object();
+  j["probability"] = por.probability;
+  j["identifier_b64"] = bytes_to_b64(por.identifier);
+  if (por.expiry.has_value()) {
+    j["expiry"] = por.expiry.value();
+  }
+}
+
+static void to_json(nlohmann::json& j, const CatNipEntry& entry) {
+  j = nlohmann::json::object();
+  j["tag"] = entry.tag;
+  j["value_b64"] = bytes_to_b64(entry.value);
+}
+
+static void to_json(nlohmann::json& j, const GeoAltitude& alt) {
+  j = nlohmann::json::object();
+  j["altitude"] = alt.altitude;
+  if (alt.deviation.has_value()) {
+    j["deviation"] = alt.deviation.value();
+  }
+}
+
+static void to_json(nlohmann::json& j, const CatUriMatchMap& map) {
+  j = nlohmann::json::object();
+  for (const auto& [component, match] : map.components) {
+    j[std::to_string(component)] = component_match_to_json(match);
+  }
+}
+
+static void to_json(nlohmann::json& j, const CatHostHeaderMatchList& list) {
+  j = nlohmann::json::array();
+  for (const auto& entry : list.entries) {
+    nlohmann::json e = nlohmann::json::object();
+    e["name"] = entry.name;
+    e["match"] = component_match_to_json(entry.match);
+    j.push_back(std::move(e));
+  }
+}
+
+static void to_json(nlohmann::json& j, const GeohashClaimValue& gh) {
+  if (gh.isString()) {
+    j = gh.asString();
+  } else {
+    j = gh.asArray();
+  }
+}
+
+static void to_json(nlohmann::json& j, const CatIfData& d) {
+  if (d.isString()) {
+    j = d.asString();
+  } else {
+    j = d.asArray();
+  }
+}
+
+static void to_json(nlohmann::json& j, const CatConfirmation& cnf) {
+  j = nlohmann::json::object();
+  if (cnf.jkt.has_value()) {
+    j["jkt_b64"] = bytes_to_b64(cnf.jkt.value());
+  }
+  if (cnf.kid.has_value()) {
+    j["kid"] = cnf.kid.value();
+  }
+  if (cnf.raw.has_value()) {
+    j["raw_b64"] = bytes_to_b64(cnf.raw.value());
+  }
+}
+
+static void to_json(nlohmann::json& j, const CatDpopSettings& dp) {
+  j = nlohmann::json::object();
+  if (dp.critical.has_value()) {
+    j["critical"] = dp.critical.value();
+  }
+  if (dp.proof_lifetime_seconds.has_value()) {
+    j["proof_lifetime_seconds"] = dp.proof_lifetime_seconds.value();
+  }
+  if (dp.jti_challenge.has_value()) {
+    j["jti_challenge_b64"] = bytes_to_b64(dp.jti_challenge.value());
+  }
+  if (dp.raw.has_value()) {
+    j["raw_b64"] = bytes_to_b64(dp.raw.value());
+  }
+}
+
+static void to_json(nlohmann::json& j, const CatRequestDirective& d) {
+  j = nlohmann::json::object();
+  j["raw_b64"] = bytes_to_b64(d.raw);
 }
 
 void to_json(nlohmann::json& j, const CatClaims& claims) {
@@ -47,40 +176,50 @@ void to_json(nlohmann::json& j, const CatClaims& claims) {
     j["catv"] = claims.catv.value();
   }
   if (claims.catu.has_value()) {
-    j["catu"] = claims.catu.value();
+    to_json(j["catu"], claims.catu.value());
   }
   if (claims.catreplay.has_value()) {
-    j["catreplay"] = claims.catreplay.value();
+    j["catreplay"] = static_cast<uint32_t>(claims.catreplay.value());
   }
   if (claims.catpor.has_value()) {
-    j["catpor"] = claims.catpor.value();
+    to_json(j["catpor"], claims.catpor.value());
   }
   if (claims.catgeocoord.has_value()) {
     to_json(j["catgeocoord"], claims.catgeocoord.value());
   }
   if (claims.geohash.has_value()) {
-    j["geohash"] = claims.geohash.value();
+    to_json(j["geohash"], claims.geohash.value());
   }
   if (claims.catgeoalt.has_value()) {
-    j["catgeoalt"] = claims.catgeoalt.value();
+    to_json(j["catgeoalt"], claims.catgeoalt.value());
   }
   if (claims.catnip.has_value()) {
-    j["catnip"] = claims.catnip.value();
+    auto arr = nlohmann::json::array();
+    for (const auto& entry : claims.catnip.value()) {
+      nlohmann::json e;
+      to_json(e, entry);
+      arr.push_back(std::move(e));
+    }
+    j["catnip"] = std::move(arr);
   }
   if (claims.catm.has_value()) {
     j["catm"] = claims.catm.value();
   }
   if (claims.catalpn.has_value()) {
-    j["catalpn"] = claims.catalpn.value();
+    auto arr = nlohmann::json::array();
+    for (const auto& proto : claims.catalpn.value()) {
+      arr.push_back(bytes_to_b64(proto));
+    }
+    j["catalpn"] = std::move(arr);
   }
   if (claims.cath.has_value()) {
-    j["cath"] = claims.cath.value();
+    to_json(j["cath"], claims.cath.value());
   }
   if (claims.catgeoiso3166.has_value()) {
     j["catgeoiso3166"] = claims.catgeoiso3166.value();
   }
   if (claims.cattpk.has_value()) {
-    j["cattpk"] = claims.cattpk.value();
+    j["cattpk_b64"] = bytes_to_b64(claims.cattpk.value());
   }
 }
 
@@ -94,7 +233,7 @@ void to_json(nlohmann::json& j, const InformationalClaims& claims) {
     j["iat"] = claims.iat.value();
   }
   if (claims.catifdata.has_value()) {
-    j["catifdata"] = claims.catifdata.value();
+    to_json(j["catifdata"], claims.catifdata.value());
   }
 }
 
@@ -102,10 +241,10 @@ void to_json(nlohmann::json& j, const DpopClaims& claims) {
   j = nlohmann::json::object();
 
   if (claims.cnf.has_value()) {
-    j["cnf"] = claims.cnf.value();
+    to_json(j["cnf"], claims.cnf.value());
   }
   if (claims.catdpop.has_value()) {
-    j["catdpop"] = claims.catdpop.value();
+    to_json(j["catdpop"], claims.catdpop.value());
   }
 }
 
@@ -113,10 +252,10 @@ void to_json(nlohmann::json& j, const RequestClaims& claims) {
   j = nlohmann::json::object();
 
   if (claims.catif.has_value()) {
-    j["catif"] = claims.catif.value();
+    to_json(j["catif"], claims.catif.value());
   }
   if (claims.catr.has_value()) {
-    j["catr"] = claims.catr.value();
+    to_json(j["catr"], claims.catr.value());
   }
 }
 
@@ -342,77 +481,143 @@ void from_json(const nlohmann::json& j, CatToken& token) {
   if (j.contains("core") && j["core"].is_object()) {
     const auto& core_json = j["core"];
     if (core_json.contains("iss") && core_json["iss"].is_string()) {
-      token.core.iss = core_json["iss"];
+      token.core.iss = core_json["iss"].get<std::string>();
     }
     if (core_json.contains("aud") && core_json["aud"].is_array()) {
-      token.core.aud = core_json["aud"];
+      token.core.aud = core_json["aud"].get<std::vector<std::string>>();
     }
     if (core_json.contains("exp") && core_json["exp"].is_number()) {
-      token.core.exp = core_json["exp"];
+      token.core.exp = core_json["exp"].get<int64_t>();
     }
     if (core_json.contains("nbf") && core_json["nbf"].is_number()) {
-      token.core.nbf = core_json["nbf"];
+      token.core.nbf = core_json["nbf"].get<int64_t>();
     }
-    if (core_json.contains("cti") && core_json["cti"].is_string()) {
-      token.core.cti = core_json["cti"];
+    if (core_json.contains("cti_b64") && core_json["cti_b64"].is_string()) {
+      token.core.cti = b64_to_bytes(core_json["cti_b64"].get<std::string>());
     }
   }
 
   // Parse CAT claims
   if (j.contains("cat") && j["cat"].is_object()) {
     const auto& cat_json = j["cat"];
-    if (cat_json.contains("catv") && cat_json["catv"].is_string()) {
-      token.cat.catv = cat_json["catv"];
+    if (cat_json.contains("catv") && cat_json["catv"].is_number_unsigned()) {
+      token.cat.catv = cat_json["catv"].get<uint32_t>();
     }
-    if (cat_json.contains("catu") && cat_json["catu"].is_number()) {
-      token.cat.catu = cat_json["catu"];
+    if (cat_json.contains("catu") && cat_json["catu"].is_object()) {
+      CatUriMatchMap m;
+      for (auto it = cat_json["catu"].begin(); it != cat_json["catu"].end();
+           ++it) {
+        try {
+          int64_t component = std::stoll(it.key());
+          m.components[component] = component_match_from_json(it.value());
+        } catch (const std::exception&) {
+          // Skip malformed entries
+        }
+      }
+      token.cat.catu = std::move(m);
     }
-    if (cat_json.contains("catreplay") && cat_json["catreplay"].is_string()) {
-      token.cat.catreplay = cat_json["catreplay"];
+    if (cat_json.contains("catreplay") &&
+        cat_json["catreplay"].is_number_unsigned()) {
+      token.cat.catreplay =
+          static_cast<CatReplayMode>(cat_json["catreplay"].get<uint32_t>());
     }
-    if (cat_json.contains("catpor") && cat_json["catpor"].is_boolean()) {
-      token.cat.catpor = cat_json["catpor"];
+    if (cat_json.contains("catpor") && cat_json["catpor"].is_object()) {
+      CatProofOfPossession por;
+      const auto& p = cat_json["catpor"];
+      if (p.contains("probability") && p["probability"].is_number()) {
+        por.probability = p["probability"].get<double>();
+      }
+      if (p.contains("identifier_b64") && p["identifier_b64"].is_string()) {
+        por.identifier = b64_to_bytes(p["identifier_b64"].get<std::string>());
+      }
+      if (p.contains("expiry") && p["expiry"].is_number()) {
+        por.expiry = p["expiry"].get<int64_t>();
+      }
+      token.cat.catpor = std::move(por);
     }
     if (cat_json.contains("catgeocoord") &&
         cat_json["catgeocoord"].is_object()) {
       const auto& coord_json = cat_json["catgeocoord"];
       if (coord_json.contains("lat") && coord_json.contains("lon")) {
-        double lat = coord_json["lat"];
-        double lon = coord_json["lon"];
-        std::optional<double> accuracy;
-        if (coord_json.contains("accuracy")) {
-          accuracy = coord_json["accuracy"];
+        double lat = coord_json["lat"].get<double>();
+        double lon = coord_json["lon"].get<double>();
+        std::optional<double> radius;
+        if (coord_json.contains("radius") && coord_json["radius"].is_number()) {
+          radius = coord_json["radius"].get<double>();
         }
-        auto coord = GeoCoordinate::createSafe(lat, lon, accuracy);
+        auto coord = GeoCoordinate::createSafe(lat, lon, radius);
         if (coord.has_value()) {
           token.cat.catgeocoord = coord.value();
         }
       }
     }
-    if (cat_json.contains("geohash") && cat_json["geohash"].is_string()) {
-      token.cat.geohash = cat_json["geohash"];
+    if (cat_json.contains("geohash")) {
+      const auto& g = cat_json["geohash"];
+      if (g.is_string()) {
+        token.cat.geohash = GeohashClaimValue(g.get<std::string>());
+      } else if (g.is_array()) {
+        token.cat.geohash =
+            GeohashClaimValue(g.get<std::vector<std::string>>());
+      }
     }
-    if (cat_json.contains("catgeoalt") && cat_json["catgeoalt"].is_number()) {
-      token.cat.catgeoalt = cat_json["catgeoalt"];
+    if (cat_json.contains("catgeoalt") && cat_json["catgeoalt"].is_object()) {
+      const auto& a = cat_json["catgeoalt"];
+      GeoAltitude alt;
+      if (a.contains("altitude") && a["altitude"].is_number()) {
+        alt.altitude = a["altitude"].get<int32_t>();
+      }
+      if (a.contains("deviation") && a["deviation"].is_number()) {
+        alt.deviation = a["deviation"].get<int32_t>();
+      }
+      token.cat.catgeoalt = alt;
     }
     if (cat_json.contains("catnip") && cat_json["catnip"].is_array()) {
-      token.cat.catnip = cat_json["catnip"];
+      std::vector<CatNipEntry> entries;
+      for (const auto& e : cat_json["catnip"]) {
+        CatNipEntry entry;
+        if (e.contains("tag") && e["tag"].is_number_unsigned()) {
+          entry.tag = e["tag"].get<uint64_t>();
+        }
+        if (e.contains("value_b64") && e["value_b64"].is_string()) {
+          entry.value = b64_to_bytes(e["value_b64"].get<std::string>());
+        }
+        entries.push_back(std::move(entry));
+      }
+      token.cat.catnip = std::move(entries);
     }
-    if (cat_json.contains("catm") && cat_json["catm"].is_string()) {
-      token.cat.catm = cat_json["catm"];
+    if (cat_json.contains("catm") && cat_json["catm"].is_array()) {
+      token.cat.catm = cat_json["catm"].get<std::vector<std::string>>();
     }
     if (cat_json.contains("catalpn") && cat_json["catalpn"].is_array()) {
-      token.cat.catalpn = cat_json["catalpn"];
+      std::vector<std::vector<uint8_t>> protocols;
+      for (const auto& p : cat_json["catalpn"]) {
+        if (p.is_string()) {
+          protocols.push_back(b64_to_bytes(p.get<std::string>()));
+        }
+      }
+      token.cat.catalpn = std::move(protocols);
     }
     if (cat_json.contains("cath") && cat_json["cath"].is_array()) {
-      token.cat.cath = cat_json["cath"];
+      CatHostHeaderMatchList list;
+      for (const auto& e : cat_json["cath"]) {
+        CatHeaderMatch entry;
+        if (e.contains("name") && e["name"].is_string()) {
+          entry.name = e["name"].get<std::string>();
+        }
+        if (e.contains("match") && e["match"].is_object()) {
+          entry.match = component_match_from_json(e["match"]);
+        }
+        list.entries.push_back(std::move(entry));
+      }
+      token.cat.cath = std::move(list);
     }
     if (cat_json.contains("catgeoiso3166") &&
         cat_json["catgeoiso3166"].is_array()) {
-      token.cat.catgeoiso3166 = cat_json["catgeoiso3166"];
+      token.cat.catgeoiso3166 =
+          cat_json["catgeoiso3166"].get<std::vector<std::string>>();
     }
-    if (cat_json.contains("cattpk") && cat_json["cattpk"].is_string()) {
-      token.cat.cattpk = cat_json["cattpk"];
+    if (cat_json.contains("cattpk_b64") && cat_json["cattpk_b64"].is_string()) {
+      token.cat.cattpk = b64_to_bytes(cat_json["cattpk_b64"].get<std::string>());
     }
   }
 
@@ -420,35 +625,80 @@ void from_json(const nlohmann::json& j, CatToken& token) {
   if (j.contains("informational") && j["informational"].is_object()) {
     const auto& info_json = j["informational"];
     if (info_json.contains("sub") && info_json["sub"].is_string()) {
-      token.informational.sub = info_json["sub"];
+      token.informational.sub = info_json["sub"].get<std::string>();
     }
     if (info_json.contains("iat") && info_json["iat"].is_number()) {
-      token.informational.iat = info_json["iat"];
+      token.informational.iat = info_json["iat"].get<int64_t>();
     }
-    if (info_json.contains("catifdata") && info_json["catifdata"].is_string()) {
-      token.informational.catifdata = info_json["catifdata"];
+    if (info_json.contains("catifdata")) {
+      const auto& d = info_json["catifdata"];
+      if (d.is_string()) {
+        token.informational.catifdata = CatIfData(d.get<std::string>());
+      } else if (d.is_array()) {
+        token.informational.catifdata =
+            CatIfData(d.get<std::vector<std::string>>());
+      }
     }
   }
 
   // Parse DPoP claims
   if (j.contains("dpop") && j["dpop"].is_object()) {
     const auto& dpop_json = j["dpop"];
-    if (dpop_json.contains("cnf") && dpop_json["cnf"].is_string()) {
-      token.dpop.cnf = dpop_json["cnf"];
+    if (dpop_json.contains("cnf") && dpop_json["cnf"].is_object()) {
+      const auto& c = dpop_json["cnf"];
+      CatConfirmation cnf;
+      if (c.contains("jkt_b64") && c["jkt_b64"].is_string()) {
+        cnf.jkt = b64_to_bytes(c["jkt_b64"].get<std::string>());
+      }
+      if (c.contains("kid") && c["kid"].is_string()) {
+        cnf.kid = c["kid"].get<std::string>();
+      }
+      if (c.contains("raw_b64") && c["raw_b64"].is_string()) {
+        cnf.raw = b64_to_bytes(c["raw_b64"].get<std::string>());
+      }
+      token.dpop.cnf = std::move(cnf);
     }
-    if (dpop_json.contains("catdpop") && dpop_json["catdpop"].is_string()) {
-      token.dpop.catdpop = dpop_json["catdpop"];
+    if (dpop_json.contains("catdpop") && dpop_json["catdpop"].is_object()) {
+      const auto& d = dpop_json["catdpop"];
+      CatDpopSettings dp;
+      if (d.contains("critical") && d["critical"].is_array()) {
+        dp.critical = d["critical"].get<std::vector<int64_t>>();
+      }
+      if (d.contains("proof_lifetime_seconds") &&
+          d["proof_lifetime_seconds"].is_number()) {
+        dp.proof_lifetime_seconds =
+            d["proof_lifetime_seconds"].get<int64_t>();
+      }
+      if (d.contains("jti_challenge_b64") &&
+          d["jti_challenge_b64"].is_string()) {
+        dp.jti_challenge =
+            b64_to_bytes(d["jti_challenge_b64"].get<std::string>());
+      }
+      if (d.contains("raw_b64") && d["raw_b64"].is_string()) {
+        dp.raw = b64_to_bytes(d["raw_b64"].get<std::string>());
+      }
+      token.dpop.catdpop = std::move(dp);
     }
   }
 
   // Parse request claims
   if (j.contains("request") && j["request"].is_object()) {
     const auto& request_json = j["request"];
-    if (request_json.contains("catif") && request_json["catif"].is_string()) {
-      token.request.catif = request_json["catif"];
+    if (request_json.contains("catif") && request_json["catif"].is_object()) {
+      const auto& c = request_json["catif"];
+      CatRequestDirective d;
+      if (c.contains("raw_b64") && c["raw_b64"].is_string()) {
+        d.raw = b64_to_bytes(c["raw_b64"].get<std::string>());
+      }
+      token.request.catif = std::move(d);
     }
-    if (request_json.contains("catr") && request_json["catr"].is_string()) {
-      token.request.catr = request_json["catr"];
+    if (request_json.contains("catr") && request_json["catr"].is_object()) {
+      const auto& c = request_json["catr"];
+      CatRequestDirective d;
+      if (c.contains("raw_b64") && c["raw_b64"].is_string()) {
+        d.raw = b64_to_bytes(c["raw_b64"].get<std::string>());
+      }
+      token.request.catr = std::move(d);
     }
   }
 

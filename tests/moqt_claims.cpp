@@ -454,7 +454,7 @@ TEST_SUITE("Integration Tests") {
                        .withIssuer("https://streaming.example")
                        .withAudience({"relay.example"})
                        .withExpiration(std::chrono::system_clock::now() + 1h)
-                       .withVersion("1.0")
+                       .withVersion(1)
                        .withMoqtRevalidationInterval(300s);
 
       // Add MOQT scope using template method

@@ -192,9 +192,13 @@ struct DpopPayload {
 };
 
 /**
- * @brief CAT DPoP settings claim (catdpop)
+ * @brief DPoP proof-validator configuration.
+ *
+ * Validator-side tuning (window, JTI cache size) — not the on-wire
+ * `catdpop` claim. The wire-form struct is `catapult::CatDpopSettings` in
+ * `claims.hpp`.
  */
-struct CatDpopSettings {
+struct DpopValidationSettings {
   std::optional<std::chrono::seconds>
       window;                     ///< Time window for proof validity
   std::optional<bool> honor_jti;  ///< Whether to honor JTI claims
@@ -207,12 +211,12 @@ struct CatDpopSettings {
   /**
    * @brief Default constructor with reasonable defaults
    */
-  CatDpopSettings() = default;
+  DpopValidationSettings() = default;
 
   /**
    * @brief Constructor with window setting
    */
-  explicit CatDpopSettings(std::chrono::seconds time_window)
+  explicit DpopValidationSettings(std::chrono::seconds time_window)
       : window(time_window), honor_jti(true) {}
 
   /**
@@ -419,7 +423,7 @@ class DpopProof {
    * @brief Validate proof structure and freshness
    */
   [[nodiscard]] bool is_valid(
-      const CatDpopSettings& settings = {}) const noexcept {
+      const DpopValidationSettings& settings = {}) const noexcept {
     return header_.is_valid() && payload_.is_valid() &&
            payload_.is_fresh(settings.get_effective_window()) &&
            !signature_.empty();
@@ -499,7 +503,7 @@ class DpopProofValidator {
   mutable std::mutex jti_mutex_;  ///< Mutex for thread-safe JTI tracking
   std::unordered_map<std::string, std::chrono::system_clock::time_point>
       used_jtis_;
-  CatDpopSettings settings_;
+  DpopValidationSettings settings_;
   // Optional external verifier used for CWT-encoded proofs (which do not
   // carry an algorithm resolvable from their protected header alone). Set
   // via `set_cwt_verifier()`. When null and the proof is CWT-encoded, the
@@ -510,7 +514,7 @@ class DpopProofValidator {
   /**
    * @brief Constructor with settings
    */
-  explicit DpopProofValidator(CatDpopSettings settings = {})
+  explicit DpopProofValidator(DpopValidationSettings settings = {})
       : settings_(std::move(settings)) {}
 
   /**
@@ -577,14 +581,14 @@ class DpopProofValidator {
   /**
    * @brief Get current settings
    */
-  [[nodiscard]] const CatDpopSettings& get_settings() const noexcept {
+  [[nodiscard]] const DpopValidationSettings& get_settings() const noexcept {
     return settings_;
   }
 
   /**
    * @brief Update settings
    */
-  void update_settings(CatDpopSettings new_settings) {
+  void update_settings(DpopValidationSettings new_settings) {
     settings_ = std::move(new_settings);
   }
 
@@ -698,7 +702,7 @@ class DpopKeyPair {
  */
 struct EnhancedDpopClaims {
   std::optional<std::string> cnf;  ///< Confirmation claim (JWK thumbprint)
-  std::optional<CatDpopSettings> catdpop;  ///< CAT DPoP settings
+  std::optional<DpopValidationSettings> catdpop;  ///< CAT DPoP settings
 
   /**
    * @brief Default constructor
@@ -715,15 +719,15 @@ struct EnhancedDpopClaims {
   /**
    * @brief Set DPoP settings
    */
-  void set_dpop_settings(CatDpopSettings settings) {
+  void set_dpop_settings(DpopValidationSettings settings) {
     catdpop = std::move(settings);
   }
 
   /**
    * @brief Get effective DPoP settings
    */
-  [[nodiscard]] CatDpopSettings get_effective_settings() const {
-    return catdpop.value_or(CatDpopSettings{});
+  [[nodiscard]] DpopValidationSettings get_effective_settings() const {
+    return catdpop.value_or(DpopValidationSettings{});
   }
 
   /**

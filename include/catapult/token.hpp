@@ -182,17 +182,8 @@ class CatToken {
       }
     }
 
-    // Enhanced usage limit validation
-    if (cat.catu.has_value()) {
-      if (cat.catu.value() == 0) {
-        throw InvalidClaimValueError("Usage limit must be greater than zero");
-      }
-      constexpr uint32_t MAX_USAGE_LIMIT = 1000000;  // Reasonable upper bound
-      if (cat.catu.value() > MAX_USAGE_LIMIT) {
-        throw InvalidClaimValueError(
-            "Usage limit exceeds maximum allowed value");
-      }
-    }
+    // `catu` used to carry a single uint usage-limit. In CTA-5007-B it is a
+    // URI-component match map; the bounds check moved to the validator.
 
     // Validate string lengths to prevent DoS attacks
     if (core.iss.has_value() && core.iss->length() > 256) {
@@ -213,31 +204,31 @@ class CatToken {
   CatToken& withAudience(const std::vector<std::string>& audience);
   CatToken& withExpiration(const std::chrono::system_clock::time_point& exp);
   CatToken& withNotBefore(const std::chrono::system_clock::time_point& nbf);
-  CatToken& withCwtId(const std::string& cti);
-  CatToken& withVersion(const std::string& version);
-  CatToken& withUsageLimit(uint32_t limit);
-  CatToken& withReplayProtection(const std::string& nonce);
-  CatToken& withProofOfPossession(bool enabled);
+  CatToken& withCwtId(std::vector<uint8_t> cti);
+  CatToken& withCwtIdString(std::string_view cti);
+  CatToken& withVersion(uint32_t version);
+  CatToken& withUriMatch(CatUriMatchMap catu);
+  CatToken& withReplayProtection(CatReplayMode mode);
+  CatToken& withProofOfPossession(CatProofOfPossession por);
   CatToken& withGeoCoordinate(double lat, double lon,
-                              std::optional<double> accuracy = std::nullopt);
-  CatToken& withGeohash(const std::string& geohash);
-  CatToken& withGeoAltitude(int32_t altitude);
-  CatToken& withNetworkInterfaces(const std::vector<std::string>& nips);
-  CatToken& withMethods(const std::string& methods);
-  CatToken& withAlpnProtocols(const std::vector<std::string>& protocols);
-  CatToken& withHosts(const std::vector<std::string>& hosts);
+                              std::optional<double> radius = std::nullopt);
+  CatToken& withGeohash(GeohashClaimValue geohash);
+  CatToken& withGeoAltitude(GeoAltitude altitude);
+  CatToken& withNetworkInterfaces(std::vector<CatNipEntry> nips);
+  CatToken& withMethods(std::vector<std::string> methods);
+  CatToken& withAlpnProtocols(std::vector<std::vector<uint8_t>> protocols);
+  CatToken& withHeaderMatches(CatHostHeaderMatchList cath);
   CatToken& withCountries(const std::vector<std::string>& countries);
-  CatToken& withTokenPublicKeyThumbprint(const std::string& thumbprint);
+  CatToken& withTokenPublicKeyThumbprint(std::vector<uint8_t> thumbprint);
 
   // New claim methods
   CatToken& withSubject(const std::string& subject);
   CatToken& withIssuedAt(const std::chrono::system_clock::time_point& iat);
-  CatToken& withInterfaceData(const std::string& data);
-  CatToken& withConfirmation(const std::string& cnf);
-  CatToken& withDpopClaim(const std::string& dpop);
-  CatToken& withInterfaceClaim(const std::string& interface);
-  CatToken& withRequestClaim(const std::string& request);
-  CatToken& withUriPatterns(const std::vector<std::string>& patterns);
+  CatToken& withInterfaceData(CatIfData data);
+  CatToken& withConfirmation(CatConfirmation cnf);
+  CatToken& withDpopClaim(CatDpopSettings dpop);
+  CatToken& withInterfaceClaim(CatRequestDirective interface_claim);
+  CatToken& withRequestClaim(CatRequestDirective request_claim);
 
   // Composite claim builder methods
   CatToken& withOrComposite(std::unique_ptr<OrClaim> orClaim);
@@ -539,22 +530,23 @@ class CatTokenBuilder {
   CatTokenBuilder& expiresAt(int64_t exp);
   CatTokenBuilder& expiresIn(std::chrono::seconds duration);
   CatTokenBuilder& notBefore(int64_t nbf);
-  CatTokenBuilder& tokenId(const std::string& cti);
-  CatTokenBuilder& version(const std::string& v);
-  CatTokenBuilder& usageLimit(uint32_t limit);
-  CatTokenBuilder& replayNonce(const std::string& nonce);
-  CatTokenBuilder& proofOfPossession(bool enabled = true);
+  CatTokenBuilder& tokenId(std::vector<uint8_t> cti);
+  CatTokenBuilder& tokenIdFromString(std::string_view cti);
+  CatTokenBuilder& version(uint32_t v);
+  CatTokenBuilder& uriMatch(CatUriMatchMap catu);
+  CatTokenBuilder& replayMode(CatReplayMode mode);
+  CatTokenBuilder& proofOfPossession(CatProofOfPossession por);
   CatTokenBuilder& subject(const std::string& sub);
   CatTokenBuilder& geoCoordinate(double lat, double lon,
-                                 std::optional<double> accuracy = std::nullopt);
-  CatTokenBuilder& geohash(const std::string& hash);
-  CatTokenBuilder& altitude(int32_t alt);
-  CatTokenBuilder& networkInterfaces(const std::vector<std::string>& nips);
-  CatTokenBuilder& methods(const std::string& m);
-  CatTokenBuilder& alpn(const std::vector<std::string>& protocols);
-  CatTokenBuilder& hosts(const std::vector<std::string>& h);
+                                 std::optional<double> radius = std::nullopt);
+  CatTokenBuilder& geohash(GeohashClaimValue hash);
+  CatTokenBuilder& altitude(GeoAltitude alt);
+  CatTokenBuilder& networkInterfaces(std::vector<CatNipEntry> nips);
+  CatTokenBuilder& methods(std::vector<std::string> m);
+  CatTokenBuilder& alpn(std::vector<std::vector<uint8_t>> protocols);
+  CatTokenBuilder& headerMatches(CatHostHeaderMatchList h);
   CatTokenBuilder& countries(const std::vector<std::string>& iso3166);
-  CatTokenBuilder& dpopThumbprint(const std::string& cnf);
+  CatTokenBuilder& dpopThumbprint(std::vector<uint8_t> jkt);
   [[nodiscard]] CatToken build();
 };
 
@@ -594,28 +586,35 @@ inline CatTokenBuilder& CatTokenBuilder::notBefore(int64_t nbf) {
   return *this;
 }
 
-inline CatTokenBuilder& CatTokenBuilder::tokenId(const std::string& cti) {
-  token_.core.cti = cti;
+inline CatTokenBuilder& CatTokenBuilder::tokenId(std::vector<uint8_t> cti) {
+  token_.core.cti = std::move(cti);
   return *this;
 }
 
-inline CatTokenBuilder& CatTokenBuilder::version(const std::string& v) {
+inline CatTokenBuilder& CatTokenBuilder::tokenIdFromString(
+    std::string_view cti) {
+  token_.core.cti = std::vector<uint8_t>(cti.begin(), cti.end());
+  return *this;
+}
+
+inline CatTokenBuilder& CatTokenBuilder::version(uint32_t v) {
   token_.cat.catv = v;
   return *this;
 }
 
-inline CatTokenBuilder& CatTokenBuilder::usageLimit(uint32_t limit) {
-  token_.cat.catu = limit;
+inline CatTokenBuilder& CatTokenBuilder::uriMatch(CatUriMatchMap catu) {
+  token_.cat.catu = std::move(catu);
   return *this;
 }
 
-inline CatTokenBuilder& CatTokenBuilder::replayNonce(const std::string& nonce) {
-  token_.cat.catreplay = nonce;
+inline CatTokenBuilder& CatTokenBuilder::replayMode(CatReplayMode mode) {
+  token_.cat.catreplay = mode;
   return *this;
 }
 
-inline CatTokenBuilder& CatTokenBuilder::proofOfPossession(bool enabled) {
-  token_.cat.catpor = enabled;
+inline CatTokenBuilder& CatTokenBuilder::proofOfPossession(
+    CatProofOfPossession por) {
+  token_.cat.catpor = std::move(por);
   return *this;
 }
 
@@ -625,44 +624,44 @@ inline CatTokenBuilder& CatTokenBuilder::subject(const std::string& sub) {
 }
 
 inline CatTokenBuilder& CatTokenBuilder::geoCoordinate(
-    double lat, double lon, std::optional<double> accuracy) {
-  auto coord = GeoCoordinate::createSafe(lat, lon, accuracy);
+    double lat, double lon, std::optional<double> radius) {
+  auto coord = GeoCoordinate::createSafe(lat, lon, radius);
   if (coord.has_value()) {
     token_.cat.catgeocoord = coord.value();
   }
   return *this;
 }
 
-inline CatTokenBuilder& CatTokenBuilder::geohash(const std::string& hash) {
-  token_.cat.geohash = hash;
+inline CatTokenBuilder& CatTokenBuilder::geohash(GeohashClaimValue hash) {
+  token_.cat.geohash = std::move(hash);
   return *this;
 }
 
-inline CatTokenBuilder& CatTokenBuilder::altitude(int32_t alt) {
+inline CatTokenBuilder& CatTokenBuilder::altitude(GeoAltitude alt) {
   token_.cat.catgeoalt = alt;
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::networkInterfaces(
-    const std::vector<std::string>& nips) {
-  token_.cat.catnip = nips;
+    std::vector<CatNipEntry> nips) {
+  token_.cat.catnip = std::move(nips);
   return *this;
 }
 
-inline CatTokenBuilder& CatTokenBuilder::methods(const std::string& m) {
-  token_.cat.catm = m;
+inline CatTokenBuilder& CatTokenBuilder::methods(std::vector<std::string> m) {
+  token_.cat.catm = std::move(m);
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::alpn(
-    const std::vector<std::string>& protocols) {
-  token_.cat.catalpn = protocols;
+    std::vector<std::vector<uint8_t>> protocols) {
+  token_.cat.catalpn = std::move(protocols);
   return *this;
 }
 
-inline CatTokenBuilder& CatTokenBuilder::hosts(
-    const std::vector<std::string>& h) {
-  token_.cat.cath = h;
+inline CatTokenBuilder& CatTokenBuilder::headerMatches(
+    CatHostHeaderMatchList h) {
+  token_.cat.cath = std::move(h);
   return *this;
 }
 
@@ -673,8 +672,10 @@ inline CatTokenBuilder& CatTokenBuilder::countries(
 }
 
 inline CatTokenBuilder& CatTokenBuilder::dpopThumbprint(
-    const std::string& cnf) {
-  token_.dpop.cnf = cnf;
+    std::vector<uint8_t> jkt) {
+  CatConfirmation cnf;
+  cnf.jkt = std::move(jkt);
+  token_.dpop.cnf = std::move(cnf);
   return *this;
 }
 

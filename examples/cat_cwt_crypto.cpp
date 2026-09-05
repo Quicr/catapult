@@ -65,28 +65,47 @@ CatToken create_composite_cat_token() {
   token.core.aud = std::vector<std::string>{"test-client.example.com"};
   token.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + std::chrono::hours{2});
-  token.core.cti = "token-12345";
+  token.core.setCwtIdFromString("token-12345");
 
   // CAT claims
-  token.cat.catv = "1.0";
-  token.cat.catu = 100;
-  token.cat.catreplay = "nonce-98765";
-  token.cat.catpor = true;
+  token.cat.catv = 1u;
+  {
+    CatUriMatchMap catu;
+    catu.components[3] =
+        UriComponentMatch{UriMatchType::Prefix, {'/', 'a', 'p', 'i'}};
+    token.cat.catu = catu;
+  }
+  token.cat.catreplay = CatReplayMode::RejectOnReplay;
+  {
+    CatProofOfPossession por;
+    por.probability = 1.0;
+    por.identifier = {0x0A, 0x0B, 0x0C};
+    token.cat.catpor = por;
+  }
 
   // Geographic claims
   auto coord = GeoCoordinate::createSafe(37.7749, -122.4194);  // San Francisco
   if (coord.has_value()) {
-    coord->accuracy = 100.0;
+    coord->radius = 100.0;
     token.cat.catgeocoord = coord.value();
   }
-  token.cat.geohash = "9q8yy";
-  token.cat.catgeoalt = 50;
+  token.cat.geohash = GeohashClaimValue{std::string{"9q8yy"}};
+  token.cat.catgeoalt = GeoAltitude{50};
 
   // Network claims
-  token.cat.catnip = std::vector<std::string>{"192.168.1.0/24"};
-  token.cat.catm = "GET,POST";
-  token.cat.catalpn = std::vector<std::string>{"h3", "h2"};
-  token.cat.cath = std::vector<std::string>{"api.example.com"};
+  token.cat.catnip = std::vector<CatNipEntry>{
+      CatNipEntry{.tag = 260, .value = {0xC0, 0xA8, 0x01, 0x00}}};
+  token.cat.catm = std::vector<std::string>{"GET", "POST"};
+  token.cat.catalpn =
+      std::vector<std::vector<uint8_t>>{{'h', '3'}, {'h', '2'}};
+  {
+    CatHostHeaderMatchList cath;
+    cath.entries.push_back(
+        {"host",
+         UriComponentMatch{UriMatchType::Exact,
+                           {'a', 'p', 'i', '.', 'e', 'x'}}});
+    token.cat.cath = cath;
+  }
   token.cat.catgeoiso3166 = std::vector<std::string>{"US"};
 
   // Create simple tokens for composite claims
@@ -96,7 +115,7 @@ CatToken create_composite_cat_token() {
   user_token.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + std::chrono::hours{1});
   user_token.informational.sub = "user123";
-  user_token.cat.catv = "user-1.0";
+  user_token.cat.catv = 1u;
 
   auto service_token = CatToken{};
   service_token.core.iss = "service-authority.example.com";
@@ -105,7 +124,7 @@ CatToken create_composite_cat_token() {
   service_token.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + std::chrono::hours{1});
   service_token.informational.sub = "service-account";
-  service_token.cat.catv = "service-1.0";
+  service_token.cat.catv = 2u;
 
   // Create OR composite: (User OR Service)
   std::vector<ClaimSet> or_claim_sets;
@@ -433,7 +452,9 @@ int main(int argc, char* argv[]) {
       std::cout << "none\n";
     }
     std::cout << "CAT Version: "
-              << (token.cat.catv.has_value() ? *token.cat.catv : "none")
+              << (token.cat.catv.has_value()
+                      ? std::to_string(*token.cat.catv)
+                      : std::string{"none"})
               << "\n";
     std::cout << "Has Composite Claims: "
               << (token.composite.orClaim ? "YES (OR)" : "NO") << "\n";

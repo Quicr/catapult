@@ -15,7 +15,7 @@ CatToken createValidToken(const std::string& issuer = "test-issuer") {
     core.iss = issuer;
     core.aud = std::vector<std::string>{"test-audience"};
     core.exp = std::chrono::duration_cast<std::chrono::seconds>(exp.time_since_epoch()).count();
-    core.cti = "test-id";
+    core.setCwtIdFromString("test-id");
     
     auto tokenPtr = CatToken::createValidated(std::move(core));
     return *tokenPtr;
@@ -28,7 +28,7 @@ CatToken createExpiredToken() {
     core.iss = "test-issuer";
     core.aud = std::vector<std::string>{"test-audience"};
     core.exp = std::chrono::duration_cast<std::chrono::seconds>(past.time_since_epoch()).count();
-    core.cti = "expired-id";
+    core.setCwtIdFromString("expired-id");
     
     auto tokenPtr = CatToken::createValidated(std::move(core));
     return *tokenPtr;

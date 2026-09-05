@@ -33,47 +33,68 @@ CatToken create_sample_token() {
       std::vector<std::string>{"client1.example.com", "client2.example.com"};
   token.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + std::chrono::hours{2});
-  token.core.cti = "token-id-12345";
+  token.core.setCwtIdFromString("token-id-12345");
 
   // CAT claims
-  token.cat.catv = "1.0";
-  token.cat.catu = 100;
-  token.cat.catreplay = "nonce-98765";
-  token.cat.catpor = true;
+  CatProofOfPossession por;
+  por.probability = 1.0;
+  por.identifier = {0x01, 0x02, 0x03};
+
+  CatUriMatchMap catu;
+  catu.components[3] = UriComponentMatch{UriMatchType::Prefix,
+                                         {'/', 'a', 'p', 'i'}};
+
+  token.cat.catv = 1u;
+  token.cat.catu = catu;
+  token.cat.catreplay = CatReplayMode::RejectOnReplay;
+  token.cat.catpor = por;
 
   // Geographic claims
   auto coord = GeoCoordinate::createSafe(37.7749, -122.4194);  // San Francisco
   if (coord.has_value()) {
-    coord->accuracy = 100.0;
+    coord->radius = 100.0;
     token.cat.catgeocoord = coord.value();
   }
-  token.cat.geohash = "9q8yy";
-  token.cat.catgeoalt = 50;  // meters
+  token.cat.geohash = GeohashClaimValue{std::string{"9q8yy"}};
+  token.cat.catgeoalt = GeoAltitude{50};  // meters
 
   // Network claims
-  token.cat.catnip = std::vector<std::string>{"192.168.1.0/24", "10.0.0.0/8"};
-  token.cat.catm = "GET,POST,PUT";
-  token.cat.catalpn = std::vector<std::string>{"h3", "h2", "http/1.1"};
-  token.cat.cath = std::vector<std::string>{"api.example.com", "*.example.com"};
+  CatNipEntry nip_a{.tag = 260, .value = {0xC0, 0xA8, 0x01, 0x00}};
+  CatNipEntry nip_b{.tag = 260, .value = {0x0A, 0x00, 0x00, 0x00}};
+  token.cat.catnip = std::vector<CatNipEntry>{nip_a, nip_b};
+  token.cat.catm = std::vector<std::string>{"GET", "POST", "PUT"};
+  token.cat.catalpn = std::vector<std::vector<uint8_t>>{
+      {'h', '3'}, {'h', '2'}, {'h', 't', 't', 'p', '/', '1', '.', '1'}};
+  CatHostHeaderMatchList cath;
+  cath.entries.push_back(
+      {"host", UriComponentMatch{UriMatchType::Exact, {'a', 'p', 'i'}}});
+  token.cat.cath = cath;
   token.cat.catgeoiso3166 = std::vector<std::string>{"US", "CA"};
 
   // Informational claims
   token.informational.sub = "user123";
   token.informational.iat =
       std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-  token.informational.catifdata = "interface-data-xyz";
+  token.informational.catifdata = CatIfData{std::string{"interface-data-xyz"}};
 
   // DPoP claims
-  token.dpop.cnf = "jwk-thumbprint-abc123";
-  token.dpop.catdpop = "dpop-token-xyz";
+  CatConfirmation cnf;
+  cnf.jkt = {0xAA, 0xBB, 0xCC};
+  token.dpop.cnf = cnf;
+
+  CatDpopSettings dpop;
+  dpop.critical = std::vector<int64_t>{1, 3};
+  dpop.proof_lifetime_seconds = 300;
+  token.dpop.catdpop = dpop;
 
   // Request claims
-  token.request.catif = "interface-data-123";
-  token.request.catr = "request-data-456";
+  CatRequestDirective catif;
+  catif.raw = {'i', 'f'};
+  token.request.catif = catif;
 
-  // Custom claims
-  token.custom[9999] = "custom-value-1";
-  token.custom[9998] = "custom-value-2";
+  CatRequestDirective catr;
+  catr.raw = {'r', 'e', 'q'};
+  token.request.catr = catr;
 
   return token;
 }
@@ -145,8 +166,13 @@ CatToken create_composite_token() {
   admin_token.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + std::chrono::hours{24});
   admin_token.informational.sub = "admin-user";
-  admin_token.cat.catv = "admin-1.0";
-  admin_token.cat.catpor = true;
+  admin_token.cat.catv = 1u;
+  {
+    CatProofOfPossession admin_por;
+    admin_por.probability = 1.0;
+    admin_por.identifier = {0xA0};
+    admin_token.cat.catpor = admin_por;
+  }
 
   // Create OR composite: (Publisher OR Moderator)
   std::vector<ClaimSet> or_claim_sets;
@@ -187,12 +213,12 @@ CatToken create_nested_composite_token() {
   auto user_token = CatToken{};
   user_token.core.iss = "user-authority.example.com";
   user_token.informational.sub = "regular-user";
-  user_token.cat.catv = "user-1.0";
+  user_token.cat.catv = 1u;
 
   auto service_token = CatToken{};
   service_token.core.iss = "service-authority.example.com";
   service_token.informational.sub = "service-account";
-  service_token.cat.catv = "service-1.0";
+  service_token.cat.catv = 2u;
 
   auto blocked_token = CatToken{};
   blocked_token.core.iss = "blocked-authority.example.com";
@@ -318,7 +344,7 @@ void show_claim_type_examples() {
   core_token.core.aud = std::vector<std::string>{"client.example.com"};
   core_token.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + std::chrono::hours{1});
-  core_token.core.cti = "core-token-123";
+  core_token.core.setCwtIdFromString("core-token-123");
 
   std::cout << "Base64: "
             << json_serialization::to_base64_json(core_token, false) << "\n";
@@ -332,10 +358,20 @@ void show_claim_type_examples() {
   cat_token.core.iss = "cat-authority.example.com";
   cat_token.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + std::chrono::hours{2});
-  cat_token.cat.catv = "1.0";
-  cat_token.cat.catu = 50;
-  cat_token.cat.catreplay = "replay-nonce-456";
-  cat_token.cat.catpor = true;
+  cat_token.cat.catv = 1u;
+  {
+    CatUriMatchMap catu2;
+    catu2.components[3] = UriComponentMatch{UriMatchType::Prefix,
+                                            {'/', 'r', 'e', 's'}};
+    cat_token.cat.catu = catu2;
+  }
+  cat_token.cat.catreplay = CatReplayMode::RejectOnReplay;
+  {
+    CatProofOfPossession por2;
+    por2.probability = 1.0;
+    por2.identifier = {0xB0};
+    cat_token.cat.catpor = por2;
+  }
 
   std::cout << "Base64: "
             << json_serialization::to_base64_json(cat_token, false) << "\n";
@@ -352,11 +388,11 @@ void show_claim_type_examples() {
       std::chrono::system_clock::now() + std::chrono::hours{1});
   auto coord = GeoCoordinate::createSafe(40.7128, -74.0060);  // NYC
   if (coord.has_value()) {
-    coord->accuracy = 50.0;
+    coord->radius = 50.0;
     geo_token.cat.catgeocoord = coord.value();
   }
-  geo_token.cat.geohash = "dr5reg";
-  geo_token.cat.catgeoalt = 10;
+  geo_token.cat.geohash = GeohashClaimValue{std::string{"dr5reg"}};
+  geo_token.cat.catgeoalt = GeoAltitude{10};
   geo_token.cat.catgeoiso3166 = std::vector<std::string>{"US"};
 
   std::cout << "Base64: "
@@ -373,10 +409,16 @@ void show_claim_type_examples() {
   net_token.core.iss = "network-authority.example.com";
   net_token.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + std::chrono::hours{1});
-  net_token.cat.catnip = std::vector<std::string>{"192.168.1.0/24"};
-  net_token.cat.catm = "GET,POST";
-  net_token.cat.catalpn = std::vector<std::string>{"h2", "http/1.1"};
-  net_token.cat.cath = std::vector<std::string>{"api.example.com"};
+  net_token.cat.catnip = std::vector<CatNipEntry>{
+      CatNipEntry{.tag = 260, .value = {0xC0, 0xA8, 0x01, 0x00}}};
+  net_token.cat.catm = std::vector<std::string>{"GET", "POST"};
+  net_token.cat.catalpn = std::vector<std::vector<uint8_t>>{
+      {'h', '2'}, {'h', 't', 't', 'p', '/', '1', '.', '1'}};
+  CatHostHeaderMatchList net_cath;
+  net_cath.entries.push_back(
+      {"host", UriComponentMatch{UriMatchType::Exact,
+                                 {'a', 'p', 'i', '.', 'e', 'x'}}});
+  net_token.cat.cath = net_cath;
 
   std::cout << "Base64: "
             << json_serialization::to_base64_json(net_token, false) << "\n";
@@ -392,8 +434,16 @@ void show_claim_type_examples() {
   dpop_token.core.iss = "dpop-authority.example.com";
   dpop_token.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + std::chrono::hours{1});
-  dpop_token.dpop.cnf = "jwk-thumbprint-dpop-123";
-  dpop_token.dpop.catdpop = "dpop-proof-token-xyz";
+  {
+    CatConfirmation cnf2;
+    cnf2.jkt = {0xDE, 0xAD, 0xBE, 0xEF};
+    dpop_token.dpop.cnf = cnf2;
+  }
+  {
+    CatDpopSettings dpop2;
+    dpop2.proof_lifetime_seconds = 600;
+    dpop_token.dpop.catdpop = dpop2;
+  }
 
   std::cout << "Base64: "
             << json_serialization::to_base64_json(dpop_token, false) << "\n";
@@ -409,8 +459,14 @@ void show_claim_type_examples() {
   req_token.core.iss = "request-authority.example.com";
   req_token.core.exp = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now() + std::chrono::hours{1});
-  req_token.request.catif = "interface-request-789";
-  req_token.request.catr = "request-data-abc";
+  {
+    CatRequestDirective req_if;
+    req_if.raw = {'i', 'f', 'a', 'c', 'e'};
+    req_token.request.catif = req_if;
+    CatRequestDirective req_r;
+    req_r.raw = {'r', 'e', 'q'};
+    req_token.request.catr = req_r;
+  }
 
   std::cout << "Base64: "
             << json_serialization::to_base64_json(req_token, false) << "\n";
