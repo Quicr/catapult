@@ -29,66 +29,56 @@ struct TrieNodePoolDeleter {
 };
 
 /**
- * @brief Optimized node structure for trie data structures
- * Uses flat array for all 8-bit characters for maximum performance
+ * @brief Node structure for trie data structures.
+ *
+ * Stores its outgoing edges in a sorted vector of `(byte, child)` pairs
+ * rather than a 256-entry array. Typical policy tokens hold only a handful
+ * of edges per node, so the array form was paying ~2 KiB per node on
+ * 64-bit builds to leave 250+ null slots. Binary search on a small sorted
+ * vector is bounded and, for the common few-child case, well inside the
+ * noise floor of the surrounding string work.
  */
 struct TrieNode {
-  static constexpr size_t BYTE_SIZE = 256;
-
-  // Define the TrieNodePtr type locally within TrieNode
   using TrieNodePtr = std::unique_ptr<TrieNode, TrieNodePoolDeleter>;
 
-  // Use TrieNodePtr for internal storage to preserve custom deleter
-  std::array<TrieNodePtr, BYTE_SIZE> children;
+  struct Edge {
+    unsigned char byte;
+    TrieNodePtr child;
+  };
 
-  bool isTerminal = false;  ///< Terminal node flag
-  std::string value;        ///< Stored value
+  // Sorted by `byte`. Kept in a member function so callers cannot bypass
+  // the ordering invariant that lookups rely on.
+  std::vector<Edge> children;
+
+  bool isTerminal = false;
+  std::string value;
 
   /**
-   * @brief Get child node for character
-   *  @param c Character to lookup child for
-   * @return Non-owning raw pointer to child node, or nullptr if no child
-   * exists. Caller does not own the returned pointer - it remains owned by this
-   * node. The returned pointer is only valid as long as this node exists and
-   *         the child is not removed.
+   * @brief Get child node for character.
+   * @return Non-owning raw pointer, or nullptr if no edge exists.
    */
   TrieNode* getChild(char c) const noexcept {
-    return children[static_cast<unsigned char>(c)].get();
+    auto b = static_cast<unsigned char>(c);
+    auto it = std::lower_bound(children.begin(), children.end(), b,
+                               [](const Edge& e, unsigned char v) {
+                                 return e.byte < v;
+                               });
+    if (it == children.end() || it->byte != b) return nullptr;
+    return it->child.get();
   }
 
-  /**
-   * @brief Set child node for character (optimized for all byte values)
-   */
   void setChild(char c, TrieNodePtr child);
 
-  /**
-   * @brief Remove child node for character (optimized for all byte values)
-   */
   TrieNodePtr removeChild(char c);
 
-  /**
-   * @brief Check if node has any children (optimized for full byte array)
-   */
-  bool hasChildren() const noexcept {
-    for (const auto& child : children) {
-      if (child) return true;
-    }
-    return false;
-  }
+  bool hasChildren() const noexcept { return !children.empty(); }
 
-  /**
-   * @brief Get all child characters (optimized with pre-allocation)
-   */
   std::vector<char> getChildChars() const {
     std::vector<char> chars;
-    chars.reserve(32);  // Reserve space for common case
-
-    for (size_t i = 0; i < BYTE_SIZE; ++i) {
-      if (children[i]) {
-        chars.push_back(static_cast<char>(i));
-      }
+    chars.reserve(children.size());
+    for (const auto& e : children) {
+      chars.push_back(static_cast<char>(e.byte));
     }
-
     return chars;
   }
 };

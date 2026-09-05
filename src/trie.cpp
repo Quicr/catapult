@@ -25,21 +25,34 @@ void TrieNodePoolDeleter::operator()(TrieNode* ptr) const {
   }
 }
 
-/**
- * @brief TrieNode method implementations that handle pool memory
- */
 void TrieNode::setChild(char c, TrieNodePtr child) {
-  // Store the TrieNodePtr directly, preserving the custom deleter
-  if (child) {
-    children[static_cast<unsigned char>(c)] = std::move(child);
-  } else {
-    children[static_cast<unsigned char>(c)] = nullptr;
+  auto b = static_cast<unsigned char>(c);
+  auto it = std::lower_bound(children.begin(), children.end(), b,
+                             [](const Edge& e, unsigned char v) {
+                               return e.byte < v;
+                             });
+  if (it != children.end() && it->byte == b) {
+    if (child) {
+      it->child = std::move(child);
+    } else {
+      children.erase(it);
+    }
+    return;
   }
+  if (!child) return;
+  children.insert(it, Edge{b, std::move(child)});
 }
 
 TrieNodePtr TrieNode::removeChild(char c) {
-  auto child = std::move(children[static_cast<unsigned char>(c)]);
-  return child;  // child is already a TrieNodePtr
+  auto b = static_cast<unsigned char>(c);
+  auto it = std::lower_bound(children.begin(), children.end(), b,
+                             [](const Edge& e, unsigned char v) {
+                               return e.byte < v;
+                             });
+  if (it == children.end() || it->byte != b) return TrieNodePtr{};
+  TrieNodePtr removed = std::move(it->child);
+  children.erase(it);
+  return removed;
 }
 
 /**
@@ -135,14 +148,11 @@ size_t PrefixTrie::calculateNodeMemory(const TrieNode* node) const noexcept {
 
   size_t memory = sizeof(TrieNode);
   memory += node->value.capacity();
+  memory += node->children.capacity() * sizeof(TrieNode::Edge);
 
-  // Byte children array is always allocated (full 256 bytes)
-  memory += sizeof(node->children);
-
-  // Recursively calculate children memory
-  for (const auto& child : node->children) {
-    if (child) {
-      memory += calculateNodeMemory(child.get());
+  for (const auto& edge : node->children) {
+    if (edge.child) {
+      memory += calculateNodeMemory(edge.child.get());
     }
   }
 
