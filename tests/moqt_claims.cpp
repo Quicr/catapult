@@ -589,7 +589,12 @@ std::vector<uint8_t> wrap_moqt_claim_bytes(cbor_item_t* moqt_value_owned) {
   must_add(map,
            cbor_pair{.key = cbor_move(aud_key), .value = cbor_move(aud_arr)});
 
-  cbor_item_t* moqt_key = cbor_build_uint64(catapult::CLAIM_MOQT);
+  // CLAIM_MOQT = 65000 fits in 2 bytes; use uint16 so the fixture is
+  // shortest-form and passes loadStrict's RFC 8949 §4.2.1 check.
+  static_assert(catapult::CLAIM_MOQT <= 0xFFFF,
+                "CLAIM_MOQT must fit in a CBOR uint16 for this fixture");
+  cbor_item_t* moqt_key = cbor_build_uint16(
+      static_cast<uint16_t>(catapult::CLAIM_MOQT));
   must_add(map, cbor_pair{.key = cbor_move(moqt_key),
                           .value = cbor_move(moqt_value_owned)});
 

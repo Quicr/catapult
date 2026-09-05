@@ -68,10 +68,9 @@ bool safeCborMapAdd(cbor_item_t* map, cbor_item_t* raw_key,
 // the wire form matches the registered identifier's sign.
 CborItemPtr buildAlgId(int64_t alg_id) {
   if (alg_id < 0) {
-    return CborItemPtr(
-        cbor_build_negint64(static_cast<uint64_t>(-alg_id - 1)));
+    return cbor_build_negint64_owned(static_cast<uint64_t>(-alg_id - 1));
   }
-  return CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(alg_id)));
+  return cbor_build_uint64_owned(static_cast<uint64_t>(alg_id));
 }
 
 // Build the DPoP protected-header CBOR bytes. Kept in one place so signer
@@ -104,6 +103,11 @@ std::vector<uint8_t> buildDpopProtectedHeaderBytes(
              CborItemPtr(cbor_build_bytestring(cose_key.data(),
                                                cose_key.size())));
   }
+
+  // The protected header integer labels are 1/3/-2 (RFC 8152) which have
+  // different serialized widths, so the insertion order isn't canonical.
+  // Reorder before serializing so the header round-trips through loadStrict.
+  catapult::internal::canonicalizeMapOrder(protected_map.get());
 
   size_t length = 0;
   auto buffer = cbor_serialize_alloc_owned(protected_map.get(), length);

@@ -136,3 +136,43 @@ TEST_CASE("strict CBOR rejects payloads exceeding size cap") {
   CHECK_THROWS_AS(loadStrict(std::span<const uint8_t>(bytes)),
                   InvalidCborError);
 }
+
+TEST_CASE("strict CBOR rejects non-shortest integer (2-byte encoding of 1)") {
+  // 0x19 0x00 0x01 = uint16 with value 1. Canonical form is 0x01.
+  auto bytes = asBytes({0x19, 0x00, 0x01});
+  CHECK_THROWS_AS(loadStrict(std::span<const uint8_t>(bytes)),
+                  InvalidCborError);
+}
+
+TEST_CASE("strict CBOR rejects non-shortest integer (8-byte encoding of 5)") {
+  // 0x1b 00 00 00 00 00 00 00 05 = uint64 with value 5.
+  auto bytes = asBytes({0x1b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05});
+  CHECK_THROWS_AS(loadStrict(std::span<const uint8_t>(bytes)),
+                  InvalidCborError);
+}
+
+TEST_CASE("strict CBOR rejects non-shortest negint") {
+  // 0x39 0x00 0x00 = negint16 with value -1. Canonical is 0x20.
+  auto bytes = asBytes({0x39, 0x00, 0x00});
+  CHECK_THROWS_AS(loadStrict(std::span<const uint8_t>(bytes)),
+                  InvalidCborError);
+}
+
+TEST_CASE("strict CBOR rejects non-canonical map key order") {
+  // { 100: 1, 1: 2 }
+  //  - key 100 serializes to 3 bytes: 0x18 0x64
+  //  - key 1 serializes to 1 byte: 0x01
+  // Length-first ordering requires the 1-byte key first, so this input is
+  // out of canonical order.
+  auto bytes = asBytes({0xa2, 0x18, 0x64, 0x01, 0x01, 0x02});
+  CHECK_THROWS_AS(loadStrict(std::span<const uint8_t>(bytes)),
+                  InvalidCborError);
+}
+
+TEST_CASE("strict CBOR accepts canonical length-first map order") {
+  // { 1: 2, 100: 3 } — 1-byte key precedes 2-byte key.
+  auto bytes = asBytes({0xa2, 0x01, 0x02, 0x18, 0x64, 0x03});
+  auto item = loadStrict(std::span<const uint8_t>(bytes));
+  REQUIRE(item);
+  CHECK(cbor_typeof(item.get()) == CBOR_TYPE_MAP);
+}

@@ -46,11 +46,37 @@ inline CborItemPtr cbor_build_uint8_owned(uint8_t value) {
   return CborItemPtr(cbor_build_uint8(value));
 }
 
+// RFC 8949 §4.2.1 "Preferred serialization": encode an unsigned integer
+// in the fewest bytes that can represent it. libcbor's cbor_build_uint64
+// unconditionally emits an 8-byte body; that would violate the canonical
+// encoding rules that loadStrict now enforces. Route every unsigned build
+// through the minimal-width helper so encoder output can round-trip
+// through the strict decoder.
 inline CborItemPtr cbor_build_uint64_owned(uint64_t value) {
+  if (value <= 0xFFu) {
+    return CborItemPtr(cbor_build_uint8(static_cast<uint8_t>(value)));
+  }
+  if (value <= 0xFFFFu) {
+    return CborItemPtr(cbor_build_uint16(static_cast<uint16_t>(value)));
+  }
+  if (value <= 0xFFFFFFFFu) {
+    return CborItemPtr(cbor_build_uint32(static_cast<uint32_t>(value)));
+  }
   return CborItemPtr(cbor_build_uint64(value));
 }
 
+// Same principle for negints: the wire value is `-1 - n` encoded in the
+// smallest width that fits.
 inline CborItemPtr cbor_build_negint64_owned(uint64_t value) {
+  if (value <= 0xFFu) {
+    return CborItemPtr(cbor_build_negint8(static_cast<uint8_t>(value)));
+  }
+  if (value <= 0xFFFFu) {
+    return CborItemPtr(cbor_build_negint16(static_cast<uint16_t>(value)));
+  }
+  if (value <= 0xFFFFFFFFu) {
+    return CborItemPtr(cbor_build_negint32(static_cast<uint32_t>(value)));
+  }
   return CborItemPtr(cbor_build_negint64(value));
 }
 

@@ -2,8 +2,12 @@
 
 #include <cbor.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 #include "catapult/error.hpp"
@@ -11,6 +15,37 @@
 namespace catapult::internal {
 
 namespace {
+
+// RFC 8949 §4.2.1 "Preferred serialization": an unsigned integer MUST be
+// encoded in the fewest bytes that can represent it. libcbor exposes the
+// as-parsed width via cbor_int_get_width(); compare against the minimum
+// width that would suffice for the value.
+//
+// The check applies uniformly to CBOR_TYPE_UINT and CBOR_TYPE_NEGINT since
+// negative integers on the wire encode `(-n - 1)` as an unsigned value in
+// the same major-type-1 width.
+void checkShortestIntegerEncoding(cbor_item_t* item) {
+  const uint64_t v = cbor_get_int(item);
+  const cbor_int_width w = cbor_int_get_width(item);
+  cbor_int_width minimal;
+  if (v <= 23) {
+    minimal = CBOR_INT_8;  // inline / 1-byte head
+  } else if (v <= 0xFF) {
+    minimal = CBOR_INT_8;
+  } else if (v <= 0xFFFF) {
+    minimal = CBOR_INT_16;
+  } else if (v <= 0xFFFFFFFFULL) {
+    minimal = CBOR_INT_32;
+  } else {
+    minimal = CBOR_INT_64;
+  }
+  // Inline (v<=23) is represented by libcbor as CBOR_INT_8 too, so any
+  // narrower-than-minimal encoding is impossible; only wider is a bug.
+  if (static_cast<int>(w) > static_cast<int>(minimal)) {
+    throw InvalidCborError(
+        "Integer not encoded in the shortest form (RFC 8949 §4.2.1)");
+  }
+}
 
 // Recursively walk the DOM tree, enforcing:
 //   - no indefinite-length containers,
@@ -35,6 +70,9 @@ void walk(cbor_item_t* item, const StrictCborOptions& opts,
   switch (cbor_typeof(item)) {
     case CBOR_TYPE_UINT:
     case CBOR_TYPE_NEGINT:
+      if (opts.require_shortest_integer) {
+        checkShortestIntegerEncoding(item);
+      }
       return;
 
     case CBOR_TYPE_BYTESTRING:
@@ -68,30 +106,55 @@ void walk(cbor_item_t* item, const StrictCborOptions& opts,
       std::size_t n = cbor_map_size(item);
       cbor_pair* pairs = cbor_map_handle(item);
 
+      // We serialise each key once and use it for three checks: recursive
+      // walk (already done), duplicate detection, and canonical ordering
+      // (RFC 8949 §4.2.3 "Length-first Core Deterministic Encoding":
+      // shorter serialised key first; ties broken by bytewise lex order).
+      const bool need_serialized =
+          opts.forbid_duplicate_map_keys || opts.require_canonical_map_order;
       std::vector<std::vector<uint8_t>> keySerializations;
-      keySerializations.reserve(n);
+      if (need_serialized) {
+        keySerializations.reserve(n);
+      }
+
+      auto lengthFirstLess = [](const std::vector<uint8_t>& a,
+                                const std::vector<uint8_t>& b) {
+        if (a.size() != b.size()) return a.size() < b.size();
+        return std::lexicographical_compare(a.begin(), a.end(), b.begin(),
+                                            b.end());
+      };
 
       for (std::size_t i = 0; i < n; ++i) {
         walk(pairs[i].key, opts, depth + 1);
         walk(pairs[i].value, opts, depth + 1);
 
+        if (!need_serialized) continue;
+
+        unsigned char* buf = nullptr;
+        size_t buf_size = 0;
+        size_t len = cbor_serialize_alloc(pairs[i].key, &buf, &buf_size);
+        if (len == 0) {
+          if (buf) free(buf);
+          throw InvalidCborError("Failed to serialize map key");
+        }
+        std::vector<uint8_t> serialized(buf, buf + len);
+        free(buf);
+
         if (opts.forbid_duplicate_map_keys) {
-          unsigned char* buf = nullptr;
-          size_t buf_size = 0;
-          size_t len = cbor_serialize_alloc(pairs[i].key, &buf, &buf_size);
-          if (len == 0) {
-            if (buf) free(buf);
-            throw InvalidCborError("Failed to serialize map key for dup check");
-          }
-          std::vector<uint8_t> serialized(buf, buf + len);
-          free(buf);
           for (const auto& prev : keySerializations) {
             if (prev == serialized) {
               throw InvalidCborError("Duplicate CBOR map key");
             }
           }
-          keySerializations.push_back(std::move(serialized));
         }
+        if (opts.require_canonical_map_order && !keySerializations.empty()) {
+          if (!lengthFirstLess(keySerializations.back(), serialized)) {
+            throw InvalidCborError(
+                "Map keys not in canonical length-first order "
+                "(RFC 8949 §4.2.3)");
+          }
+        }
+        keySerializations.push_back(std::move(serialized));
       }
       return;
     }
@@ -123,6 +186,74 @@ void walk(cbor_item_t* item, const StrictCborOptions& opts,
 }
 
 }  // namespace
+
+// Recursively sort each map's pairs in place by their canonical
+// serialization (RFC 8949 §4.2.3 length-first order). Called by encoders
+// so that maps built from unordered containers still round-trip through
+// loadStrict.
+void canonicalizeMapOrder(cbor_item_t* item) {
+  if (!item) return;
+  switch (cbor_typeof(item)) {
+    case CBOR_TYPE_ARRAY: {
+      const std::size_t n = cbor_array_size(item);
+      cbor_item_t** items = cbor_array_handle(item);
+      for (std::size_t i = 0; i < n; ++i) {
+        canonicalizeMapOrder(items[i]);
+      }
+      return;
+    }
+    case CBOR_TYPE_MAP: {
+      const std::size_t n = cbor_map_size(item);
+      cbor_pair* pairs = cbor_map_handle(item);
+      for (std::size_t i = 0; i < n; ++i) {
+        canonicalizeMapOrder(pairs[i].key);
+        canonicalizeMapOrder(pairs[i].value);
+      }
+      // Serialize each key once so the sort compares stable byte strings.
+      std::vector<std::pair<std::vector<uint8_t>, std::size_t>> keyed;
+      keyed.reserve(n);
+      for (std::size_t i = 0; i < n; ++i) {
+        unsigned char* buf = nullptr;
+        size_t buf_size = 0;
+        size_t len = cbor_serialize_alloc(pairs[i].key, &buf, &buf_size);
+        if (len == 0) {
+          if (buf) free(buf);
+          throw InvalidCborError(
+              "Failed to serialize map key during canonicalization");
+        }
+        std::vector<uint8_t> serialized(buf, buf + len);
+        free(buf);
+        keyed.emplace_back(std::move(serialized), i);
+      }
+      std::stable_sort(keyed.begin(), keyed.end(),
+                       [](const auto& a, const auto& b) {
+                         const auto& ka = a.first;
+                         const auto& kb = b.first;
+                         if (ka.size() != kb.size()) {
+                           return ka.size() < kb.size();
+                         }
+                         return std::lexicographical_compare(
+                             ka.begin(), ka.end(), kb.begin(), kb.end());
+                       });
+      std::vector<cbor_pair> reordered(n);
+      for (std::size_t i = 0; i < n; ++i) {
+        reordered[i] = pairs[keyed[i].second];
+      }
+      for (std::size_t i = 0; i < n; ++i) {
+        pairs[i] = reordered[i];
+      }
+      return;
+    }
+    case CBOR_TYPE_TAG: {
+      // cbor_tag_item returns a new reference; balance it immediately.
+      CborItemPtr inner(cbor_tag_item(item));
+      canonicalizeMapOrder(inner.get());
+      return;
+    }
+    default:
+      return;
+  }
+}
 
 CborItemPtr loadStrict(std::span<const uint8_t> data,
                        const StrictCborOptions& opts) {

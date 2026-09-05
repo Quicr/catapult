@@ -31,11 +31,11 @@ CborItemPtr buildAlgCborValue(int64_t alg) {
     throw InvalidCborError("COSE algorithm id out of accepted range");
   }
   if (alg >= 0) {
-    return CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(alg)));
+    return cbor_build_uint64_owned(static_cast<uint64_t>(alg));
   }
   // Encode -1 - alg without overflowing when alg == INT64_MIN.
   uint64_t magnitude = static_cast<uint64_t>(-(alg + 1));
-  return CborItemPtr(cbor_build_negint64(magnitude));
+  return cbor_build_negint64_owned(magnitude);
 }
 
 // Decode a COSE alg header value, enforcing the same range and rejecting
@@ -133,13 +133,13 @@ class CborMapBuilder {
   CborItemPtr root_;
 
   void addClaimImpl(int64_t claim_id, const std::string& value) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     auto val = CborItemPtr(cbor_build_string(value.c_str()));
     addPair(std::move(key), std::move(val));
   }
 
   void addClaimImpl(int64_t claim_id, const std::vector<std::string>& values) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     auto array = CborItemPtr(cbor_new_definite_array(values.size()));
 
     for (const auto& val : values) {
@@ -153,19 +153,22 @@ class CborMapBuilder {
   }
 
   void addClaimImpl(int64_t claim_id, int64_t value) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
-    auto val = CborItemPtr(cbor_build_uint64(value));
+    auto key = cbor_build_uint64_owned(claim_id);
+    auto val = cbor_build_uint64_owned(value);
     addPair(std::move(key), std::move(val));
   }
 
   void addClaimImpl(int64_t claim_id, uint32_t value) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
-    auto val = CborItemPtr(cbor_build_uint32(value));
+    auto key = cbor_build_uint64_owned(claim_id);
+    // Route through the shortest-form helper so a small `catv` (value 1) is
+    // emitted as CBOR uint8, not uint32; loadStrict rejects non-shortest
+    // integer encodings per RFC 8949 §4.2.1.
+    auto val = cbor_build_uint64_owned(value);
     addPair(std::move(key), std::move(val));
   }
 
   void addClaimImpl(int64_t claim_id, bool value) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     auto val = CborItemPtr(cbor_build_bool(value));
     addPair(std::move(key), std::move(val));
   }
@@ -174,7 +177,7 @@ class CborMapBuilder {
   // is represented as the two-element form; producers MUST NOT emit a
   // separate `accuracy` map key (that was the pre-1.3 shape).
   void addClaimImpl(int64_t claim_id, const GeoCoordinate& coord) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     const size_t len = coord.radius.has_value() ? 3 : 2;
     auto arr = cbor_new_definite_array_owned(len);
     auto lat_val = CborItemPtr(cbor_build_float8(coord.lat));
@@ -196,15 +199,15 @@ class CborMapBuilder {
 
   // CTA-5007-B `catgeoalt`: array `[altitude, deviation?]`.
   void addClaimImpl(int64_t claim_id, const GeoAltitude& alt) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     const size_t len = alt.deviation.has_value() ? 2 : 1;
     auto arr = cbor_new_definite_array_owned(len);
-    auto alt_val = CborItemPtr(cbor_build_uint64(
-        static_cast<uint64_t>(alt.altitude < 0 ? -alt.altitude : alt.altitude)));
+    auto alt_val = cbor_build_uint64_owned(
+        static_cast<uint64_t>(alt.altitude < 0 ? -alt.altitude : alt.altitude));
     // Negative altitudes encode as negints per RFC 8949; use the alg helper.
     if (alt.altitude < 0) {
-      alt_val = CborItemPtr(cbor_build_negint64(
-          static_cast<uint64_t>(-(static_cast<int64_t>(alt.altitude) + 1))));
+      alt_val = cbor_build_negint64_owned(
+          static_cast<uint64_t>(-(static_cast<int64_t>(alt.altitude) + 1)));
     }
     if (!cbor_array_push(arr.get(), alt_val.get())) {
       throw InvalidCborError("Failed to push catgeoalt altitude");
@@ -212,9 +215,9 @@ class CborMapBuilder {
     if (alt.deviation.has_value()) {
       const int32_t d = *alt.deviation;
       auto dev_val = d >= 0
-                         ? CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(d)))
-                         : CborItemPtr(cbor_build_negint64(
-                               static_cast<uint64_t>(-(static_cast<int64_t>(d) + 1))));
+                         ? cbor_build_uint64_owned(static_cast<uint64_t>(d))
+                         : cbor_build_negint64_owned(
+                               static_cast<uint64_t>(-(static_cast<int64_t>(d) + 1)));
       if (!cbor_array_push(arr.get(), dev_val.get())) {
         throw InvalidCborError("Failed to push catgeoalt deviation");
       }
@@ -224,7 +227,7 @@ class CborMapBuilder {
 
   // CTA-5007-B `geohash`: either a text string or an array of strings.
   void addClaimImpl(int64_t claim_id, const GeohashClaimValue& gh) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     if (gh.isString()) {
       auto val = CborItemPtr(cbor_build_string(gh.asString().c_str()));
       addPair(std::move(key), std::move(val));
@@ -243,9 +246,8 @@ class CborMapBuilder {
 
   // CTA-5007-B `catreplay`: unsigned integer mode (0/1/2/...).
   void addClaimImpl(int64_t claim_id, CatReplayMode mode) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
-    auto val = CborItemPtr(
-        cbor_build_uint64(static_cast<uint64_t>(mode)));
+    auto key = cbor_build_uint64_owned(claim_id);
+    auto val = cbor_build_uint64_owned(static_cast<uint64_t>(mode));
     addPair(std::move(key), std::move(val));
   }
 
@@ -255,7 +257,7 @@ class CborMapBuilder {
       throw InvalidClaimValueError(
           "'catpor' probability out of [0,1] or empty identifier");
     }
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     const size_t len = por.expiry.has_value() ? 3 : 2;
     auto arr = cbor_new_definite_array_owned(len);
     auto prob = CborItemPtr(cbor_build_float8(por.probability));
@@ -270,9 +272,9 @@ class CborMapBuilder {
     if (por.expiry.has_value()) {
       const int64_t e = *por.expiry;
       auto exp_val = e >= 0
-                         ? CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(e)))
-                         : CborItemPtr(cbor_build_negint64(
-                               static_cast<uint64_t>(-(e + 1))));
+                         ? cbor_build_uint64_owned(static_cast<uint64_t>(e))
+                         : cbor_build_negint64_owned(
+                               static_cast<uint64_t>(-(e + 1)));
       if (!cbor_array_push(arr.get(), exp_val.get())) {
         throw InvalidCborError("Failed to push catpor expiry");
       }
@@ -282,7 +284,7 @@ class CborMapBuilder {
 
   // CTA-5007-B `catnip`: array of tagged NIP entries.
   void addClaimImpl(int64_t claim_id, const std::vector<CatNipEntry>& nips) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     auto arr = cbor_new_definite_array_owned(nips.size());
     for (const auto& e : nips) {
       auto val =
@@ -298,16 +300,15 @@ class CborMapBuilder {
 
   // CTA-5007-B `catu`: map from component label (int) to [type, value].
   void addClaimImpl(int64_t claim_id, const CatUriMatchMap& catu) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     auto m = cbor_new_definite_map_owned(catu.components.size());
     for (const auto& [label, match] : catu.components) {
       auto lbl_key = label >= 0
-                         ? CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(label)))
-                         : CborItemPtr(cbor_build_negint64(
-                               static_cast<uint64_t>(-(label + 1))));
+                         ? cbor_build_uint64_owned(static_cast<uint64_t>(label))
+                         : cbor_build_negint64_owned(
+                               static_cast<uint64_t>(-(label + 1)));
       auto entry = cbor_new_definite_array_owned(2);
-      auto ty = CborItemPtr(
-          cbor_build_uint64(static_cast<uint64_t>(match.type)));
+      auto ty = cbor_build_uint64_owned(static_cast<uint64_t>(match.type));
       if (!cbor_array_push(entry.get(), ty.get())) {
         throw InvalidCborError("Failed to push catu type");
       }
@@ -324,7 +325,7 @@ class CborMapBuilder {
   // CTA-5007-B `catalpn`: array of ALPN byte strings (exact byte match).
   void addClaimImpl(int64_t claim_id,
                     const std::vector<std::vector<uint8_t>>& alpn) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     auto arr = cbor_new_definite_array_owned(alpn.size());
     for (const auto& proto : alpn) {
       auto val = cbor_build_bytestring_owned(proto.data(), proto.size());
@@ -337,7 +338,7 @@ class CborMapBuilder {
 
   // CTA-5007-B `cath`: array of [header_name, [type, value]] pairs.
   void addClaimImpl(int64_t claim_id, const CatHostHeaderMatchList& cath) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     auto arr = cbor_new_definite_array_owned(cath.entries.size());
     for (const auto& e : cath.entries) {
       auto pair = cbor_new_definite_array_owned(2);
@@ -346,8 +347,7 @@ class CborMapBuilder {
         throw InvalidCborError("Failed to push cath header name");
       }
       auto match = cbor_new_definite_array_owned(2);
-      auto ty = CborItemPtr(
-          cbor_build_uint64(static_cast<uint64_t>(e.match.type)));
+      auto ty = cbor_build_uint64_owned(static_cast<uint64_t>(e.match.type));
       if (!cbor_array_push(match.get(), ty.get())) {
         throw InvalidCborError("Failed to push cath match type");
       }
@@ -368,7 +368,7 @@ class CborMapBuilder {
 
   // RFC 8747 `cnf`: map with `jkt` bytes and/or `kid` string.
   void addClaimImpl(int64_t claim_id, const CatConfirmation& cnf) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     size_t entries = 0;
     if (cnf.jkt.has_value()) ++entries;
     if (cnf.kid.has_value()) ++entries;
@@ -384,7 +384,7 @@ class CborMapBuilder {
       // RFC 8747 §3.1 assigns label 3 to `kid`; §3.2 uses `jkt` under label
       // "jkt" in the confirmation JWK thumbprint form. We follow RFC 8747
       // and emit `jkt` as an integer label (3) with the SHA-256 bytes.
-      auto lbl = CborItemPtr(cbor_build_uint64(3));
+      auto lbl = cbor_build_uint64_owned(3);
       auto val = cbor_build_bytestring_owned(cnf.jkt->data(), cnf.jkt->size());
       addPairToMap(m.get(), std::move(lbl), std::move(val));
     }
@@ -400,7 +400,7 @@ class CborMapBuilder {
   //   0 -> window-seconds (uint)
   //   1 -> honor_jti (bool)
   void addClaimImpl(int64_t claim_id, const CatDpopSettings& d) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     // If only the raw pass-through bytes are present, emit them directly as
     // a byte string (issuer opaque form for future or unknown map labels).
     const bool has_typed =
@@ -415,17 +415,17 @@ class CborMapBuilder {
     if (d.honor_jti.has_value()) ++entries;
     auto m = cbor_new_definite_map_owned(entries);
     if (d.window_seconds.has_value()) {
-      auto lbl = CborItemPtr(cbor_build_uint64(0));
+      auto lbl = cbor_build_uint64_owned(0);
       const int64_t v = *d.window_seconds;
       if (v < 0) {
         throw InvalidClaimValueError(
             "'catdpop' window-seconds must be non-negative");
       }
-      auto val = CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(v)));
+      auto val = cbor_build_uint64_owned(static_cast<uint64_t>(v));
       addPairToMap(m.get(), std::move(lbl), std::move(val));
     }
     if (d.honor_jti.has_value()) {
-      auto lbl = CborItemPtr(cbor_build_uint64(1));
+      auto lbl = cbor_build_uint64_owned(1);
       auto val = CborItemPtr(cbor_build_bool(*d.honor_jti));
       addPairToMap(m.get(), std::move(lbl), std::move(val));
     }
@@ -434,7 +434,7 @@ class CborMapBuilder {
 
   // CTA-5007-B `catifdata`: string or array-of-strings.
   void addClaimImpl(int64_t claim_id, const CatIfData& v) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     if (v.isString()) {
       auto val = CborItemPtr(cbor_build_string(v.asString().c_str()));
       addPair(std::move(key), std::move(val));
@@ -455,7 +455,7 @@ class CborMapBuilder {
   // finalises typed accessors (tracked as future work).
   void addClaimImpl(int64_t claim_id, const CatRequestDirective& dir) {
     if (dir.empty()) return;
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     auto val = cbor_build_bytestring_owned(dir.raw.data(), dir.raw.size());
     addPair(std::move(key), std::move(val));
   }
@@ -463,7 +463,7 @@ class CborMapBuilder {
   // `cti` (RFC 8392 §3.1.7): CBOR byte string. Also used for `cattpk`,
   // and any other typed byte string claim.
   void addClaimImpl(int64_t claim_id, const std::vector<uint8_t>& data) {
-    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto key = cbor_build_uint64_owned(claim_id);
     auto val = cbor_build_bytestring_owned(data.data(), data.size());
     addPair(std::move(key), std::move(val));
   }
@@ -563,7 +563,7 @@ class ClaimProcessor {
     if (extended.hasMoqtClaims()) {
       const MoqtClaims& moqt = *extended.getMoqtClaimsReadOnly();
       auto moqt_item = buildMoqtClaimItem(moqt);
-      auto moqt_key = CborItemPtr(cbor_build_uint64(CLAIM_MOQT));
+      auto moqt_key = cbor_build_uint64_owned(CLAIM_MOQT);
       builder.addPairToMap(builder.root_.get(), std::move(moqt_key),
                            std::move(moqt_item));
 
@@ -573,9 +573,9 @@ class ClaimProcessor {
           throw InvalidClaimValueError(
               "'moqt-reval' revalidation interval must be non-negative");
         }
-        auto reval_key = CborItemPtr(cbor_build_uint64(CLAIM_MOQT_REVAL));
+        auto reval_key = cbor_build_uint64_owned(CLAIM_MOQT_REVAL);
         auto reval_val =
-            CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(secs)));
+            cbor_build_uint64_owned(static_cast<uint64_t>(secs));
         builder.addPairToMap(builder.root_.get(), std::move(reval_key),
                              std::move(reval_val));
       }
@@ -766,6 +766,11 @@ std::vector<uint8_t> Cwt::encodePayload() const {
 
     // Get the CBOR root and serialize
     auto root = builder.release();
+    // Some claim maps (e.g. catu.components) come from unordered containers,
+    // so the pair-insertion order isn't canonical. Sort every nested map by
+    // length-first key order before serializing so tokens round-trip through
+    // the strict decoder.
+    catapult::internal::canonicalizeMapOrder(root.get());
 
     unsigned char* raw_buffer;
     size_t buffer_size;
@@ -2777,7 +2782,7 @@ std::vector<uint8_t> Cwt::createDpopSigningInput(
 
     // Add action
     addToMap(actx_map.get(), CborItemPtr(cbor_build_string("action")),
-             CborItemPtr(cbor_build_uint64(actx.action)));
+             cbor_build_uint64_owned(actx.action));
 
     // Add tns (track namespace)
     addToMap(actx_map.get(), CborItemPtr(cbor_build_string("tns")),
@@ -2799,7 +2804,7 @@ std::vector<uint8_t> Cwt::createDpopSigningInput(
 
     // Add iat (issued at)
     addToMap(payload_map.get(), CborItemPtr(cbor_build_string("iat")),
-             CborItemPtr(cbor_build_uint64(iat)));
+             cbor_build_uint64_owned(iat));
 
     // Add jti if present
     if (jti.has_value()) {
@@ -2812,6 +2817,10 @@ std::vector<uint8_t> Cwt::createDpopSigningInput(
       addToMap(payload_map.get(), CborItemPtr(cbor_build_string("ath")),
                CborItemPtr(cbor_build_string(ath.value().c_str())));
     }
+
+    // Sort map keys into canonical order before serializing so the DPoP
+    // payload round-trips through loadStrict (RFC 8949 §4.2.3).
+    catapult::internal::canonicalizeMapOrder(payload_map.get());
 
     // Serialize CBOR to bytes
     unsigned char* raw_buffer;

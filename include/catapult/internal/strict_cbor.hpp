@@ -47,6 +47,12 @@ struct StrictCborOptions {
   /// no tags are allowed (CAT/COSE do not use tag numbers in the CWT
   /// payload; the outer COSE tag is handled separately).
   bool forbid_unrecognized_tags = true;
+  /// If true, require RFC 8949 §4.2.1 "Preferred serialization" for
+  /// integers — the shortest CBOR head that can represent the value.
+  bool require_shortest_integer = true;
+  /// If true, require RFC 8949 §4.2.3 "Length-first" canonical map key
+  /// ordering: shorter serialised key first, ties broken bytewise.
+  bool require_canonical_map_order = true;
 
   /// Derive strict options from an aggregated ParseLimits struct.
   static StrictCborOptions fromLimits(const ParseLimits& limits) noexcept {
@@ -70,5 +76,19 @@ struct StrictCborOptions {
  */
 CborItemPtr loadStrict(std::span<const uint8_t> data,
                        const StrictCborOptions& opts = {});
+
+/**
+ * @brief Recursively sort the pairs of every map in a CBOR tree so that the
+ *   serialized form satisfies RFC 8949 §4.2.3 "length-first" ordering.
+ *
+ * Rationale: catapult stores several claim maps in std::unordered_map, whose
+ * iteration order is nondeterministic, and libcbor's cbor_map_add preserves
+ * insertion order. Without this pass the encoder would emit tokens that the
+ * strict loader (loadStrict) itself would reject on round-trip.
+ *
+ * The reorder is in-place. Duplicate keys are not resolved here; loadStrict
+ * catches them separately.
+ */
+void canonicalizeMapOrder(cbor_item_t* item);
 
 }  // namespace catapult::internal
