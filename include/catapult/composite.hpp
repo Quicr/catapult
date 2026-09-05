@@ -459,16 +459,13 @@ constexpr bool validateDepth(const T& claim) noexcept {
 /**
  * @brief Runtime utility functions using TypedCompositeClaim
  *
- * These functions provide convenient ways to create typed composite claims from
- * collections of claim sets or tokens. All functions support optional
- * memory pool allocation for improved performance.
- *
- * Performance Notes:
- * - When usePool=true, uses ThreadLocalMemoryPool for both ClaimSet and
- * composite allocations
- * - Pool allocation is beneficial for high-frequency composite claim creation
- * - Pool reduces heap fragmentation and improves cache locality
- * - Default usePool=false maintains backward compatibility
+ * These functions create typed composite claims from collections of claim sets
+ * or tokens. The `usePool` parameter is currently a no-op (Phase 0 security
+ * fix, C-06): pool-backed allocation returned pooled storage inside a
+ * default-deleter std::unique_ptr, which is UB on destruction. Every path
+ * uses standard allocation regardless; passing usePool=true will emit a
+ * warning log and behave identically to usePool=false. Full pool support will
+ * return once the ownership model is rewritten (see remediation task #24).
  */
 
 /**

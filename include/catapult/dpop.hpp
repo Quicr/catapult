@@ -500,6 +500,11 @@ class DpopProofValidator {
   std::unordered_map<std::string, std::chrono::system_clock::time_point>
       used_jtis_;
   CatDpopSettings settings_;
+  // Optional external verifier used for CWT-encoded proofs (which do not
+  // carry an algorithm resolvable from their protected header alone). Set
+  // via `set_cwt_verifier()`. When null and the proof is CWT-encoded, the
+  // validator fails closed rather than silently skipping signature check.
+  const CryptographicAlgorithm* cwt_verifier_{nullptr};
 
  public:
   /**
@@ -509,7 +514,30 @@ class DpopProofValidator {
       : settings_(std::move(settings)) {}
 
   /**
-   * @brief Validate DPoP proof
+   * @brief Register the verifier used for CWT-encoded DPoP proofs.
+   *
+   * Required for CWT proofs: the COSE_Key present in the proof header
+   * carries public key material but not the algorithm binding needed by
+   * `CryptographicAlgorithm::verify`. Pass the algorithm instance that
+   * matches the expected key (typically resolved from the CAT's `cnf.jkt`
+   * out of band).
+   *
+   * Passing `nullptr` disables CWT verification, which will cause
+   * `validate_proof` to reject every CWT-encoded proof. JWT-encoded proofs
+   * are unaffected — they self-resolve their algorithm from the embedded
+   * JWK.
+   */
+  void set_cwt_verifier(const CryptographicAlgorithm* verifier) noexcept {
+    cwt_verifier_ = verifier;
+  }
+
+  /**
+   * @brief Validate DPoP proof.
+   *
+   * CTA-5007-B / CAT-4-MOQT: signature verification is MANDATORY. This
+   * method fails closed if the proof signature cannot be verified —
+   * including the case where a CWT-encoded proof is submitted without a
+   * verifier having been configured via `set_cwt_verifier`.
    */
   [[nodiscard]] bool validate_proof(
       const DpopProof& proof, int expected_action,
@@ -638,6 +666,18 @@ class DpopKeyPair {
    */
   [[nodiscard]] const std::string& get_public_key_thumbprint() const noexcept {
     return public_key_thumbprint_;
+  }
+
+  /**
+   * @brief Access the algorithm bound to this key pair.
+   *
+   * Intended for callers that need to hand a verifier to
+   * `DpopProofValidator::set_cwt_verifier()` when validating CWT proofs
+   * signed by this key pair. The returned reference is owned by this
+   * object; do not outlive the DpopKeyPair.
+   */
+  [[nodiscard]] const CryptographicAlgorithm& get_algorithm() const noexcept {
+    return *algorithm_;
   }
 
   /**

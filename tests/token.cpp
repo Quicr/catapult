@@ -166,18 +166,20 @@ TEST_CASE("ValidatorClockSkewTolerance") {
         .withCwtId("recently-expired-token");
         
     
-    // With default tolerance (60 seconds), should pass
-    CatTokenValidator validator1;
-    validator1.withExpectedIssuers({"https://trusted-issuer.com"})
-             .withExpectedAudiences({"https://my-service.com"});
-    REQUIRE_NOTHROW(validator1.validate(token));
-    
-    // With zero tolerance, should fail
-    CatTokenValidator validator2;
-    validator2.withExpectedIssuers({"https://trusted-issuer.com"})
-             .withExpectedAudiences({"https://my-service.com"})
-             .withClockSkewTolerance(0);
-    REQUIRE_THROWS_AS(validator2.validate(token), TokenExpiredError);
+    // CTA-5007-B §4.6.3–4.6.4: default is zero tolerance, so a recently
+    // expired token MUST be rejected without an explicit opt-in tolerance.
+    CatTokenValidator strictDefault;
+    strictDefault.withExpectedIssuers({"https://trusted-issuer.com"})
+        .withExpectedAudiences({"https://my-service.com"});
+    REQUIRE_THROWS_AS(strictDefault.validate(token), TokenExpiredError);
+
+    // Callers who explicitly opt into a non-zero tolerance for operational
+    // clock-skew reasons may still accept it.
+    CatTokenValidator withOptIn;
+    withOptIn.withExpectedIssuers({"https://trusted-issuer.com"})
+        .withExpectedAudiences({"https://my-service.com"})
+        .withClockSkewTolerance(60);
+    REQUIRE_NOTHROW(withOptIn.validate(token));
 }
 
 TEST_CASE("ValidatorMultipleAudiences") {

@@ -103,24 +103,46 @@ class CatTokenValidator {
   void validateCompositeClaims(const CatToken& token) const;
 };
 
-/**
- * @brief Encode a CAT token to string format
- * @param token Token to encode
- * @param algorithm Cryptographic algorithm for signing
- * @return Encoded token string
- */
-std::string encodeToken(const CatToken& token,
-                        CryptographicAlgorithm& algorithm);
+#ifdef CATAPULT_ENABLE_LEGACY_JWT_TOKEN
+namespace legacy {
 
 /**
- * @brief Decode and verify a CAT token from string format
- * @param tokenStr Encoded token string
- * @param algorithm Cryptographic algorithm for verification
- * @return Decoded and verified token
+ * @brief LEGACY, NON-STANDARD: encode a CAT token as a JWT-shaped
+ *        base64url(header) "." base64url(payload) "." base64url(signature)
+ *        string.
+ *
+ * WARNING: This format is NOT a CTA-5007-B CWT. It is retained only for
+ * backwards compatibility with existing consumers of the pre-1.3 API and
+ * MUST NOT be used for any interoperable CAT deployment. CTA-5007-B §4.3.1
+ * mandates a base64url-encoded CWT (COSE structure serialized to CBOR).
+ * Use `Cwt::createCwtBase64` / `Cwt::validateCwtBase64` for standards
+ * conformance.
+ *
+ * Availability of this API is gated at build time by the CMake option
+ * `CATAPULT_ENABLE_LEGACY_JWT_TOKEN` (OFF by default).
+ */
+[[deprecated(
+    "Legacy JWT-shaped token format is not CTA-5007-B compliant. Use "
+    "Cwt::createCwtBase64 instead.")]]
+std::string legacyJwtEncodeToken(const CatToken& token,
+                                 CryptographicAlgorithm& algorithm);
+
+/**
+ * @brief LEGACY, NON-STANDARD: decode and verify a JWT-shaped CAT token.
+ *
+ * See `legacyJwtEncodeToken` for the compatibility warning. Prefer
+ * `Cwt::validateCwtBase64` for standards-conformant validation.
+ *
  * @throws SignatureVerificationError if verification fails
  */
-CatToken decodeToken(const std::string& tokenStr,
-                     CryptographicAlgorithm& algorithm);
+[[deprecated(
+    "Legacy JWT-shaped token format is not CTA-5007-B compliant. Use "
+    "Cwt::validateCwtBase64 instead.")]]
+CatToken legacyJwtDecodeToken(const std::string& tokenStr,
+                              CryptographicAlgorithm& algorithm);
+
+}  // namespace legacy
+#endif  // CATAPULT_ENABLE_LEGACY_JWT_TOKEN
 
 /**
  * @brief Create a minimal valid token using token factory utilities

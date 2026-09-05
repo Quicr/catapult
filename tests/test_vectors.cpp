@@ -29,6 +29,26 @@
 using namespace catapult;
 using json = nlohmann::json;
 
+// The tests below intentionally exercise the deprecated legacy JWT-shaped
+// token API as a regression suite; suppress the deprecation warnings inside
+// this translation unit only.
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+#ifdef CATAPULT_ENABLE_LEGACY_JWT_TOKEN
+using catapult::legacy::legacyJwtDecodeToken;
+using catapult::legacy::legacyJwtEncodeToken;
+// Compatibility aliases so existing tests keep reading naturally.
+inline auto decodeToken(const std::string& s, CryptographicAlgorithm& a) {
+  return legacyJwtDecodeToken(s, a);
+}
+inline auto encodeToken(const CatToken& t, CryptographicAlgorithm& a) {
+  return legacyJwtEncodeToken(t, a);
+}
+#endif
+
 namespace {
 
 std::vector<uint8_t> hexToBytes(const std::string &hex) {

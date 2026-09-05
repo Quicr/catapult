@@ -7,12 +7,17 @@
 #include "catapult/claims.hpp"
 #include "catapult/composite_impl.hpp"
 #include "catapult/cwt.hpp"
+#include "catapult/internal/parse_limits.hpp"
 #include "catapult/logging.hpp"
 #include "catapult/validator.hpp"
 
 namespace catapult {
 
-CatTokenValidator::CatTokenValidator() : clockSkewTolerance_(60) {}
+// CTA-5007-B §4.6.3–4.6.4: recipients MUST NOT permit leeway when validating
+// `exp` and `nbf`. Default tolerance is zero; callers who need a non-zero
+// tolerance must set it explicitly via withClockSkewTolerance() and must
+// document the operational reason.
+CatTokenValidator::CatTokenValidator() : clockSkewTolerance_(0) {}
 
 CatTokenValidator& CatTokenValidator::withExpectedIssuers(
     const std::vector<std::string>& issuers) {
@@ -72,16 +77,38 @@ void CatTokenValidator::validate(const CatToken& token) const {
                  std::chrono::system_clock::now().time_since_epoch())
                  .count();
 
-  // Check expiration
+  // Cross-claim relationship: nbf must not exceed exp.
+  if (token.core.exp && token.core.nbf &&
+      *token.core.nbf > *token.core.exp) {
+    throw InvalidClaimValueError(
+        "Token 'nbf' is after 'exp' — token is uninhabitable");
+  }
+
+  // Check expiration. Guard the tolerance addition against signed overflow
+  // before comparing against `now`.
   if (token.core.exp) {
-    if (now > *token.core.exp + clockSkewTolerance_) {
+    const int64_t exp = *token.core.exp;
+    int64_t exp_deadline;
+    if (__builtin_add_overflow(exp, clockSkewTolerance_, &exp_deadline)) {
+      // Overflow implies an implausibly distant future — treat as invalid
+      // rather than accept a token whose deadline cannot be represented.
+      throw InvalidClaimValueError(
+          "'exp' + clock skew tolerance overflows int64_t");
+    }
+    if (now > exp_deadline) {
       throw TokenExpiredError();
     }
   }
 
-  // Check not before
+  // Check not before, guarding subtraction against signed overflow.
   if (token.core.nbf) {
-    if (now < *token.core.nbf - clockSkewTolerance_) {
+    const int64_t nbf = *token.core.nbf;
+    int64_t nbf_floor;
+    if (__builtin_sub_overflow(nbf, clockSkewTolerance_, &nbf_floor)) {
+      throw InvalidClaimValueError(
+          "'nbf' - clock skew tolerance overflows int64_t");
+    }
+    if (now < nbf_floor) {
       throw TokenNotYetValidError();
     }
   }
@@ -196,42 +223,47 @@ CatToken createMinimalToken(const std::string& issuer,
   return token;
 }
 
-std::string encodeToken(const CatToken& token,
-                        CryptographicAlgorithm& algorithm) {
-  CAT_LOG_DEBUG("Encoding CAT token with algorithm ID: {}",
+#ifdef CATAPULT_ENABLE_LEGACY_JWT_TOKEN
+namespace legacy {
+
+std::string legacyJwtEncodeToken(const CatToken& token,
+                                 CryptographicAlgorithm& algorithm) {
+  CAT_LOG_DEBUG("Encoding legacy JWT-shaped CAT token with algorithm ID: {}",
                 algorithm.algorithmId());
   Cwt cwt(algorithm.algorithmId(), token);
 
-  // Create header CBOR
-  std::vector<uint8_t> headerCbor;
-  // Simplified header creation - in real implementation would use libcbor
+  // NOTE: This header is a JSON string, not CBOR, despite historical variable
+  // names. The legacy format is intentionally non-standard; do not use for
+  // interoperable CAT deployments.
+  std::vector<uint8_t> headerBytes;
   std::ostringstream headerStream;
   headerStream << "{\"alg\":" << algorithm.algorithmId() << ",\"typ\":\"CAT\"}";
   std::string headerStr = headerStream.str();
-  headerCbor.assign(headerStr.begin(), headerStr.end());
+  headerBytes.assign(headerStr.begin(), headerStr.end());
 
-  // Encode payload
   auto payloadCbor = cwt.encodePayload();
-
-  // Create JWT-style signing input for legacy token format
-  auto signingInput = createJwtSigningInput(headerCbor, payloadCbor);
-
-  // Sign
+  auto signingInput = createJwtSigningInput(headerBytes, payloadCbor);
   auto signature = algorithm.sign(signingInput);
 
-  // Base64URL encode components
-  auto headerB64 = base64UrlEncode(headerCbor);
+  auto headerB64 = base64UrlEncode(headerBytes);
   auto payloadB64 = base64UrlEncode(payloadCbor);
   auto signatureB64 = base64UrlEncode(signature);
 
   return headerB64 + "." + payloadB64 + "." + signatureB64;
 }
 
-CatToken decodeToken(const std::string& tokenStr,
-                     CryptographicAlgorithm& algorithm) {
-  CAT_LOG_DEBUG("Decoding CAT token with algorithm ID: {}",
+CatToken legacyJwtDecodeToken(const std::string& tokenStr,
+                              CryptographicAlgorithm& algorithm) {
+  CAT_LOG_DEBUG("Decoding legacy JWT-shaped CAT token with algorithm ID: {}",
                 algorithm.algorithmId());
-  // Split token
+  // Bound attacker-controlled input before spending any parsing budget.
+  // The legacy format is dot-separated base64 so the encoded ceiling is a
+  // safe upper bound for the whole string.
+  if (tokenStr.size() > internal::kMaxEncodedTokenBytes) {
+    CAT_LOG_ERROR("Legacy JWT-shaped token exceeds maximum ({} > {})",
+                  tokenStr.size(), internal::kMaxEncodedTokenBytes);
+    throw InvalidTokenFormatError();
+  }
   std::vector<std::string> parts;
   std::stringstream ss(tokenStr);
   std::string part;
@@ -241,25 +273,25 @@ CatToken decodeToken(const std::string& tokenStr,
   }
 
   if (parts.size() != 3) {
-    CAT_LOG_ERROR("Invalid token format: expected 3 parts, got {}",
+    CAT_LOG_ERROR("Invalid legacy token format: expected 3 parts, got {}",
                   parts.size());
     throw InvalidTokenFormatError();
   }
 
-  // Decode components
-  auto headerCbor = base64UrlDecode(parts[0]);
+  auto headerBytes = base64UrlDecode(parts[0]);
   auto payloadCbor = base64UrlDecode(parts[1]);
   auto signature = base64UrlDecode(parts[2]);
 
-  // Verify JWT-style signature for legacy token format
-  auto signingInput = createJwtSigningInput(headerCbor, payloadCbor);
+  auto signingInput = createJwtSigningInput(headerBytes, payloadCbor);
   if (!algorithm.verify(signingInput, signature)) {
     throw SignatureVerificationError();
   }
 
-  // Decode payload
   return Cwt::decodePayload(payloadCbor);
 }
+
+}  // namespace legacy
+#endif  // CATAPULT_ENABLE_LEGACY_JWT_TOKEN
 
 // Explicit template instantiations for composite claims with CatTokenValidator
 template bool CompositeClaims::validateAll<CatTokenValidator>(

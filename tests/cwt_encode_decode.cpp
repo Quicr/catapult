@@ -192,6 +192,36 @@ TEST_SUITE("CWT Encode/Decode Tests") {
         CHECK(decoded.core.nbf.value() == 1600000000);
     }
 
+    TEST_CASE("Oversized encoded CWT is rejected before crypto/CBOR work") {
+        // CTA-5007-B §4.3.1 recommends rejecting CATs beyond ~4096 bytes.
+        std::vector<uint8_t> keyBytes(32, 0x11);
+        HmacSha256Algorithm hmac(keyBytes);
+        std::string oversize(8192, 'A');  // valid base64url charset, ~8 KiB
+        CHECK_THROWS_AS(Cwt::validateCwtBase64(oversize, hmac),
+                        InvalidTokenFormatError);
+    }
+
+    TEST_CASE("Decoder rejects malformed 'iss' (int instead of string)") {
+        // C-05: a security parser MUST NOT silently repair malformed known
+        // claims. iss must be a text string per CTA-5007-B / RFC 8392.
+        // CBOR: {1: 42} -> a1 01 18 2a
+        std::vector<uint8_t> cbor = {0xa1, 0x01, 0x18, 0x2a};
+        CHECK_THROWS_AS(Cwt::decodePayload(cbor), InvalidClaimValueError);
+    }
+
+    TEST_CASE("Decoder rejects malformed 'exp' (negative)") {
+        // {4: -1} -> a1 04 20 (negint 0 = -1)
+        std::vector<uint8_t> cbor = {0xa1, 0x04, 0x20};
+        CHECK_THROWS_AS(Cwt::decodePayload(cbor), InvalidClaimValueError);
+    }
+
+    TEST_CASE("Decoder rejects non-uint claim key") {
+        // {"iss": "x"} using text-string key is not a valid CWT claim label
+        // per RFC 8392 §4 — labels must be integers. a1 63 69 73 73 61 78
+        std::vector<uint8_t> cbor = {0xa1, 0x63, 0x69, 0x73, 0x73, 0x61, 0x78};
+        CHECK_THROWS_AS(Cwt::decodePayload(cbor), InvalidTokenFormatError);
+    }
+
     TEST_CASE("Encode large payload") {
         std::vector<std::string> largeAudience;
         for (int i = 0; i < 100; ++i) {
