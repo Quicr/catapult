@@ -79,6 +79,20 @@ std::vector<uint8_t> hashSha256(const std::vector<uint8_t>& data) {
   return hash;
 }
 
+std::vector<uint8_t> hashSha512_256(const std::vector<uint8_t>& data) {
+  std::vector<uint8_t> hash(SHA256_DIGEST_LENGTH);
+  unsigned int len = 0;
+  auto ctx = EvpMdCtxWrapper(EVP_MD_CTX_new());
+  if (!ctx.get() ||
+      EVP_DigestInit_ex(ctx.get(), EVP_sha512_256(), nullptr) != 1 ||
+      EVP_DigestUpdate(ctx.get(), data.data(), data.size()) != 1 ||
+      EVP_DigestFinal_ex(ctx.get(), hash.data(), &len) != 1) {
+    throw std::runtime_error("SHA-512/256 digest failed");
+  }
+  hash.resize(len);
+  return hash;
+}
+
 // Base structure builder - handles common CBOR operations
 class SigStructureBuilder {
  protected:

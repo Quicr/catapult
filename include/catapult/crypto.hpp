@@ -521,6 +521,12 @@ std::vector<uint8_t> createJwtSigningInput(const std::vector<uint8_t>& header,
 std::vector<uint8_t> hashSha256(const std::vector<uint8_t>& data);
 
 /**
+ * @brief Compute SHA-512/256 (SHA-512 truncated to the first 256 bits per
+ *        FIPS 180-4 §6.7).
+ */
+std::vector<uint8_t> hashSha512_256(const std::vector<uint8_t>& data);
+
+/**
  * @brief AES-GCM algorithm implementation for AEAD encryption
  */
 class AesGcmAlgorithm : public CryptographicAlgorithm {

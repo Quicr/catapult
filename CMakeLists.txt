@@ -176,6 +176,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         tests/memory_pool.cpp
         tests/moqt_claims.cpp
         tests/parse_limits.cpp
+        tests/uri_catu.cpp
         tests/secure_vector.cpp
         tests/strict_cbor.cpp
         tests/token.cpp
