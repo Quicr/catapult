@@ -79,25 +79,6 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         });
     }
 
-    TEST_CASE("RFC 8392 Section 7 - Create Signed CWT with PS256") {
-        auto token = createTestToken();
-        Cwt cwt(ALG_PS256, token);
-        cwt.withKeyId("test-key-ps256");
-        
-        // Generate PS256 key pair
-        auto keyPair = Ps256Algorithm::generateSecureKeyPair();
-        Ps256Algorithm ps256Alg(keyPair.first, keyPair.second);
-        
-        // Create signed CWT
-        REQUIRE_NOTHROW({
-            std::string signedCwt = cwt.createCwtBase64(CwtMode::Signed, ps256Alg);
-            
-            checkBase64UrlEncoding(signedCwt);
-            
-            INFO("Generated PS256 CWT length: " << signedCwt.size());
-        });
-    }
-
     TEST_CASE("RFC 8392 Section 7 - Full Round Trip: Create and Validate Signed CWT") {
         auto originalToken = createTestToken();
         Cwt originalCwt(ALG_ES256, originalToken);

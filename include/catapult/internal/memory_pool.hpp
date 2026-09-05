@@ -264,30 +264,6 @@ class BoundedObjectPool {
   }
 };
 
-/**
- * @brief Thread-local pool wrapper — same API, per-thread instance.
- */
-template <typename T, size_t PoolSize = 1024>
-class ThreadLocalMemoryPool {
- private:
-  thread_local static BoundedObjectPool<T, PoolSize> pool_;
-
- public:
-  using PoolPtr = typename BoundedObjectPool<T, PoolSize>::PoolPtr;
-
-  template <typename... Args>
-  [[nodiscard]] static PoolPtr make(Args&&... args) noexcept(
-      std::is_nothrow_constructible_v<T, Args...>) {
-    return pool_.make(std::forward<Args>(args)...);
-  }
-
-  static auto get_stats() noexcept { return pool_.get_stats(); }
-};
-
-template <typename T, size_t PoolSize>
-thread_local BoundedObjectPool<T, PoolSize>
-    ThreadLocalMemoryPool<T, PoolSize>::pool_;
-
 }  // namespace catapult
 
 #ifdef _MSC_VER

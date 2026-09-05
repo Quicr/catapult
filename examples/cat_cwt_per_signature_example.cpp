@@ -40,7 +40,6 @@ int main() {
 
     // Create different cryptographic algorithms
     auto es256Algorithm = std::make_unique<Es256Algorithm>();
-    auto ps256Algorithm = std::make_unique<Ps256Algorithm>();
 
     std::vector<uint8_t> hmacKey(
         reinterpret_cast<const uint8_t*>("hmac-secret-key-16"),
@@ -53,9 +52,6 @@ int main() {
 
     // Add ES256 signature (PKI authority)
     cwt.addSignature(*es256Algorithm);
-
-    // Add PS256 signature (Government authority)
-    cwt.addSignature(*ps256Algorithm);
 
     // Add HMAC signature (Internal authority)
     cwt.addSignature(*hmacAlgorithm);
@@ -78,8 +74,6 @@ int main() {
         algorithmMap;
     algorithmMap.emplace(es256Algorithm->algorithmId(),
                          std::cref(*es256Algorithm));
-    algorithmMap.emplace(ps256Algorithm->algorithmId(),
-                         std::cref(*ps256Algorithm));
     algorithmMap.emplace(hmacAlgorithm->algorithmId(),
                          std::cref(*hmacAlgorithm));
 
@@ -111,9 +105,6 @@ int main() {
       if (validatedCwt.signatures[i].algorithmId ==
           es256Algorithm->algorithmId()) {
         algName = "ES256";
-      } else if (validatedCwt.signatures[i].algorithmId ==
-                 ps256Algorithm->algorithmId()) {
-        algName = "PS256";
       } else if (validatedCwt.signatures[i].algorithmId ==
                  hmacAlgorithm->algorithmId()) {
         algName = "HMAC-SHA256";

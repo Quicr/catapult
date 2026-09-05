@@ -124,8 +124,7 @@ consteval bool is_valid_claim_id(int64_t claim_id) noexcept {
  * @brief Validation of COSE algorithm
  */
 consteval bool is_valid_cose_algorithm(int64_t alg_id) noexcept {
-  return alg_id == -4 || alg_id == -7 ||
-         alg_id == -37;  // HMAC256, ES256, PS256
+  return alg_id == -4 || alg_id == -7;  // HMAC256, ES256
 }
 
 /**

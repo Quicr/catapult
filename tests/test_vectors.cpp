@@ -29,33 +29,6 @@
 using namespace catapult;
 using json = nlohmann::json;
 
-// The tests below intentionally exercise the deprecated legacy JWT-shaped
-// token API as a regression suite; suppress the deprecation warnings inside
-// this translation unit only.
-#if defined(__clang__) || defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-
-// The legacy JWT-shaped API is now double-gated: enabling the CMake
-// option is not enough. Every translation unit that uses it must also
-// acknowledge the insecurity by defining this macro before including
-// validator.hpp. Do that here for the regression suite only.
-#ifdef CATAPULT_ENABLE_LEGACY_JWT_TOKEN
-#ifndef CATAPULT_LEGACY_JWT_ACKNOWLEDGE_INSECURE
-#error "Test build force-enables the legacy JWT API; expected the ACKNOWLEDGE_INSECURE macro to have been defined by CMake."
-#endif
-using catapult::legacy::legacyJwtDecodeToken;
-using catapult::legacy::legacyJwtEncodeToken;
-// Compatibility aliases so existing tests keep reading naturally.
-inline auto decodeToken(const std::string& s, CryptographicAlgorithm& a) {
-  return legacyJwtDecodeToken(s, a);
-}
-inline auto encodeToken(const CatToken& t, CryptographicAlgorithm& a) {
-  return legacyJwtEncodeToken(t, a);
-}
-#endif
-
 namespace {
 
 std::vector<uint8_t> hexToBytes(const std::string &hex) {
@@ -67,23 +40,6 @@ std::vector<uint8_t> hexToBytes(const std::string &hex) {
     bytes.push_back(byte);
   }
   return bytes;
-}
-
-std::vector<uint8_t> rawEcdsaToDer(const std::vector<uint8_t> &raw) {
-  if (raw.size() != 64) return raw;
-  auto r = BN_bin2bn(raw.data(), 32, nullptr);
-  auto s = BN_bin2bn(raw.data() + 32, 32, nullptr);
-
-  ECDSA_SIG *sig = ECDSA_SIG_new();
-  ECDSA_SIG_set0(sig, r, s);
-
-  unsigned char *der = nullptr;
-  int derLen = i2d_ECDSA_SIG(sig, &der);
-  ECDSA_SIG_free(sig);
-
-  std::vector<uint8_t> result(der, der + derLen);
-  OPENSSL_free(der);
-  return result;
 }
 
 std::string bytesToHex(const std::vector<uint8_t> &bytes) {
@@ -334,30 +290,6 @@ TEST_CASE("Token Structure - HMAC-SHA256 signature verification") {
     CHECK_THROWS(Cwt::decodePayload(payloadBytes));
   }
 
-  SUBCASE("token_hmac_minimal - decodeToken round-trip") {
-    auto &v = token_vectors[0];
-    auto keyBytes = hexToBytes(v["key_hex"].get<std::string>());
-    HmacSha256Algorithm hmac(keyBytes);
-
-    std::string tokenStr = v["token"].get<std::string>();
-    auto token = decodeToken(tokenStr, hmac);
-
-    CHECK(token.core.iss == "https://auth.example.com");
-    REQUIRE(token.core.aud.has_value());
-    CHECK((*token.core.aud)[0] == "https://relay.example.com");
-    CHECK(token.core.exp == 1700086400);
-  }
-
-  SUBCASE("token_hmac_full - decodeToken round-trip") {
-    auto &v = token_vectors[1];
-    auto keyBytes = hexToBytes(v["key_hex"].get<std::string>());
-    HmacSha256Algorithm hmac(keyBytes);
-
-    // Legacy vector encodes catv/catu with pre-CTA-5007-B types; the strict
-    // decoder now rejects it. TODO(phase-2): regenerate with typed schema.
-    std::string tokenStr = v["token"].get<std::string>();
-    CHECK_THROWS(decodeToken(tokenStr, hmac));
-  }
 }
 
 TEST_CASE("Token Structure - ES256 signature verification") {
@@ -427,145 +359,6 @@ TEST_CASE("Base64url - Encoding/decoding consistency with test vectors") {
     auto sigBytes = hexToBytes(sigHex);
     auto sigEncoded = base64UrlEncode(sigBytes);
     CHECK(sigEncoded == v["signature_b64"].get<std::string>());
-  }
-}
-
-TEST_CASE("Validation - Signature failure scenarios") {
-  auto vectors = loadTestVectors();
-  auto &keys = vectors["keys"];
-  auto &val_vectors = vectors["vectors"]["validation"]["vectors"];
-  auto hmacKey = hexToBytes(keys["hmac_sha256"].get<std::string>());
-  HmacSha256Algorithm hmac(hmacKey);
-
-  SUBCASE("invalid_tampered_signature - Corrupted signature rejected") {
-    auto &v = val_vectors[5];
-    REQUIRE(v["id"] == "invalid_tampered_signature");
-
-    std::string tokenStr = v["token"].get<std::string>();
-    CHECK_THROWS_AS(decodeToken(tokenStr, hmac), SignatureVerificationError);
-  }
-
-  SUBCASE("invalid_wrong_key - Wrong key rejected") {
-    auto &v = val_vectors[6];
-    REQUIRE(v["id"] == "invalid_wrong_key");
-
-    auto wrongKey =
-        hexToBytes(v["validation"]["wrong_key_hex"].get<std::string>());
-    HmacSha256Algorithm wrongHmac(wrongKey);
-
-    std::string tokenStr = v["token"].get<std::string>();
-    CHECK_THROWS_AS(decodeToken(tokenStr, wrongHmac),
-                    SignatureVerificationError);
-  }
-
-  SUBCASE("invalid_tampered_signature - Original token is valid") {
-    auto &v = val_vectors[5];
-    std::string originalToken =
-        v["original_token"].get<std::string>();
-    REQUIRE_NOTHROW(decodeToken(originalToken, hmac));
-  }
-}
-
-TEST_CASE("Validation - Claim validation scenarios") {
-  auto vectors = loadTestVectors();
-  auto &keys = vectors["keys"];
-  auto &val_vectors = vectors["vectors"]["validation"]["vectors"];
-  auto hmacKey = hexToBytes(keys["hmac_sha256"].get<std::string>());
-  HmacSha256Algorithm hmac(hmacKey);
-
-  SUBCASE("valid_basic - Token claims are correct") {
-    auto &v = val_vectors[0];
-    REQUIRE(v["id"] == "valid_basic");
-
-    std::string tokenStr = v["token"].get<std::string>();
-    auto token = decodeToken(tokenStr, hmac);
-
-    CHECK(token.core.iss == "https://auth.example.com");
-    REQUIRE(token.core.aud.has_value());
-    CHECK((*token.core.aud)[0] == "https://relay.example.com");
-    CHECK(token.core.exp == 1700086400);
-    CHECK(token.core.nbf == 1700000000);
-
-    CatTokenValidator validator;
-    validator
-        .withExpectedIssuers(
-            v["validation"]["expected_issuers"]
-                .get<std::vector<std::string>>())
-        .withExpectedAudiences(
-            v["validation"]["expected_audiences"]
-                .get<std::vector<std::string>>())
-        .withClockSkewTolerance(
-            static_cast<int64_t>(2000000000));
-    REQUIRE_NOTHROW(validator.validate(token));
-  }
-
-  SUBCASE("invalid_expired - Expired token decoded then rejected") {
-    auto &v = val_vectors[1];
-    REQUIRE(v["id"] == "invalid_expired");
-
-    std::string tokenStr = v["token"].get<std::string>();
-    auto token = decodeToken(tokenStr, hmac);
-
-    CatTokenValidator validator;
-    CHECK_THROWS_AS(validator.validate(token), TokenExpiredError);
-  }
-
-  SUBCASE("invalid_not_yet_valid - NBF in the future relative to reference time") {
-    auto &v = val_vectors[2];
-    REQUIRE(v["id"] == "invalid_not_yet_valid");
-
-    std::string tokenStr = v["token"].get<std::string>();
-    auto token = decodeToken(tokenStr, hmac);
-
-    // The vector has nbf=1700086400, exp=1700172800 at reference_time=1700000000.
-    // At that reference time, nbf is in the future (token not yet valid).
-    // Since current wall clock is past exp, our validator sees expiry first.
-    // Either way, the token correctly fails validation.
-    REQUIRE(token.core.nbf.has_value());
-    REQUIRE(token.core.exp.has_value());
-    CHECK(*token.core.exp > *token.core.nbf);
-
-    CatTokenValidator validator;
-    CHECK_THROWS(validator.validate(token));
-  }
-
-  SUBCASE("invalid_wrong_issuer - Issuer validation") {
-    auto &v = val_vectors[3];
-    REQUIRE(v["id"] == "invalid_wrong_issuer");
-
-    std::string tokenStr = v["token"].get<std::string>();
-    auto token = decodeToken(tokenStr, hmac);
-
-    // The token exp is also in the past. Use large clock skew to
-    // bypass time checks and test issuer validation.
-    CatTokenValidator validator;
-    validator.withExpectedIssuers(
-        v["validation"]["expected_issuers"]
-            .get<std::vector<std::string>>())
-        .withClockSkewTolerance(static_cast<int64_t>(2000000000));
-
-    CHECK_THROWS_AS(validator.validate(token), InvalidIssuerError);
-  }
-
-  SUBCASE("invalid_wrong_audience - Audience validation") {
-    auto &v = val_vectors[4];
-    REQUIRE(v["id"] == "invalid_wrong_audience");
-
-    std::string tokenStr = v["token"].get<std::string>();
-    auto token = decodeToken(tokenStr, hmac);
-
-    CatTokenValidator validator;
-    validator
-        .withExpectedIssuers(
-            v["validation"]["expected_issuers"]
-                .get<std::vector<std::string>>())
-        .withExpectedAudiences(
-            v["validation"]["expected_audiences"]
-                .get<std::vector<std::string>>())
-        .withClockSkewTolerance(
-            static_cast<int64_t>(2000000000));
-
-    CHECK_THROWS_AS(validator.validate(token), InvalidAudienceError);
   }
 }
 
@@ -659,20 +452,6 @@ TEST_CASE("MOQT Scopes - CBOR payload decoding") {
   }
 }
 
-TEST_CASE("MOQT Scopes - Token signature verification") {
-  auto vectors = loadTestVectors();
-  auto &keys = vectors["keys"];
-  auto &moqt_vectors = vectors["vectors"]["moqt_scopes"]["vectors"];
-  auto hmacKey = hexToBytes(keys["hmac_sha256"].get<std::string>());
-  HmacSha256Algorithm hmac(hmacKey);
-
-  for (auto &v : moqt_vectors) {
-    if (!v.contains("token")) continue;
-    std::string tokenStr = v["token"].get<std::string>();
-    REQUIRE_NOTHROW(decodeToken(tokenStr, hmac));
-  }
-}
-
 TEST_CASE("DPoP Binding - Payload decoding from test vectors") {
   auto vectors = loadTestVectors();
   auto &dpop_vectors = vectors["vectors"]["dpop_binding"]["vectors"];
@@ -699,26 +478,6 @@ TEST_CASE("DPoP Binding - Payload decoding from test vectors") {
     REQUIRE(token.core.aud.has_value());
     CHECK((*token.core.aud)[0] == "https://relay.example.com");
     CHECK(token.core.exp == 1700086400);
-  }
-}
-
-TEST_CASE("DPoP Binding - HMAC token signature verification") {
-  auto vectors = loadTestVectors();
-  auto &keys = vectors["keys"];
-  auto &dpop_vectors = vectors["vectors"]["dpop_binding"]["vectors"];
-  auto hmacKey = hexToBytes(keys["hmac_sha256"].get<std::string>());
-  HmacSha256Algorithm hmac(hmacKey);
-
-  SUBCASE("dpop_jwk_binding") {
-    auto &v = dpop_vectors[0];
-    std::string tokenStr = v["token"].get<std::string>();
-    REQUIRE_NOTHROW(decodeToken(tokenStr, hmac));
-  }
-
-  SUBCASE("dpop_no_jti") {
-    auto &v = dpop_vectors[1];
-    std::string tokenStr = v["token"].get<std::string>();
-    REQUIRE_NOTHROW(decodeToken(tokenStr, hmac));
   }
 }
 

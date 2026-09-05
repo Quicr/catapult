@@ -208,4 +208,94 @@ TEST_SUITE("DPoP CWT wire format") {
                                          expected_uri,
                                          real_keys->get_public_key_thumbprint()));
   }
+
+  TEST_CASE("DpopProofValidator refuses an empty expected thumbprint") {
+    // HN-03: an empty expected thumbprint cannot represent a policy
+    // intent. The API must fail closed rather than let the caller
+    // accidentally disable the `cnf`/`catdpop` binding check.
+    auto keys = makeEs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-empty-thumb"});
+    auto expected_uri =
+        moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
+
+    DpopValidationSettings settings;
+    settings.set_window(std::chrono::seconds{300});
+    DpopProofValidator validator(settings);
+    validator.set_cwt_verifier(&keys->get_algorithm());
+
+    CHECK_FALSE(
+        validator.validate_proof(proof, moqt_actions::PUBLISH, expected_uri,
+                                 /*expected_public_key_thumbprint=*/""));
+  }
+
+  TEST_CASE(
+      "DpopProofValidator rejects wrong-key proofs before touching the "
+      "replay store") {
+    // HN-03: the thumbprint check must precede replay admission —
+    // otherwise a proof bound to another key can consume admission
+    // slots for the victim's jti, poisoning the bounded store.
+    auto real_keys = makeEs256KeyPair();
+    auto imposter_keys = makeEs256KeyPair();
+    auto expected_uri =
+        moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
+    auto imposter_proof = imposter_keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-shared-target"});
+
+    DpopValidationSettings settings;
+    settings.set_window(std::chrono::seconds{300});
+    DpopProofValidator validator(settings);
+    // Verifier is bound to the imposter's key so signature verification
+    // itself would succeed. The rejection must therefore come from the
+    // thumbprint mismatch check, not from replay admission.
+    validator.set_cwt_verifier(&imposter_keys->get_algorithm());
+
+    CHECK_FALSE(validator.validate_proof(
+        imposter_proof, moqt_actions::PUBLISH, expected_uri,
+        real_keys->get_public_key_thumbprint()));
+
+    // The victim's own proof reusing the same jti must still be
+    // admittable — if the imposter's rejected proof had consumed the
+    // slot, this would fail.
+    auto victim_proof = real_keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-shared-target"});
+    validator.set_cwt_verifier(&real_keys->get_algorithm());
+    CHECK(validator.validate_proof(victim_proof, moqt_actions::PUBLISH,
+                                   expected_uri,
+                                   real_keys->get_public_key_thumbprint()));
+  }
+
+  TEST_CASE("CWT DPoP deserialization rejects non-18 outer tag") {
+    // HN-03: a COSE_Sign1 body labelled with any other single-recipient
+    // tag must be refused before we do any crypto.
+    auto keys = makeEs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-tag-check"});
+    auto wire = proof.serialize();
+    auto cose_bytes = base64UrlDecode(wire);
+
+    // Prepend CBOR tag 17 (0xd1) — an untagged encoder means this
+    // synthesizes the "mis-tagged" case even if the wire form was
+    // originally untagged.
+    std::vector<uint8_t> mistagged;
+    mistagged.reserve(cose_bytes.size() + 1);
+    mistagged.push_back(0xd1);
+    mistagged.insert(mistagged.end(), cose_bytes.begin(), cose_bytes.end());
+    auto mistagged_wire = base64UrlEncode(mistagged);
+
+    CHECK_THROWS(DpopProof::deserialize_cwt(mistagged_wire));
+
+    // A correctly-tagged (18/0xd2) proof must accept.
+    std::vector<uint8_t> correctly_tagged;
+    correctly_tagged.reserve(cose_bytes.size() + 1);
+    correctly_tagged.push_back(0xd2);
+    correctly_tagged.insert(correctly_tagged.end(), cose_bytes.begin(),
+                            cose_bytes.end());
+    auto tagged_wire = base64UrlEncode(correctly_tagged);
+    CHECK_NOTHROW(DpopProof::deserialize_cwt(tagged_wire));
+  }
 }

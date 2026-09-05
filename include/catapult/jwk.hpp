@@ -29,14 +29,6 @@ namespace jwk {
 std::string createES256JWK(const std::vector<uint8_t>& public_key_der);
 
 /**
- * @brief Create PS256 JWK from DER-encoded public key
- * @param public_key_der DER-encoded public key bytes
- * @return JWK JSON string
- * @throws CryptoError if key parsing or extraction fails
- */
-std::string createPS256JWK(const std::vector<uint8_t>& public_key_der);
-
-/**
  * @brief Calculate JWK thumbprint using SHA-256
  * @param jwk_json JWK in JSON string format
  * @return Base64url-encoded thumbprint
@@ -46,7 +38,7 @@ std::string calculateJWKThumbprint(const std::string& jwk_json);
 
 /**
  * @brief Create JWK from algorithm-specific public key
- * @param algorithm_id COSE algorithm identifier (ALG_ES256, ALG_PS256, etc.)
+ * @param algorithm_id COSE algorithm identifier (ALG_ES256, etc.)
  * @param public_key_der DER-encoded public key bytes
  * @return JWK JSON string
  * @throws CryptoError if algorithm is unsupported or key parsing fails

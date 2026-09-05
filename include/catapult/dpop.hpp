@@ -312,6 +312,17 @@ class DpopProof {
   DpopPayload payload_;
   std::vector<uint8_t> signature_;
   DpopEncoding encoding_ = DpopEncoding::CWT;
+  // Original wire signing input as it was signed by the issuer. For JWT
+  // proofs this is `base64url(header) "." base64url(payload)` taken
+  // verbatim from the wire; for CWT proofs it is the Sig_structure
+  // computed from the wire-protected header and wire payload bytes. This
+  // is populated on deserialization so that verification checks the
+  // exact bytes that were signed rather than a re-serialization from the
+  // parsed struct — otherwise re-canonicalising JSON (key order, escape
+  // rules, whitespace) or CBOR fields can silently break signature
+  // matching or, worse, produce a re-serialization that still verifies
+  // even though the wire had been tampered with (HN-03).
+  std::vector<uint8_t> wire_signing_input_;
 
  public:
   /**
@@ -325,6 +336,16 @@ class DpopProof {
         signature_(signature.begin(), signature.end()),
         encoding_(encoding) {
     header_.set_encoding(encoding);
+  }
+
+  /**
+   * @brief Set the original wire signing input (used by deserializers).
+   *
+   * Verifiers use these bytes verbatim so that signature checks bind to
+   * the exact bytes that were signed.
+   */
+  void set_wire_signing_input(std::vector<uint8_t> bytes) {
+    wire_signing_input_ = std::move(bytes);
   }
 
   /**
@@ -780,7 +801,7 @@ class DpopKeyPair {
   }
 
   /**
-   * @brief Get algorithm name (e.g., "ES256", "PS256")
+   * @brief Get algorithm name (e.g., "ES256")
    */
   [[nodiscard]] std::string get_algorithm_name() const;
 

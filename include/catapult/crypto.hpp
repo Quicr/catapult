@@ -36,7 +36,6 @@ namespace catapult {
 /// COSE Algorithm Identifiers
 constexpr int64_t ALG_HMAC256_256 = 5;  ///< HMAC 256/256
 constexpr int64_t ALG_ES256 = -7;       ///< ECDSA w/ SHA-256
-constexpr int64_t ALG_PS256 = -37;      ///< RSASSA-PSS w/ SHA-256
 constexpr int64_t ALG_A128GCM =
     1;  ///< AES-GCM mode w/ 128-bit key, 128-bit tag
 constexpr int64_t ALG_A192GCM =
@@ -49,7 +48,6 @@ constexpr int64_t ALG_ChaCha20_Poly1305 =
 namespace crypto_constants {
 constexpr size_t HMAC_KEY_SIZE = 32;   ///< HMAC-SHA256 recommended key size
 constexpr size_t ES256_KEY_SIZE = 32;  ///< P-256 private key size
-constexpr size_t PS256_MIN_KEY_SIZE = 256;  ///< RSA minimum key size in bytes
 constexpr size_t AES128_KEY_SIZE = 16;      ///< AES-128 key size in bytes
 constexpr size_t AES192_KEY_SIZE = 24;      ///< AES-192 key size in bytes
 constexpr size_t AES256_KEY_SIZE = 32;      ///< AES-256 key size in bytes
@@ -65,10 +63,6 @@ constexpr bool is_valid_hmac_key_size(size_t size) noexcept {
   return size >= 16 && size <= 64;  // NIST recommendations
 }
 
-consteval bool is_valid_rsa_key_size(size_t size) noexcept {
-  return size >= 256 && size <= 512;  // 2048-4096 bits
-}
-
 constexpr bool is_valid_aes_key_size(size_t size) noexcept {
   return size == AES128_KEY_SIZE || size == AES192_KEY_SIZE ||
          size == AES256_KEY_SIZE;
@@ -79,9 +73,6 @@ constexpr bool is_valid_aes_key_size(size_t size) noexcept {
 static_assert(
     crypto_constants::is_valid_hmac_key_size(crypto_constants::HMAC_KEY_SIZE),
     "HMAC key size is invalid");
-static_assert(crypto_constants::is_valid_rsa_key_size(
-                  crypto_constants::PS256_MIN_KEY_SIZE),
-              "RSA minimum key size is invalid");
 static_assert(crypto_constants::ES256_KEY_SIZE == 32,
               "ES256 key size must be exactly 32 bytes for P-256");
 
@@ -327,79 +318,6 @@ class Es256Algorithm : public CryptographicAlgorithm {
 
   /**
    * @brief Generate ES256 key pair with secure memory for private key
-   * @return Pair of (private key in secure storage, DER public key)
-   */
-  static std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>
-  generateSecureKeyPair();
-
-  /**
-   * @brief Get the DER-encoded public key
-   * @return Public key bytes
-   */
-  std::vector<uint8_t> getPublicKey() const;
-
-  std::vector<uint8_t> signImpl(std::span<const uint8_t> data) const override;
-  bool verifyImpl(std::span<const uint8_t> data,
-                  std::span<const uint8_t> signature) const override;
-  int64_t algorithmId() const override;
-};
-
-/**
- * @brief RSASSA-PSS with SHA-256 (PS256) algorithm implementation.
- *
- * Provides RSA-PSS signing and verification using SHA-256 as both the hash
- * and MGF1 hash. Minimum key size is 2048 bits. Supports sign+verify and
- * verify-only modes. Keys are DER-encoded.
- */
-class Ps256Algorithm : public CryptographicAlgorithm {
- public:
-  struct Impl;  // Made public for memory pool access
-
- private:
-  std::unique_ptr<Impl> pImpl_;
-
-  void initializeImpl();
-  void loadPrivateKey(const uint8_t* keyData, size_t keySize);
-  void loadPublicKey(const uint8_t* keyData, size_t keySize);
-
- public:
-  /**
-   * @brief Default constructor (generates a new 2048-bit RSA key pair)
-   */
-  Ps256Algorithm();
-
-  /**
-   * @brief Construct with an existing key pair
-   * @param privateKey DER-encoded RSA private key
-   * @param publicKey DER-encoded RSA public key
-   */
-  Ps256Algorithm(const std::vector<uint8_t>& privateKey,
-                 const std::vector<uint8_t>& publicKey);
-
-  /**
-   * @brief Construct with secure private key storage
-   * @param privateKey RSA private key in secure memory
-   * @param publicKey DER-encoded RSA public key
-   */
-  Ps256Algorithm(const SecureVector<uint8_t>& privateKey,
-                 const std::vector<uint8_t>& publicKey);
-
-  /**
-   * @brief Construct for verification only (no signing capability)
-   * @param publicKey DER-encoded RSA public key
-   */
-  explicit Ps256Algorithm(const std::vector<uint8_t>& publicKey);
-
-  ~Ps256Algorithm();
-
-  Ps256Algorithm(Ps256Algorithm&& other) noexcept;
-  Ps256Algorithm& operator=(Ps256Algorithm&& other) noexcept;
-
-  Ps256Algorithm(const Ps256Algorithm&) = delete;
-  Ps256Algorithm& operator=(const Ps256Algorithm&) = delete;
-
-  /**
-   * @brief Generate PS256 key pair with secure memory for private key
    * @return Pair of (private key in secure storage, DER public key)
    */
   static std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>

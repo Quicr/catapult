@@ -161,16 +161,6 @@ TEST_CASE("SecureMemory_Es256SecureKeyPair") {
     CHECK(secure_algo.algorithmId() == ALG_ES256);
 }
 
-TEST_CASE("SecureMemory_Ps256SecureKeyPair") {
-    auto [secure_private, public_key] = Ps256Algorithm::generateSecureKeyPair();
-
-    CHECK(secure_private.size() > 0);
-    CHECK(public_key.size() > 0);
-
-    Ps256Algorithm secure_algo(secure_private, public_key);
-    CHECK(secure_algo.algorithmId() == ALG_PS256);
-}
-
 TEST_CASE("SecureMemory_UtilityFunctions") {
     // Test secure_utils conversion functions
     std::vector<uint8_t> regular_vec = {1, 2, 3, 4, 5};

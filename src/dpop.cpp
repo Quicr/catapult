@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 
 #ifdef CATAPULT_ENABLE_JSON
@@ -61,10 +62,10 @@ bool safeCborMapAdd(cbor_item_t* map, cbor_item_t* raw_key,
 //
 // COSE registers algorithms with both positive and negative integer
 // identifiers (RFC 8152 §16.4). The previous encoder always produced a
-// negative CBOR integer, which was correct for the ES256/PS256 identifiers
-// catapult exercises today (both are negative) but would silently mangle
-// any positive algorithm added later. Route through the two CBOR integer
-// classes so the wire form matches the registered identifier's sign.
+// negative CBOR integer, which was correct for the ES256 identifier
+// catapult exercises today but would silently mangle any positive
+// algorithm added later. Route through the two CBOR integer classes so
+// the wire form matches the registered identifier's sign.
 CborItemPtr buildAlgId(int64_t alg_id) {
   if (alg_id < 0) {
     return CborItemPtr(
@@ -184,38 +185,6 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
             cbor_build_bytestring(y_bytes.data(), y_bytes.size()))) {
       throw CryptoError("Failed to build EC COSE_Key");
     }
-  } else if (alg_id == ALG_PS256) {
-    BIGNUM* n = nullptr;
-    BIGNUM* e = nullptr;
-
-    if (!EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_N, &n) ||
-        !EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_E, &e)) {
-      if (n) BN_free(n);
-      if (e) BN_free(e);
-      throw CryptoError("Failed to extract RSA parameters");
-    }
-
-    int n_len = BN_num_bytes(n);
-    int e_len = BN_num_bytes(e);
-    std::vector<uint8_t> n_bytes(n_len), e_bytes(e_len);
-    BN_bn2bin(n, n_bytes.data());
-    BN_bn2bin(e, e_bytes.data());
-    BN_free(n);
-    BN_free(e);
-
-    // kty: RSA (3), alg: PS256 (-37), n, e
-    if (!safeCborMapAdd(cose_key.get(), cbor_build_uint8(1),
-                        cbor_build_uint8(3)) ||
-        !safeCborMapAdd(cose_key.get(), cbor_build_uint8(3),
-                        cbor_build_negint8(36)) ||
-        !safeCborMapAdd(
-            cose_key.get(), cbor_build_negint8(0),
-            cbor_build_bytestring(n_bytes.data(), n_bytes.size())) ||
-        !safeCborMapAdd(
-            cose_key.get(), cbor_build_negint8(1),
-            cbor_build_bytestring(e_bytes.data(), e_bytes.size()))) {
-      throw CryptoError("Failed to build RSA COSE_Key");
-    }
   } else {
     throw CryptoError("Unsupported algorithm for COSE_Key: " +
                       std::to_string(alg_id));
@@ -322,64 +291,6 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
     EVP_PKEY_free(pkey);
 
     return std::make_unique<Es256Algorithm>(der_bytes);
-
-  } else if (alg_name == "PS256") {
-    if (jwk["kty"] != "RSA") {
-      throw CryptoError("Invalid JWK for PS256: must be RSA");
-    }
-
-    auto n_bytes = base64UrlDecode(jwk["n"].get<std::string>());
-    auto e_bytes = base64UrlDecode(jwk["e"].get<std::string>());
-
-    EVP_PKEY* pkey = nullptr;
-    OSSL_PARAM_BLD* param_bld = OSSL_PARAM_BLD_new();
-    if (!param_bld) {
-      throw CryptoError("Failed to create parameter builder");
-    }
-
-    BIGNUM* n_bn = BN_bin2bn(n_bytes.data(), n_bytes.size(), nullptr);
-    BIGNUM* e_bn = BN_bin2bn(e_bytes.data(), e_bytes.size(), nullptr);
-
-    if (!n_bn || !e_bn) {
-      OSSL_PARAM_BLD_free(param_bld);
-      if (n_bn) BN_free(n_bn);
-      if (e_bn) BN_free(e_bn);
-      throw CryptoError("Failed to create BIGNUM from RSA parameters");
-    }
-
-    OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_RSA_N, n_bn);
-    OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_RSA_E, e_bn);
-
-    OSSL_PARAM* params = OSSL_PARAM_BLD_to_param(param_bld);
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(nullptr, "RSA", nullptr);
-
-    bool success =
-        ctx && EVP_PKEY_fromdata_init(ctx) > 0 &&
-        EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) > 0;
-
-    OSSL_PARAM_BLD_free(param_bld);
-    OSSL_PARAM_free(params);
-    if (ctx) EVP_PKEY_CTX_free(ctx);
-    BN_free(n_bn);
-    BN_free(e_bn);
-
-    if (!success) {
-      if (pkey) EVP_PKEY_free(pkey);
-      throw CryptoError("Failed to create RSA public key from JWK");
-    }
-
-    int der_len = i2d_PUBKEY(pkey, nullptr);
-    if (der_len <= 0) {
-      EVP_PKEY_free(pkey);
-      throw CryptoError("Failed to get DER length for RSA public key");
-    }
-
-    std::vector<uint8_t> der_bytes(der_len);
-    uint8_t* der_ptr = der_bytes.data();
-    i2d_PUBKEY(pkey, &der_ptr);
-    EVP_PKEY_free(pkey);
-
-    return std::make_unique<Ps256Algorithm>(der_bytes);
   }
 
   throw CryptoError("Unsupported algorithm for DPoP verification: " + alg_name);
@@ -441,11 +352,19 @@ std::vector<uint8_t> DpopProof::create_signing_input() const {
 bool DpopProof::verify_signature(
     const CryptographicAlgorithm& algorithm) const {
   try {
-    // Create the signing input using the same method as when the proof was
-    // created
-    auto signing_input = create_signing_input();
-    // Verify the signature using the provided algorithm
-    return algorithm.verify(signing_input, signature_);
+    // Prefer the exact wire signing input captured at deserialization
+    // time (HN-03): re-serialising the parsed fields is not guaranteed
+    // to reproduce the bytes the issuer actually signed — JSON key
+    // ordering, whitespace, and escape choices vary between producers,
+    // and CBOR canonical-form deviations in an attacker-crafted proof
+    // would be smoothed over by our own emitter. Fall back to the
+    // reconstructed input only for proofs created in-memory (never
+    // deserialised), which have no wire form yet.
+    if (!wire_signing_input_.empty()) {
+      return algorithm.verify(wire_signing_input_, signature_);
+    }
+    auto fresh_input = create_signing_input();
+    return algorithm.verify(fresh_input, signature_);
   } catch (const std::exception&) {
     // If any exception occurs during verification, the signature is invalid
     return false;
@@ -594,18 +513,34 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   }
 
   cbor_load_result result;
-  auto cose_array_ptr =
+  auto cose_root =
       cbor_load_owned(reinterpret_cast<const uint8_t*>(cose_bytes.data()),
                       cose_bytes.size(), result);
 
   if (result.error.code != CBOR_ERR_NONE ||
-      result.read != cose_bytes.size() || !cose_array_ptr ||
-      !cbor_isa_array(cose_array_ptr.get()) ||
-      cbor_array_size(cose_array_ptr.get()) != 4) {
+      result.read != cose_bytes.size() || !cose_root) {
     throw InvalidTokenFormatError{};
   }
 
-  cbor_item_t* cose_array = cose_array_ptr.get();
+  // A CWT DPoP proof is a COSE_Sign1 (RFC 8152 §4.2). If the producer
+  // tagged it, the tag MUST be 18 — accepting any other single-recipient
+  // tag would let a Mac0/Encrypt0-labelled body reach signature dispatch
+  // and defeat the tag/structure binding we enforce elsewhere (HN-03).
+  if (cbor_isa_tag(cose_root.get())) {
+    const uint64_t tagValue = cbor_tag_value(cose_root.get());
+    if (tagValue != 18) {
+      throw InvalidTokenFormatError{};
+    }
+    CborItemPtr inner(cbor_tag_item(cose_root.get()));
+    cose_root = std::move(inner);
+  }
+
+  if (!cose_root || !cbor_isa_array(cose_root.get()) ||
+      cbor_array_size(cose_root.get()) != 4) {
+    throw InvalidTokenFormatError{};
+  }
+
+  cbor_item_t* cose_array = cose_root.get();
 
   DpopHeader header;
   header.set_encoding(DpopEncoding::CWT);
@@ -617,6 +552,14 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   if (!protected_bstr || !cbor_isa_bytestring(protected_bstr.get())) {
     throw InvalidTokenFormatError{};
   }
+  // Capture the wire bytes of the protected header for later Sig_structure
+  // reconstruction. Using these bytes verbatim (rather than re-serialising
+  // the parsed alg/cose_key) is what makes the CWT DPoP verification bind
+  // to the exact bytes the issuer signed (HN-03).
+  std::vector<uint8_t> wire_protected_header(
+      cbor_bytestring_handle(protected_bstr.get()),
+      cbor_bytestring_handle(protected_bstr.get()) +
+          cbor_bytestring_length(protected_bstr.get()));
   {
     size_t prot_len = cbor_bytestring_length(protected_bstr.get());
     if (prot_len > 0) {
@@ -666,6 +609,11 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   if (!payload_bstr || !cbor_isa_bytestring(payload_bstr.get())) {
     throw InvalidTokenFormatError{};
   }
+  // Capture the wire payload bytes for later Sig_structure use.
+  std::vector<uint8_t> wire_payload(
+      cbor_bytestring_handle(payload_bstr.get()),
+      cbor_bytestring_handle(payload_bstr.get()) +
+          cbor_bytestring_length(payload_bstr.get()));
   {
     size_t pay_len = cbor_bytestring_length(payload_bstr.get());
     // Attacker-controlled payload map: enforce strict CBOR rules.
@@ -695,7 +643,16 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
         }
 
         if (key_str == "iat" && cbor_isa_uint(pairs[i].value)) {
-          payload.iat = static_cast<int64_t>(cbor_get_int(pairs[i].value));
+          // libcbor returns an unsigned 64-bit integer; casting a value
+          // with the top bit set into int64_t is implementation-defined
+          // and would wrap to a large negative time. Reject before it can
+          // reach freshness checks (HN-03).
+          uint64_t raw_iat = cbor_get_int(pairs[i].value);
+          if (raw_iat >
+              static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+            throw InvalidTokenFormatError{};
+          }
+          payload.iat = static_cast<int64_t>(raw_iat);
         } else if (key_str == "jti" && cbor_isa_string(pairs[i].value)) {
           payload.jti = std::string(
               reinterpret_cast<const char*>(cbor_string_handle(pairs[i].value)),
@@ -720,8 +677,14 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
                               cbor_string_length(actx_pairs[j].value));
             } else if (actx_key == "action" &&
                        cbor_isa_uint(actx_pairs[j].value)) {
-              payload.actx.action =
-                  static_cast<int>(cbor_get_int(actx_pairs[j].value));
+              // `action` is stored as `int` on the payload. Reject
+              // values that would truncate on narrow casts (HN-03).
+              uint64_t raw_action = cbor_get_int(actx_pairs[j].value);
+              if (raw_action >
+                  static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+                throw InvalidTokenFormatError{};
+              }
+              payload.actx.action = static_cast<int>(raw_action);
             } else if (actx_key == "tns" &&
                        cbor_isa_string(actx_pairs[j].value)) {
               payload.actx.tns =
@@ -757,8 +720,17 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
       cbor_bytestring_handle(sig_bstr.get()),
       cbor_bytestring_handle(sig_bstr.get()) + sig_len);
 
-  return DpopProof{std::move(header), std::move(payload), signature,
-                   DpopEncoding::CWT};
+  // Build the exact Sig_structure the issuer signed over, using the wire
+  // bytes of the protected header and payload rather than a re-encoding
+  // of the parsed fields (HN-03). `createCoseSign1Input` produces the
+  // canonical RFC 8152 §4.4 Sig_structure.
+  auto wire_signing_input =
+      createCoseSign1Input(wire_protected_header, wire_payload);
+
+  DpopProof proof{std::move(header), std::move(payload), signature,
+                  DpopEncoding::CWT};
+  proof.set_wire_signing_input(std::move(wire_signing_input));
+  return proof;
 }
 
 #ifdef CATAPULT_ENABLE_JSON
@@ -789,6 +761,18 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
     throw InvalidTokenFormatError{};
   }
 
+  // Capture the exact signing input as it appeared on the wire —
+  // `base64url(header) "." base64url(payload)` — before decoding. Any
+  // re-serialization of the parsed struct would risk producing bytes
+  // that don't match what the issuer signed (HN-03).
+  std::vector<uint8_t> wire_signing_input;
+  wire_signing_input.reserve(parts[0].size() + 1 + parts[1].size());
+  wire_signing_input.insert(wire_signing_input.end(), parts[0].begin(),
+                            parts[0].end());
+  wire_signing_input.push_back('.');
+  wire_signing_input.insert(wire_signing_input.end(), parts[1].begin(),
+                            parts[1].end());
+
   auto header_bytes = base64UrlDecode(parts[0]);
   auto payload_bytes = base64UrlDecode(parts[1]);
   auto signature = base64UrlDecode(parts[2]);
@@ -816,13 +800,45 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
   if (payload_json.contains("actx")) {
     auto actx_json = payload_json["actx"];
     payload.actx.type = actx_json.value("type", "moqt");
-    payload.actx.action = actx_json.value("action", 0);
+    // Range-check `action` before narrowing (HN-03). Unsigned JSON
+    // numbers can hold values outside `int`; a silent narrow could
+    // yield a legitimate-looking small integer that impersonates a
+    // different MOQT action.
+    if (actx_json.contains("action")) {
+      const auto& action_val = actx_json.at("action");
+      if (!action_val.is_number_integer()) {
+        throw InvalidTokenFormatError{};
+      }
+      int64_t raw_action = action_val.get<int64_t>();
+      if (raw_action < std::numeric_limits<int>::min() ||
+          raw_action > std::numeric_limits<int>::max()) {
+        throw InvalidTokenFormatError{};
+      }
+      payload.actx.action = static_cast<int>(raw_action);
+    }
     payload.actx.tns = actx_json.value("tns", "");
     payload.actx.tn = actx_json.value("tn", "");
     payload.actx.resource_uri = actx_json.value("resource", "");
   }
 
-  payload.iat = payload_json.value("iat", static_cast<int64_t>(0));
+  if (payload_json.contains("iat")) {
+    const auto& iat_val = payload_json.at("iat");
+    if (!iat_val.is_number_integer()) {
+      throw InvalidTokenFormatError{};
+    }
+    // nlohmann::json stores unsigned integers separately: values with
+    // MSB set would wrap to negative on a signed read. Route through
+    // uint64_t and range-check (HN-03).
+    if (iat_val.is_number_unsigned()) {
+      uint64_t raw = iat_val.get<uint64_t>();
+      if (raw > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        throw InvalidTokenFormatError{};
+      }
+      payload.iat = static_cast<int64_t>(raw);
+    } else {
+      payload.iat = iat_val.get<int64_t>();
+    }
+  }
 
   if (payload_json.contains("jti")) {
     payload.jti = payload_json["jti"].get<std::string>();
@@ -831,8 +847,10 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
     payload.ath = payload_json["ath"].get<std::string>();
   }
 
-  return DpopProof{std::move(header), std::move(payload), signature,
-                   DpopEncoding::JWT};
+  DpopProof proof{std::move(header), std::move(payload), signature,
+                  DpopEncoding::JWT};
+  proof.set_wire_signing_input(std::move(wire_signing_input));
+  return proof;
 }
 #endif
 
@@ -855,6 +873,17 @@ std::string generate_jti() {
 bool DpopProofValidator::validate_proof(
     const DpopProof& proof, int expected_action, std::string_view expected_uri,
     const std::string& expected_public_key_thumbprint) {
+  // The `cnf`/`catdpop` binding must be checked against a non-empty
+  // expected thumbprint: an empty string cannot represent a caller's
+  // policy intent and previously caused the check to be silently
+  // skipped. Fail closed at the API boundary rather than at the caller.
+  if (expected_public_key_thumbprint.empty()) {
+    CAT_LOG_ERROR(
+        "DPoP validation requires a non-empty expected public-key "
+        "thumbprint; rejecting proof");
+    return false;
+  }
+
   // Basic structure validation
   if (!proof.is_valid(settings_)) {
     return false;
@@ -893,6 +922,31 @@ bool DpopProofValidator::validate_proof(
     return false;
   }
 
+  // Public-key thumbprint (`cnf`/`catdpop` binding) must be checked
+  // BEFORE replay admission: otherwise a proof bound to a different key
+  // — one the attacker can freely resign — can be used to consume the
+  // bounded replay store's admission slots for the target `jti`,
+  // producing a replay-store poisoning primitive against the legitimate
+  // key holder (HN-03). We already rejected the empty-thumbprint case
+  // above, so this branch always runs.
+  try {
+    std::string actual_thumbprint;
+    if (proof.encoding() == DpopEncoding::CWT) {
+      actual_thumbprint =
+          calculateCoseKeyThumbprint(proof.get_header().cose_key);
+    }
+#ifdef CATAPULT_ENABLE_JSON
+    else {
+      actual_thumbprint = jwk::calculateJWKThumbprint(proof.get_header().jwk);
+    }
+#endif
+    if (actual_thumbprint != expected_public_key_thumbprint) {
+      return false;
+    }
+  } catch (const std::exception&) {
+    return false;
+  }
+
   // Check JTI if enabled and present. All bookkeeping — TOCTOU-safe
   // check-and-record, size cap, expiry, cross-process sharing — is the
   // replay store's responsibility. Exhaustion is treated as a replay
@@ -907,27 +961,6 @@ bool DpopProofValidator::validate_proof(
         CAT_LOG_WARN(
             "DPoP replay store exhausted; rejecting proof to fail closed");
       }
-      return false;
-    }
-  }
-
-  // Public key thumbprint matching validation
-  if (!expected_public_key_thumbprint.empty()) {
-    try {
-      std::string actual_thumbprint;
-      if (proof.encoding() == DpopEncoding::CWT) {
-        actual_thumbprint =
-            calculateCoseKeyThumbprint(proof.get_header().cose_key);
-      }
-#ifdef CATAPULT_ENABLE_JSON
-      else {
-        actual_thumbprint = jwk::calculateJWKThumbprint(proof.get_header().jwk);
-      }
-#endif
-      if (actual_thumbprint != expected_public_key_thumbprint) {
-        return false;
-      }
-    } catch (const std::exception&) {
       return false;
     }
   }
@@ -952,12 +985,6 @@ DpopKeyPair::DpopKeyPair(std::unique_ptr<CryptographicAlgorithm> alg)
       throw CryptoError("Invalid ES256 algorithm instance");
     }
     public_key_der_ = es256_alg->getPublicKey();
-  } else if (alg_id == ALG_PS256) {
-    auto* ps256_alg = dynamic_cast<Ps256Algorithm*>(algorithm_.get());
-    if (!ps256_alg) {
-      throw CryptoError("Invalid PS256 algorithm instance");
-    }
-    public_key_der_ = ps256_alg->getPublicKey();
   } else {
     throw CryptoError("Unsupported algorithm for DPoP: " +
                       std::to_string(alg_id));
@@ -979,8 +1006,6 @@ std::string DpopKeyPair::get_algorithm_name() const {
   switch (alg_id) {
     case ALG_ES256:
       return "ES256";
-    case ALG_PS256:
-      return "PS256";
     case ALG_HMAC256_256:
       return "HS256";
     default:

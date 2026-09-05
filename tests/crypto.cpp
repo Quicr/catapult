@@ -106,21 +106,5 @@ TEST_CASE("Es256AlgorithmId") {
     CHECK(algorithm.algorithmId() == ALG_ES256);
 }
 
-TEST_CASE("Ps256GenerateKeyPair") {
-    auto keyPair = Ps256Algorithm::generateSecureKeyPair();
-    CHECK_FALSE(keyPair.first.empty());  // Private key
-    CHECK_FALSE(keyPair.second.empty()); // Public key
-
-    auto keyPair2 = Ps256Algorithm::generateSecureKeyPair();
-    CHECK(secure_utils::to_regular_vector(keyPair.first) !=
-          secure_utils::to_regular_vector(keyPair2.first));
-    CHECK(keyPair.second != keyPair2.second);
-}
-
-TEST_CASE("Ps256AlgorithmId") {
-    Ps256Algorithm algorithm;
-    CHECK(algorithm.algorithmId() == ALG_PS256);
-}
-
-// Note: Full Es256 and Ps256 sign/verify tests would require proper key loading
+// Note: Full Es256 sign/verify tests would require proper key loading
 // which is not fully implemented in the simplified version

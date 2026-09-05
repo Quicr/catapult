@@ -167,85 +167,11 @@ static void BM_ES256_Verify_Large(benchmark::State& state) {
 }
 BENCHMARK(BM_ES256_Verify_Large);
 
-// PS256 Benchmarks
-static void BM_PS256_KeyGeneration(benchmark::State& state) {
-    for (auto _ : state) {
-        Ps256Algorithm ps256;
-        benchmark::DoNotOptimize(ps256);
-    }
-}
-BENCHMARK(BM_PS256_KeyGeneration);
-
-static void BM_PS256_Sign_Small(benchmark::State& state) {
-    Ps256Algorithm ps256;
-    
-    for (auto _ : state) {
-        auto signature = ps256.sign(SMALL_DATA);
-        benchmark::DoNotOptimize(signature);
-    }
-}
-BENCHMARK(BM_PS256_Sign_Small);
-
-static void BM_PS256_Sign_Medium(benchmark::State& state) {
-    Ps256Algorithm ps256;
-    auto medium_data = CreateMediumData();
-    
-    for (auto _ : state) {
-        auto signature = ps256.sign(medium_data);
-        benchmark::DoNotOptimize(signature);
-    }
-}
-BENCHMARK(BM_PS256_Sign_Medium);
-
-static void BM_PS256_Sign_Large(benchmark::State& state) {
-    Ps256Algorithm ps256;
-    
-    for (auto _ : state) {
-        auto signature = ps256.sign(LARGE_DATA);
-        benchmark::DoNotOptimize(signature);
-    }
-}
-BENCHMARK(BM_PS256_Sign_Large);
-
-static void BM_PS256_Verify_Small(benchmark::State& state) {
-    Ps256Algorithm ps256;
-    auto signature = ps256.sign(SMALL_DATA);
-    
-    for (auto _ : state) {
-        bool result = ps256.verify(SMALL_DATA, signature);
-        benchmark::DoNotOptimize(result);
-    }
-}
-BENCHMARK(BM_PS256_Verify_Small);
-
-static void BM_PS256_Verify_Medium(benchmark::State& state) {
-    Ps256Algorithm ps256;
-    auto medium_data = CreateMediumData();
-    auto signature = ps256.sign(medium_data);
-    
-    for (auto _ : state) {
-        bool result = ps256.verify(medium_data, signature);
-        benchmark::DoNotOptimize(result);
-    }
-}
-BENCHMARK(BM_PS256_Verify_Medium);
-
-static void BM_PS256_Verify_Large(benchmark::State& state) {
-    Ps256Algorithm ps256;
-    auto signature = ps256.sign(LARGE_DATA);
-    
-    for (auto _ : state) {
-        bool result = ps256.verify(LARGE_DATA, signature);
-        benchmark::DoNotOptimize(result);
-    }
-}
-BENCHMARK(BM_PS256_Verify_Large);
-
 // Algorithm Comparison Benchmarks
 static void BM_Crypto_Sign_Comparison(benchmark::State& state) {
-    const int algorithm = state.range(0); // 0=HMAC, 1=ES256, 2=PS256
+    const int algorithm = state.range(0); // 0=HMAC, 1=ES256
     auto medium_data = CreateMediumData();
-    
+
     std::unique_ptr<CryptographicAlgorithm> crypto;
     switch (algorithm) {
         case 0: {
@@ -257,23 +183,19 @@ static void BM_Crypto_Sign_Comparison(benchmark::State& state) {
             crypto = std::make_unique<Es256Algorithm>();
             break;
         }
-        case 2: {
-            crypto = std::make_unique<Ps256Algorithm>();
-            break;
-        }
     }
-    
+
     for (auto _ : state) {
         auto signature = crypto->sign(medium_data);
         benchmark::DoNotOptimize(signature);
     }
 }
-BENCHMARK(BM_Crypto_Sign_Comparison)->DenseRange(0, 2);
+BENCHMARK(BM_Crypto_Sign_Comparison)->DenseRange(0, 1);
 
 static void BM_Crypto_Verify_Comparison(benchmark::State& state) {
-    const int algorithm = state.range(0); // 0=HMAC, 1=ES256, 2=PS256
+    const int algorithm = state.range(0); // 0=HMAC, 1=ES256
     auto medium_data = CreateMediumData();
-    
+
     std::unique_ptr<CryptographicAlgorithm> crypto;
     switch (algorithm) {
         case 0: {
@@ -285,18 +207,14 @@ static void BM_Crypto_Verify_Comparison(benchmark::State& state) {
             crypto = std::make_unique<Es256Algorithm>();
             break;
         }
-        case 2: {
-            crypto = std::make_unique<Ps256Algorithm>();
-            break;
-        }
     }
-    
+
     auto signature = crypto->sign(medium_data);
-    
+
     for (auto _ : state) {
         bool result = crypto->verify(medium_data, signature);
         benchmark::DoNotOptimize(result);
     }
 }
-BENCHMARK(BM_Crypto_Verify_Comparison)->DenseRange(0, 2);
+BENCHMARK(BM_Crypto_Verify_Comparison)->DenseRange(0, 1);
 

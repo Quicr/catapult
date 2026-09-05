@@ -119,7 +119,7 @@ BENCHMARK(BM_CBOR_Encode_Medium);
 
 static void BM_CBOR_Encode_Complex(benchmark::State& state) {
     auto token = CreateComplexToken();
-    Cwt cwt(ALG_PS256, token);
+    Cwt cwt(ALG_ES256, token);
     
     for (auto _ : state) {
         auto encoded = cwt.encodePayload();
@@ -155,7 +155,7 @@ BENCHMARK(BM_CBOR_Decode_Medium);
 
 static void BM_CBOR_Decode_Complex(benchmark::State& state) {
     auto token = CreateComplexToken();
-    Cwt cwt(ALG_PS256, token);
+    Cwt cwt(ALG_ES256, token);
     auto encoded = cwt.encodePayload();
     
     for (auto _ : state) {
@@ -192,7 +192,7 @@ BENCHMARK(BM_CBOR_Roundtrip_Medium);
 
 static void BM_CBOR_Roundtrip_Complex(benchmark::State& state) {
     auto token = CreateComplexToken();
-    Cwt cwt(ALG_PS256, token);
+    Cwt cwt(ALG_ES256, token);
     
     for (auto _ : state) {
         auto encoded = cwt.encodePayload();
@@ -204,47 +204,45 @@ BENCHMARK(BM_CBOR_Roundtrip_Complex);
 
 // Algorithm-specific CBOR Benchmarks
 static void BM_CBOR_ByAlgorithm_Encode(benchmark::State& state) {
-    const int algorithm = state.range(0); // 0=HMAC, 1=ES256, 2=PS256
+    const int algorithm = state.range(0); // 0=HMAC, 1=ES256
     auto token = CreateMediumToken();
-    
+
     int64_t alg_id;
     switch (algorithm) {
         case 0: alg_id = ALG_HMAC256_256; break;
         case 1: alg_id = ALG_ES256; break;
-        case 2: alg_id = ALG_PS256; break;
         default: alg_id = ALG_HMAC256_256; break;
     }
-    
+
     Cwt cwt(alg_id, token);
-    
+
     for (auto _ : state) {
         auto encoded = cwt.encodePayload();
         benchmark::DoNotOptimize(encoded);
     }
 }
-BENCHMARK(BM_CBOR_ByAlgorithm_Encode)->DenseRange(0, 2);
+BENCHMARK(BM_CBOR_ByAlgorithm_Encode)->DenseRange(0, 1);
 
 static void BM_CBOR_ByAlgorithm_Decode(benchmark::State& state) {
-    const int algorithm = state.range(0); // 0=HMAC, 1=ES256, 2=PS256
+    const int algorithm = state.range(0); // 0=HMAC, 1=ES256
     auto token = CreateMediumToken();
-    
+
     int64_t alg_id;
     switch (algorithm) {
         case 0: alg_id = ALG_HMAC256_256; break;
         case 1: alg_id = ALG_ES256; break;
-        case 2: alg_id = ALG_PS256; break;
         default: alg_id = ALG_HMAC256_256; break;
     }
-    
+
     Cwt cwt(alg_id, token);
     auto encoded = cwt.encodePayload();
-    
+
     for (auto _ : state) {
         auto decoded = Cwt::decodePayload(encoded);
         benchmark::DoNotOptimize(decoded);
     }
 }
-BENCHMARK(BM_CBOR_ByAlgorithm_Decode)->DenseRange(0, 2);
+BENCHMARK(BM_CBOR_ByAlgorithm_Decode)->DenseRange(0, 1);
 
 // Size Analysis Benchmark
 static void BM_CBOR_SizeAnalysis(benchmark::State& state) {
@@ -254,7 +252,7 @@ static void BM_CBOR_SizeAnalysis(benchmark::State& state) {
     
     Cwt simple_cwt(ALG_HMAC256_256, simple_token);
     Cwt medium_cwt(ALG_ES256, medium_token);
-    Cwt complex_cwt(ALG_PS256, complex_token);
+    Cwt complex_cwt(ALG_ES256, complex_token);
     
     // Pre-calculate sizes for analysis
     auto simple_size = simple_cwt.encodePayload().size();

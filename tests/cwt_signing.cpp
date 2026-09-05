@@ -465,7 +465,6 @@ TEST_SUITE("CWT Signing Integration Tests") {
 
     // Create different algorithms
     auto es256 = std::make_unique<Es256Algorithm>();
-    auto ps256 = std::make_unique<Ps256Algorithm>();
     std::vector<uint8_t> hmacKey(
         reinterpret_cast<const uint8_t*>("hmac-key-16-bytes"),
         reinterpret_cast<const uint8_t*>("hmac-key-16-bytes") + 16);
@@ -474,13 +473,11 @@ TEST_SUITE("CWT Signing Integration Tests") {
     // Create CWT with mixed algorithm signatures
     Cwt cwt(es256->algorithmId(), token);
     cwt.addSignature(*es256);
-    cwt.addSignature(*ps256);
     cwt.addSignature(*hmac);
 
-    CHECK(cwt.signatures.size() == 3);
+    CHECK(cwt.signatures.size() == 2);
     CHECK(cwt.signatures[0].algorithmId == es256->algorithmId());
-    CHECK(cwt.signatures[1].algorithmId == ps256->algorithmId());
-    CHECK(cwt.signatures[2].algorithmId == hmac->algorithmId());
+    CHECK(cwt.signatures[1].algorithmId == hmac->algorithmId());
 
     // Create the token
     std::string cwtString = cwt.createCwtBase64(CwtMode::MultiSigned, *es256);
@@ -489,23 +486,21 @@ TEST_SUITE("CWT Signing Integration Tests") {
     std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>>
         algorithms;
     algorithms.emplace(es256->algorithmId(), std::cref(*es256));
-    algorithms.emplace(ps256->algorithmId(), std::cref(*ps256));
     algorithms.emplace(hmac->algorithmId(), std::cref(*hmac));
 
     // Validate with per-signature algorithms
     Cwt validated = Cwt::validateMultiSignedCwtBase64(cwtString, algorithms);
 
-    CHECK(validated.signatures.size() == 3);
+    CHECK(validated.signatures.size() == 2);
     CHECK(validated.signatures[0].algorithmId == es256->algorithmId());
-    CHECK(validated.signatures[1].algorithmId == ps256->algorithmId());
-    CHECK(validated.signatures[2].algorithmId == hmac->algorithmId());
+    CHECK(validated.signatures[1].algorithmId == hmac->algorithmId());
     CHECK(validated.payload.core.iss == "per-sig-test");
 
     // Test missing algorithm error
     std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>>
         incompleteAlgorithms;
     incompleteAlgorithms.emplace(es256->algorithmId(), std::cref(*es256));
-    // Missing ps256 and hmac
+    // Missing hmac
 
     CHECK_THROWS_AS(
         Cwt::validateMultiSignedCwtBase64(cwtString, incompleteAlgorithms),
@@ -571,6 +566,97 @@ TEST_SUITE("CWT Signing Integration Tests") {
       algorithms.emplace(algorithm->algorithmId(), std::cref(*algorithm));
       Cwt validated = Cwt::validateMultiSignedCwtBase64(cwtString, algorithms);
       CHECK(validated.payload.core.iss == "tag-test");
+    }
+  }
+
+  TEST_CASE("COSE tag/structure binding rejects mismatched tags") {
+    // A COSE tag must match the structure it wraps. If a producer
+    // wraps a Sign1-shaped body under tag 17 (Mac0) or 16 (Encrypt0) —
+    // whether by bug or by intent — validation must reject it before
+    // signature dispatch to prevent envelope-confusion attacks (HN-01).
+    // The current encoder emits untagged CWTs, so tests here synthesize
+    // the tagged variants by prepending the CBOR tag prefix.
+    CatToken token;
+    token.core.iss = "tag-binding-test";
+
+    Es256Algorithm es256;
+    Cwt cwt(ALG_ES256, token);
+    auto sign1Body = cwt.createCwt(CwtMode::Signed, es256);
+    REQUIRE(sign1Body.size() >= 1);
+    REQUIRE(sign1Body[0] == 0x84);  // 4-element definite array, no tag
+
+    auto withTag = [](uint8_t tag, const std::vector<uint8_t>& body) {
+      std::vector<uint8_t> out;
+      out.reserve(body.size() + 1);
+      out.push_back(tag);
+      out.insert(out.end(), body.begin(), body.end());
+      return out;
+    };
+
+    SUBCASE("Correctly-tagged Sign1 (0xd2) validates") {
+      auto tagged = withTag(0xd2, sign1Body);
+      CHECK_NOTHROW(Cwt::validateCwt(tagged, es256));
+    }
+
+    SUBCASE("Sign1 body labelled as Mac0 (0xd1) is rejected") {
+      auto tampered = withTag(0xd1, sign1Body);
+      CHECK_THROWS(Cwt::validateCwt(tampered, es256));
+    }
+
+    SUBCASE("Sign1 body labelled as Encrypt0 (0xd0) is rejected") {
+      auto tampered = withTag(0xd0, sign1Body);
+      // Encrypt0-shape check fires first because arraySize==4≠3.
+      CHECK_THROWS(Cwt::validateCwt(tampered, es256));
+    }
+
+    SUBCASE("Mac0 body labelled as Sign1 (0xd2) is rejected") {
+      HmacSha256Algorithm hmac(std::vector<uint8_t>(32, 0xAB));
+      Cwt macCwt(ALG_HMAC256_256, token);
+      auto macBody = macCwt.createCwt(CwtMode::MACed, hmac);
+      auto tampered = withTag(0xd2, macBody);
+      CHECK_THROWS(Cwt::validateCwt(tampered, hmac));
+    }
+  }
+
+  TEST_CASE("Multi-signed CWT rejects trailing bytes and wrong outer tag") {
+    CatToken token;
+    token.core.iss = "multi-tag-binding";
+
+    Es256Algorithm es256;
+    Cwt cwt(ALG_ES256, token);
+    cwt.addSignature(es256);
+    auto cwtBytes = cwt.createCwt(CwtMode::MultiSigned, es256);
+
+    std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>>
+        algorithms;
+    algorithms.emplace(ALG_ES256, std::cref(es256));
+
+    SUBCASE("Baseline validates") {
+      Cwt v = Cwt::validateMultiSignedCwt(cwtBytes, algorithms);
+      CHECK(v.payload.core.iss == "multi-tag-binding");
+    }
+
+    SUBCASE("Trailing bytes rejected") {
+      auto tampered = cwtBytes;
+      tampered.push_back(0x00);
+      CHECK_THROWS(Cwt::validateMultiSignedCwt(tampered, algorithms));
+    }
+
+    SUBCASE("Wrong outer tag rejected") {
+      // Prepend CBOR tag 18 (0xd2) — a Sign1 tag on a multi-signed body
+      // is envelope confusion and must be refused.
+      std::vector<uint8_t> tampered;
+      tampered.push_back(0xd2);
+      tampered.insert(tampered.end(), cwtBytes.begin(), cwtBytes.end());
+      CHECK_THROWS(Cwt::validateMultiSignedCwt(tampered, algorithms));
+    }
+
+    SUBCASE("Correct outer tag 98 accepted") {
+      // Prepend CBOR tag 98 (0xd862) — the registered COSE_Sign tag.
+      std::vector<uint8_t> tagged = {0xd8, 0x62};
+      tagged.insert(tagged.end(), cwtBytes.begin(), cwtBytes.end());
+      Cwt v = Cwt::validateMultiSignedCwt(tagged, algorithms);
+      CHECK(v.payload.core.iss == "multi-tag-binding");
     }
   }
 }

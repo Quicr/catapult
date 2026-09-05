@@ -10,15 +10,6 @@ option(CATAPULT_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehavior
 option(CATAPULT_ENABLE_TSAN "Enable ThreadSanitizer (mutually exclusive with ASan/UBSan)" OFF)
 option(CATAPULT_ENABLE_WERROR "Treat compiler warnings as errors in library and test builds" OFF)
 option(CATAPULT_ENABLE_LTO "Enable interprocedural optimization (LTO) for library targets" OFF)
-# WARNING: The legacy JWT-shaped token API (catapult::legacy::legacyJwtEncodeToken /
-# legacyJwtDecodeToken) emits and accepts a JWT-style three-part format that is NOT
-# a CTA-5007-B compliant CWT. It is retained solely for backwards compatibility with
-# pre-1.3 consumers and MUST NOT be used for interoperable CAT deployments. Leave
-# this OFF for any production build.
-option(CATAPULT_ENABLE_LEGACY_JWT_TOKEN
-       "Enable the non-standard legacy JWT-shaped CAT token API (INSECURE, off by default)"
-       OFF)
-
 # Dependency management
 find_package(OpenSSL REQUIRED)
 
@@ -60,16 +51,6 @@ if(CATAPULT_ENABLE_JSON)
 endif()
 
 add_library(catapult STATIC ${CATAPULT_SOURCES})
-
-# Propagate the legacy-JWT flag to translation units that include validator.hpp
-# so callers see the deprecated declarations and the library exports the
-# corresponding definitions.
-if(CATAPULT_ENABLE_LEGACY_JWT_TOKEN)
-    target_compile_definitions(catapult PUBLIC CATAPULT_ENABLE_LEGACY_JWT_TOKEN)
-    message(WARNING
-        "CATAPULT_ENABLE_LEGACY_JWT_TOKEN is ON. The legacy JWT-shaped token "
-        "API is NOT CTA-5007-B compliant and MUST NOT be used in production.")
-endif()
 
 # Link libraries
 target_link_libraries(catapult
@@ -223,18 +204,6 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         list(APPEND CATAPULT_TEST_SOURCES tests/test_vectors_c4m.cpp)
     endif()
 
-    # Tests exercise the legacy JWT-shaped token API for regression coverage.
-    # If the top-level build enables the tests, force the option on so that
-    # the library actually exports the legacy symbols the tests link against.
-    if(NOT CATAPULT_ENABLE_LEGACY_JWT_TOKEN)
-        message(STATUS
-            "Enabling CATAPULT_ENABLE_LEGACY_JWT_TOKEN for in-tree tests only. "
-            "Downstream consumers must opt in explicitly; the API is deprecated "
-            "and MUST NOT be used for production CAT deployments.")
-        set(CATAPULT_ENABLE_LEGACY_JWT_TOKEN ON CACHE BOOL "" FORCE)
-        target_compile_definitions(catapult PUBLIC CATAPULT_ENABLE_LEGACY_JWT_TOKEN)
-    endif()
-
     add_executable(catapult_tests ${CATAPULT_TEST_SOURCES})
 
     target_link_libraries(catapult_tests
@@ -246,12 +215,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 
     target_include_directories(catapult_tests PRIVATE ${OPENSSL_INCLUDE_DIR})
     target_compile_definitions(catapult_tests PRIVATE
-        TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/test_data"
-        # In-tree regression suite exercises the legacy JWT-shaped API.
-        # The library header requires this acknowledgement macro at every
-        # translation unit that touches the deprecated symbols; scope it
-        # to the test target only.
-        CATAPULT_LEGACY_JWT_ACKNOWLEDGE_INSECURE=1)
+        TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/test_data")
 
     if(CATAPULT_ENABLE_JSON AND TARGET nlohmann_json::nlohmann_json)
         target_link_libraries(catapult_tests nlohmann_json::nlohmann_json)

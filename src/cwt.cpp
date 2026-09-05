@@ -2210,11 +2210,13 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       throw InvalidCborError("Trailing bytes after COSE root item");
     }
 
+    std::optional<uint64_t> coseTag;
     if (cbor_isa_tag(coseItem.get())) {
       const uint64_t tagValue = cbor_tag_value(coseItem.get());
       if (tagValue != 16 && tagValue != 17 && tagValue != 18) {
         throw InvalidTokenFormatError();
       }
+      coseTag = tagValue;
       cbor_item_t* inner = cbor_tag_item(coseItem.get());
       // cbor_tag_item returns an owned reference; wrap it before releasing
       // the tag so ownership is single-rooted.
@@ -2241,6 +2243,13 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
 
     if (arraySize == 3) {
       // COSE_Encrypt0: [protected_header, unprotected_header, ciphertext]
+      // If a tag is present it must be 16 (COSE_Encrypt0). RFC 8152 §2:
+      // the tag identifies the message type, so an Encrypt0-shaped body
+      // labelled as Sign1 (18) or Mac0 (17) is not a well-formed COSE
+      // structure and must be rejected before we spend any crypto on it.
+      if (coseTag.has_value() && *coseTag != 16) {
+        throw InvalidTokenFormatError();
+      }
       if (!algorithm.supportsEncryption()) {
         throw CryptoError(
             "Algorithm does not support decryption for COSE_Encrypt0");
@@ -2341,6 +2350,19 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
         // pass verification in the other, so this dispatch must match the
         // encoder's choice exactly.
         const bool isMac = algorithm.algorithmId() == ALG_HMAC256_256;
+        // If a tag was present, require it to match the structure the
+        // algorithm dispatch selected: Sign1 ↔ 18, Mac0 ↔ 17. Otherwise a
+        // Sign1-shaped body carrying tag 17 would be MAC-verified while
+        // producers labelled it as a signature, which is exactly the
+        // envelope-confusion class the tag is meant to prevent.
+        if (coseTag.has_value()) {
+          if (isMac && *coseTag != 17) {
+            throw InvalidTokenFormatError();
+          }
+          if (!isMac && *coseTag != 18) {
+            throw InvalidTokenFormatError();
+          }
+        }
         auto verifyInput =
             isMac ? createCoseMac0Input(protectedHeaderBytes, payloadBytes)
                   : createCoseSign1Input(protectedHeaderBytes, payloadBytes);
@@ -2405,7 +2427,7 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
     }
 
     auto isKnownAlgorithm = [](int64_t alg) {
-      return alg == ALG_ES256 || alg == ALG_PS256 || alg == ALG_HMAC256_256 ||
+      return alg == ALG_ES256 || alg == ALG_HMAC256_256 ||
              alg == ALG_A128GCM || alg == ALG_A192GCM || alg == ALG_A256GCM ||
              alg == ALG_ChaCha20_Poly1305;
     };
@@ -2455,12 +2477,33 @@ Cwt Cwt::validateMultiSignedCwt(
     CAT_LOG_DEBUG("Validating multi-signed CWT token of {} bytes",
                   cwtBytes.size());
 
-    // Parse COSE structure from raw CBOR bytes
+    // Enforce the same input-size and trailing-bytes policy as the single-
+    // recipient path: attacker-controlled COSE input must not slip past the
+    // decoded-bytes ceiling, and any trailing data after the root item is
+    // treated as a framing anomaly rather than silently ignored.
+    if (cwtBytes.size() > catapult::internal::kMaxDecodedCborBytes) {
+      throw InvalidCborError("COSE input exceeds decoded-bytes limit");
+    }
     struct cbor_load_result result;
     auto coseItem = cbor_load_owned(cwtBytes, result);
 
     if (result.error.code != CBOR_ERR_NONE || !coseItem) {
       throw InvalidCborError("Failed to parse COSE structure");
+    }
+    if (result.read != cwtBytes.size()) {
+      throw InvalidCborError("Trailing bytes after COSE root item");
+    }
+
+    // RFC 8152 registers COSE_Sign under tag 98. If a tag is present it
+    // must be 98 — accepting Sign1/Mac0/Encrypt0 tags here would let a
+    // producer label a multi-signed body as a single-recipient structure.
+    if (cbor_isa_tag(coseItem.get())) {
+      const uint64_t tagValue = cbor_tag_value(coseItem.get());
+      if (tagValue != 98) {
+        throw InvalidTokenFormatError();
+      }
+      CborItemPtr innerOwned(cbor_tag_item(coseItem.get()));
+      coseItem = std::move(innerOwned);
     }
 
     if (!cbor_isa_array(coseItem.get())) {
@@ -2489,6 +2532,23 @@ Cwt Cwt::validateMultiSignedCwt(
         std::vector<uint8_t>(cbor_bytestring_handle(coseArray[0]),
                              cbor_bytestring_handle(coseArray[0]) +
                                  cbor_bytestring_length(coseArray[0]));
+
+    // Strictly validate the outer protected header before per-signature
+    // work, matching validateCwt's treatment. An empty protected header is
+    // permitted (RFC 8152 §3): a zero-length bytestring means "no
+    // protected header", not "malformed CBOR".
+    if (!protectedHeaderBytes.empty()) {
+      try {
+        CborItemPtr outerHeaderItem = catapult::internal::loadStrict(
+            std::span<const uint8_t>(protectedHeaderBytes.data(),
+                                     protectedHeaderBytes.size()));
+        if (!outerHeaderItem || !cbor_isa_map(outerHeaderItem.get())) {
+          throw InvalidTokenFormatError();
+        }
+      } catch (const InvalidCborError&) {
+        throw InvalidTokenFormatError();
+      }
+    }
 
     if (!cbor_isa_bytestring(coseArray[2])) {
       throw InvalidTokenFormatError();
@@ -2628,7 +2688,22 @@ Cwt Cwt::validateMultiSignedCwtBase64(
     const std::map<int64_t,
                    std::reference_wrapper<const CryptographicAlgorithm>>&
         algorithms) {
+  // Mirror validateCwtBase64: cap encoded and decoded sizes before any
+  // CBOR allocation on attacker-controlled input.
+  if (encodedCwt.size() > internal::kMaxEncodedTokenBytes) {
+    CAT_LOG_ERROR(
+        "Encoded multi-signed CWT exceeds CTA-5007-B recommended maximum "
+        "({} > {})",
+        encodedCwt.size(), internal::kMaxEncodedTokenBytes);
+    throw InvalidTokenFormatError();
+  }
   auto cwtBytes = base64UrlDecode(encodedCwt);
+  if (cwtBytes.size() > internal::kMaxDecodedCborBytes) {
+    CAT_LOG_ERROR(
+        "Decoded multi-signed CWT exceeds internal ceiling ({} > {} bytes)",
+        cwtBytes.size(), internal::kMaxDecodedCborBytes);
+    throw InvalidTokenFormatError();
+  }
   return validateMultiSignedCwt(cwtBytes, algorithms);
 }
 

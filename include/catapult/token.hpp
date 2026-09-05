@@ -13,7 +13,6 @@
 
 #include "claims.hpp"
 #include "composite.hpp"
-#include "internal/memory_pool.hpp"
 #include "moqt_claims.hpp"
 
 namespace catapult {
@@ -86,20 +85,22 @@ class CatToken {
   }
 
   /**
-   * @brief Factory method for creating validated tokens with memory pool
-   * optimization
+   * @brief Factory method returning an owning validated token.
+   *
+   * Uses ordinary heap ownership so the returned pointer can safely outlive
+   * the creating thread. Previously this factory backed the token with a
+   * thread_local pool, which could leave dangling deallocators when the
+   * pointer escaped its origin thread.
    */
   template <
       typename CoreClaims_T = CoreClaims, typename CatClaims_T = CatClaims,
       typename InfoClaims_T = InformationalClaims,
       typename DpopClaims_T = DpopClaims, typename ReqClaims_T = RequestClaims,
       typename CompClaims_T = CompositeClaims>
-  static auto createValidated(CoreClaims_T&& core_claims,
-                              CatClaims_T&& cat_claims = {},
-                              InfoClaims_T&& info_claims = {},
-                              DpopClaims_T&& dpop_claims = {},
-                              ReqClaims_T&& req_claims = {},
-                              CompClaims_T&& comp_claims = {})
+  static std::unique_ptr<CatToken> createValidated(
+      CoreClaims_T&& core_claims, CatClaims_T&& cat_claims = {},
+      InfoClaims_T&& info_claims = {}, DpopClaims_T&& dpop_claims = {},
+      ReqClaims_T&& req_claims = {}, CompClaims_T&& comp_claims = {})
     requires std::constructible_from<CoreClaims, CoreClaims_T> &&
              std::constructible_from<CatClaims, CatClaims_T> &&
              std::constructible_from<InformationalClaims, InfoClaims_T> &&
@@ -107,8 +108,7 @@ class CatToken {
              std::constructible_from<RequestClaims, ReqClaims_T> &&
              std::constructible_from<CompositeClaims, CompClaims_T>
   {
-    static thread_local ThreadLocalMemoryPool<CatToken, 256> pool;
-    auto tokenPtr = pool.make();
+    auto tokenPtr = std::make_unique<CatToken>();
     tokenPtr->core = std::forward<CoreClaims_T>(core_claims);
     tokenPtr->cat = std::forward<CatClaims_T>(cat_claims);
     tokenPtr->informational = std::forward<InfoClaims_T>(info_claims);

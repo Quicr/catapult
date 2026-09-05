@@ -3,6 +3,8 @@
 #include "catapult/validator.hpp"
 #include "catapult/crypto.hpp"
 #include <chrono>
+#include <future>
+#include <thread>
 
 using namespace catapult;
 
@@ -373,6 +375,34 @@ TEST_CASE("MOQT Binary Match Types") {
     REQUIRE(contains_claims->isAuthorized(moqt_actions::SUBSCRIBE, "live/stream1", "video"));
     REQUIRE(contains_claims->isAuthorized(moqt_actions::SUBSCRIBE, "recorded/live/stream", "video"));
     REQUIRE_FALSE(contains_claims->isAuthorized(moqt_actions::SUBSCRIBE, "recorded/stream", "audio"));
+}
+
+// createValidated must return storage whose lifetime is independent of the
+// thread that produced it. This test builds a token on a worker thread, hands
+// the pointer to the main thread, joins (destroys) the worker, and then
+// destroys the token — a use-after-free of a thread-local pool would surface
+// here under ASan.
+TEST_CASE("CatToken createValidated survives creator thread exit") {
+    std::promise<std::unique_ptr<CatToken>> handoff;
+    auto future = handoff.get_future();
+
+    std::thread producer([&handoff]() {
+        CoreClaims core;
+        core.iss = "https://example.com";
+        core.aud = std::vector<std::string>{"https://relay.example.com"};
+        core.exp = std::chrono::duration_cast<std::chrono::seconds>(
+                       (std::chrono::system_clock::now() + std::chrono::hours(1))
+                           .time_since_epoch())
+                       .count();
+        handoff.set_value(CatToken::createValidated(std::move(core)));
+    });
+
+    auto tokenPtr = future.get();
+    producer.join();
+
+    REQUIRE(tokenPtr);
+    CHECK(tokenPtr->core.iss == "https://example.com");
+    // tokenPtr destructor runs here, on a thread other than the producer.
 }
 
 // Note: Token encoding/decoding tests would require full CBOR implementation

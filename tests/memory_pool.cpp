@@ -213,33 +213,6 @@ TEST_CASE("MemoryPool: ThreadSafety") {
     CHECK(stats.pool_hits >= 0);
 }
 
-TEST_CASE("MemoryPool: ThreadLocalPool") {
-    std::atomic<int> total_allocations{0};
-    constexpr int num_threads = 4;
-    constexpr int allocations_per_thread = 50;
-    
-    std::vector<std::thread> threads;
-    
-    for (int t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&total_allocations]() {
-            for (int i = 0; i < allocations_per_thread; ++i) {
-                auto ptr = ThreadLocalMemoryPool<TestObject, 100>::make(i, i * 2.0);
-                if (ptr) {
-                    total_allocations.fetch_add(1);
-                    CHECK(ptr->value == i);
-                    CHECK(ptr->data == doctest::Approx(i * 2.0));
-                }
-            }
-        });
-    }
-    
-    for (auto& t : threads) {
-        t.join();
-    }
-    
-    CHECK(total_allocations.load() == num_threads * allocations_per_thread);
-}
-
 struct ThrowingConstructor {
     static inline bool should_throw = false;
     

@@ -56,7 +56,7 @@ TEST_SUITE("CWT Encode/Decode Tests") {
 
     TEST_CASE("Encode then decode round trip - full token") {
         auto originalToken = createFullTestToken();
-        Cwt cwt(ALG_PS256, originalToken);
+        Cwt cwt(ALG_ES256, originalToken);
 
         auto encoded = cwt.encodePayload();
         CHECK_FALSE(encoded.empty());
@@ -188,7 +188,7 @@ TEST_SUITE("CWT Encode/Decode Tests") {
             .withExpiration(std::chrono::system_clock::from_time_t(1700000000))
             .withNotBefore(std::chrono::system_clock::from_time_t(1600000000));
 
-        Cwt cwt(ALG_PS256, token);
+        Cwt cwt(ALG_ES256, token);
         auto encoded = cwt.encodePayload();
         auto decoded = Cwt::decodePayload(encoded);
 

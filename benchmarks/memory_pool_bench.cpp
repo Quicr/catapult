@@ -201,19 +201,6 @@ static void BM_Standard_Multithreaded(benchmark::State& state) {
 BENCHMARK(BM_Standard_Multithreaded)
     ->ThreadRange(1, std::thread::hardware_concurrency());
 
-// Thread-local pool benchmarks
-static void BM_ThreadLocal_Pool(benchmark::State& state) {
-  for (auto _ : state) {
-    auto ptr = ThreadLocalMemoryPool<SmallObject, 1024>::make(42, 3.14);
-    benchmark::DoNotOptimize(ptr);
-  }
-
-  auto stats = ThreadLocalMemoryPool<SmallObject, 1024>::get_stats();
-  state.counters["HitRate"] = stats.hit_rate();
-}
-BENCHMARK(BM_ThreadLocal_Pool)
-    ->ThreadRange(1, std::thread::hardware_concurrency());
-
 // Cache behavior benchmarks
 static void BM_Pool_Cache_Friendly(benchmark::State& state) {
   BoundedObjectPool<SmallObject, 1024> pool;

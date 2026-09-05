@@ -69,48 +69,6 @@ std::string createES256JWK(const std::vector<uint8_t>& public_key_der) {
   return jwk.dump();
 }
 
-std::string createPS256JWK(const std::vector<uint8_t>& public_key_der) {
-  // Parse DER-encoded public key using modern OpenSSL 3.0 API
-  const uint8_t* data = public_key_der.data();
-  EVP_PKEY* pkey = d2i_PUBKEY(nullptr, &data, public_key_der.size());
-  if (!pkey) {
-    throw CryptoError("Failed to parse public key DER");
-  }
-
-  // Extract RSA parameters using OpenSSL 3.0 API
-  BIGNUM* n = nullptr;
-  BIGNUM* e = nullptr;
-
-  if (!EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_N, &n) ||
-      !EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_E, &e)) {
-    if (n) BN_free(n);
-    if (e) BN_free(e);
-    EVP_PKEY_free(pkey);
-    throw CryptoError("Failed to extract RSA parameters");
-  }
-
-  // Convert to byte arrays
-  int n_len = BN_num_bytes(n);
-  int e_len = BN_num_bytes(e);
-
-  std::vector<uint8_t> n_bytes(n_len);
-  std::vector<uint8_t> e_bytes(e_len);
-
-  BN_bn2bin(n, n_bytes.data());
-  BN_bn2bin(e, e_bytes.data());
-
-  BN_free(n);
-  BN_free(e);
-  EVP_PKEY_free(pkey);
-
-  // Create JWK JSON
-  json jwk = {{"kty", "RSA"},
-              {"n", base64UrlEncode(n_bytes)},
-              {"e", base64UrlEncode(e_bytes)}};
-
-  return jwk.dump();
-}
-
 std::string calculateJWKThumbprint(const std::string& jwk_json) {
   // Prevent DoS from oversized JSON input
   constexpr size_t MAX_JWK_SIZE = 8192;
@@ -137,12 +95,6 @@ std::string calculateJWKThumbprint(const std::string& jwk_json) {
                  {"kty", jwk["kty"]},
                  {"x", jwk["x"]},
                  {"y", jwk["y"]}};
-  } else if (jwk["kty"] == "RSA") {
-    // Validate RSA-specific required fields
-    if (!jwk.contains("n") || !jwk.contains("e")) {
-      throw CryptoError("RSA JWK missing required fields (n, e)");
-    }
-    canonical = {{"e", jwk["e"]}, {"kty", jwk["kty"]}, {"n", jwk["n"]}};
   } else {
     throw CryptoError("Unsupported key type for thumbprint: " +
                       jwk["kty"].get<std::string>());
@@ -166,8 +118,6 @@ std::string createJWKFromAlgorithm(int64_t algorithm_id,
   switch (algorithm_id) {
     case ALG_ES256:
       return createES256JWK(public_key_der);
-    case ALG_PS256:
-      return createPS256JWK(public_key_der);
     default:
       throw CryptoError("Unsupported algorithm for JWK creation: " +
                         std::to_string(algorithm_id));
