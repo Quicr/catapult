@@ -9,6 +9,7 @@
 #include "catapult/crypto.hpp"
 #include "catapult/dpop.hpp"
 #include "catapult/internal/cbor_owned.hpp"
+#include "catapult/internal/parse_limits.hpp"
 #include "catapult/logging.hpp"
 
 namespace catapult {
@@ -543,25 +544,34 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
     return token;
   }
 
+  // CTA-5007-B §4.5 / C-05 fix: a security parser MUST NOT silently repair
+  // input. Any malformed claim (non-uint key, unexpected value type, out-of-
+  // range integer, unknown/experimental claim id) causes the whole token to
+  // be rejected. Widening the acceptance set is exactly the class of bug that
+  // lets an attacker smuggle scope past authorization checks.
   for (size_t i = 0; i < map_size; i++) {
     cbor_item_t* key_item = pairs[i].key;
     cbor_item_t* value_item = pairs[i].value;
 
     if (!cbor_isa_uint(key_item)) {
-      continue;
+      throw InvalidTokenFormatError();
     }
 
     uint64_t claim_id = cbor_get_int(key_item);
 
     switch (claim_id) {
       case CLAIM_ISS:
-        if (cbor_isa_string(value_item)) {
-          token.core.iss = extract_string(value_item);
+        if (!cbor_isa_string(value_item)) {
+          throw InvalidClaimValueError("'iss' must be a text string");
         }
+        token.core.iss = extract_string(value_item);
         break;
 
       case CLAIM_AUD:
-        if (cbor_isa_array(value_item)) {
+        if (!cbor_isa_array(value_item)) {
+          throw InvalidClaimValueError("'aud' must be an array");
+        }
+        {
           size_t array_size = cbor_array_size(value_item);
           // Limit audience array size to prevent memory exhaustion
           constexpr size_t MAX_AUDIENCE_COUNT = 100;
@@ -569,38 +579,48 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
             throw InvalidClaimValueError("Too many audience values");
           }
           cbor_item_t** array_handle = cbor_array_handle(value_item);
-
-          if (array_handle && array_size > 0) {
-            std::vector<std::string> audiences;
-            audiences.reserve(array_size);
-
-            for (size_t j = 0; j < array_size; j++) {
-              if (array_handle[j] && cbor_isa_string(array_handle[j])) {
-                audiences.emplace_back(extract_string(array_handle[j]));
-              }
-            }
-            token.core.aud = std::move(audiences);
+          if (!array_handle && array_size > 0) {
+            throw InvalidCborError("Invalid 'aud' array handle");
           }
+
+          std::vector<std::string> audiences;
+          audiences.reserve(array_size);
+          for (size_t j = 0; j < array_size; j++) {
+            if (!array_handle[j] || !cbor_isa_string(array_handle[j])) {
+              throw InvalidClaimValueError(
+                  "'aud' array entries must be text strings");
+            }
+            audiences.emplace_back(extract_string(array_handle[j]));
+          }
+          token.core.aud = std::move(audiences);
         }
         break;
 
       case CLAIM_EXP:
-        if (cbor_isa_uint(value_item)) {
+        if (!cbor_isa_uint(value_item)) {
+          throw InvalidClaimValueError("'exp' must be an unsigned integer");
+        }
+        {
           uint64_t exp_val = cbor_get_int(value_item);
-          if (exp_val <=
+          if (exp_val >
               static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
-            token.core.exp = static_cast<int64_t>(exp_val);
+            throw InvalidClaimValueError("'exp' exceeds int64 range");
           }
+          token.core.exp = static_cast<int64_t>(exp_val);
         }
         break;
 
       case CLAIM_NBF:
-        if (cbor_isa_uint(value_item)) {
+        if (!cbor_isa_uint(value_item)) {
+          throw InvalidClaimValueError("'nbf' must be an unsigned integer");
+        }
+        {
           uint64_t nbf_val = cbor_get_int(value_item);
-          if (nbf_val <=
+          if (nbf_val >
               static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
-            token.core.nbf = static_cast<int64_t>(nbf_val);
+            throw InvalidClaimValueError("'nbf' exceeds int64 range");
           }
+          token.core.nbf = static_cast<int64_t>(nbf_val);
         }
         break;
 
@@ -609,242 +629,331 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
           token.core.cti = extract_bytestring(value_item);
         } else if (cbor_isa_string(value_item)) {
           token.core.cti = extract_string(value_item);
+        } else {
+          throw InvalidClaimValueError(
+              "'cti' must be a byte string or text string");
         }
         break;
 
       case CLAIM_CATREPLAY:
-        if (cbor_isa_string(value_item)) {
-          token.cat.catreplay = extract_string(value_item);
+        if (!cbor_isa_string(value_item)) {
+          throw InvalidClaimValueError("'catreplay' must be a text string");
         }
+        token.cat.catreplay = extract_string(value_item);
         break;
 
       case CLAIM_CATPOR:
-        if (cbor_is_bool(value_item)) {
-          token.cat.catpor = cbor_get_bool(value_item);
+        if (!cbor_is_bool(value_item)) {
+          throw InvalidClaimValueError("'catpor' must be a boolean");
         }
+        token.cat.catpor = cbor_get_bool(value_item);
         break;
 
       case CLAIM_CATV:
-        if (cbor_isa_string(value_item)) {
-          token.cat.catv = extract_string(value_item);
+        if (!cbor_isa_string(value_item)) {
+          throw InvalidClaimValueError("'catv' must be a text string");
         }
+        token.cat.catv = extract_string(value_item);
         break;
 
       case CLAIM_CATU:
-        if (cbor_isa_uint(value_item)) {
-          token.cat.catu = static_cast<uint32_t>(cbor_get_int(value_item));
+        if (!cbor_isa_uint(value_item)) {
+          throw InvalidClaimValueError("'catu' must be an unsigned integer");
+        }
+        {
+          uint64_t catu_val = cbor_get_int(value_item);
+          if (catu_val > std::numeric_limits<uint32_t>::max()) {
+            throw InvalidClaimValueError("'catu' exceeds uint32 range");
+          }
+          token.cat.catu = static_cast<uint32_t>(catu_val);
         }
         break;
 
       case CLAIM_CATGEOCOORD:
-        if (cbor_isa_map(value_item)) {
+        if (!cbor_isa_map(value_item)) {
+          throw InvalidClaimValueError("'catgeocoord' must be a map");
+        }
+        {
           GeoCoordinate coord;
           struct cbor_pair* coord_pairs = cbor_map_handle(value_item);
           size_t coord_map_size = cbor_map_size(value_item);
-
-          if (coord_pairs && coord_map_size > 0) {
-            for (size_t k = 0; k < coord_map_size; k++) {
-              cbor_item_t* coord_key = coord_pairs[k].key;
-              cbor_item_t* coord_value = coord_pairs[k].value;
-
-              if (!cbor_isa_string(coord_key) ||
-                  !cbor_isa_float_ctrl(coord_value)) {
-                continue;
-              }
-
-              // Use string_view to avoid allocation for comparison
-              const char* key_data =
-                  reinterpret_cast<const char*>(cbor_string_handle(coord_key));
-              size_t key_len = cbor_string_length(coord_key);
-              std::string_view key_view(key_data, key_len);
-
-              double value = cbor_float_get_float8(coord_value);
-
-              if (key_view == "lat") {
-                coord.lat = value;
-              } else if (key_view == "lon") {
-                coord.lon = value;
-              } else if (key_view == "accuracy") {
-                // Validate accuracy is non-negative and reasonable
-                if (value >= 0.0 && value <= 1e9) {
-                  coord.accuracy = value;
-                }
-              }
-            }
-            token.cat.catgeocoord = coord;
+          if (!coord_pairs && coord_map_size > 0) {
+            throw InvalidCborError("Invalid 'catgeocoord' map handle");
           }
+
+          for (size_t k = 0; k < coord_map_size; k++) {
+            cbor_item_t* coord_key = coord_pairs[k].key;
+            cbor_item_t* coord_value = coord_pairs[k].value;
+
+            if (!cbor_isa_string(coord_key) ||
+                !cbor_isa_float_ctrl(coord_value)) {
+              throw InvalidClaimValueError(
+                  "'catgeocoord' entries must be (string, float) pairs");
+            }
+
+            const char* key_data =
+                reinterpret_cast<const char*>(cbor_string_handle(coord_key));
+            size_t key_len = cbor_string_length(coord_key);
+            std::string_view key_view(key_data, key_len);
+
+            double value = cbor_float_get_float8(coord_value);
+
+            if (key_view == "lat") {
+              coord.lat = value;
+            } else if (key_view == "lon") {
+              coord.lon = value;
+            } else if (key_view == "accuracy") {
+              if (value < 0.0 || value > 1e9) {
+                throw InvalidClaimValueError(
+                    "'catgeocoord.accuracy' out of range");
+              }
+              coord.accuracy = value;
+            } else {
+              throw InvalidClaimValueError(
+                  "Unknown 'catgeocoord' key");
+            }
+          }
+          token.cat.catgeocoord = coord;
         }
         break;
 
       case CLAIM_GEOHASH:
-        if (cbor_isa_string(value_item)) {
-          token.cat.geohash = extract_string(value_item);
+        if (!cbor_isa_string(value_item)) {
+          throw InvalidClaimValueError("'geohash' must be a text string");
         }
+        token.cat.geohash = extract_string(value_item);
         break;
 
       case CLAIM_SUB:
-        if (cbor_isa_string(value_item)) {
-          token.informational.sub = extract_string(value_item);
+        if (!cbor_isa_string(value_item)) {
+          throw InvalidClaimValueError("'sub' must be a text string");
         }
+        token.informational.sub = extract_string(value_item);
         break;
 
       case CLAIM_IAT:
-        if (cbor_isa_uint(value_item)) {
-          token.informational.iat = cbor_get_int(value_item);
+        if (!cbor_isa_uint(value_item)) {
+          throw InvalidClaimValueError("'iat' must be an unsigned integer");
         }
+        token.informational.iat = cbor_get_int(value_item);
         break;
 
       case CLAIM_CATIFDATA:
-        if (cbor_isa_string(value_item)) {
-          token.informational.catifdata = extract_string(value_item);
+        if (!cbor_isa_string(value_item)) {
+          throw InvalidClaimValueError("'catifdata' must be a text string");
         }
+        token.informational.catifdata = extract_string(value_item);
         break;
 
       case CLAIM_CNF:
+        // RFC 8747 §3.1: the confirmation claim may be a text string (jkt
+        // thumbprint) or a CBOR map containing a jwk/kid/etc. We currently
+        // only store the string form; the map form is accepted but treated
+        // as opaque until [[cnf-jwk-decoding]] lands.
         if (cbor_isa_string(value_item)) {
           token.dpop.cnf = extract_string(value_item);
+        } else if (!cbor_isa_map(value_item)) {
+          throw InvalidClaimValueError(
+              "'cnf' must be a text string or CBOR map");
         }
         break;
 
       case CLAIM_CATDPOP:
+        // catdpop is either a text string (opaque settings blob) or a CBOR
+        // map (structured DPoP settings). We only extract the string form
+        // today; the map form is accepted but treated as opaque until
+        // [[catdpop-structured-decoding]] lands.
         if (cbor_isa_string(value_item)) {
           token.dpop.catdpop = extract_string(value_item);
+        } else if (!cbor_isa_map(value_item)) {
+          throw InvalidClaimValueError(
+              "'catdpop' must be a text string or CBOR map");
         }
         break;
 
       case CLAIM_MOQT:
-        if (cbor_isa_bytestring(value_item)) {
+        if (!cbor_isa_bytestring(value_item)) {
+          throw InvalidClaimValueError("'moqt' must be a byte string");
+        }
+        {
           auto moqt_data = extract_bytestring(value_item);
           cbor_load_result moqt_result;
           auto moqt_array = cbor_load_owned(
               reinterpret_cast<const uint8_t*>(moqt_data.data()),
               moqt_data.size(), moqt_result);
-          if (moqt_array && cbor_isa_array(moqt_array.get())) {
-            constexpr size_t MAX_MOQT_SCOPES = 100;
-            size_t moqt_scope_count = cbor_array_size(moqt_array.get());
-            if (moqt_scope_count > MAX_MOQT_SCOPES) {
-              throw InvalidClaimValueError("Too many MOQT scopes");
+          if (!moqt_array || moqt_result.error.code != CBOR_ERR_NONE ||
+              !cbor_isa_array(moqt_array.get())) {
+            throw InvalidClaimValueError(
+                "'moqt' payload must decode to a CBOR array");
+          }
+
+          constexpr size_t MAX_MOQT_SCOPES = 100;
+          size_t moqt_scope_count = cbor_array_size(moqt_array.get());
+          if (moqt_scope_count > MAX_MOQT_SCOPES) {
+            throw InvalidClaimValueError("Too many MOQT scopes");
+          }
+          auto moqt_claims = MoqtClaims::create(moqt_scope_count);
+          for (size_t si = 0; si < moqt_scope_count; ++si) {
+            auto scope_arr = cbor_array_get_owned(moqt_array.get(), si);
+            if (!scope_arr || !cbor_isa_array(scope_arr.get())) {
+              throw InvalidClaimValueError("MOQT scope must be an array");
             }
-            auto moqt_claims = MoqtClaims::create(moqt_scope_count);
-            for (size_t si = 0; si < moqt_scope_count; ++si) {
-              auto scope_arr = cbor_array_get_owned(moqt_array.get(), si);
-              if (!scope_arr || !cbor_isa_array(scope_arr.get())) continue;
-              size_t scope_len = cbor_array_size(scope_arr.get());
-              if (scope_len < 1) continue;
+            size_t scope_len = cbor_array_size(scope_arr.get());
+            if (scope_len < 1) {
+              throw InvalidClaimValueError(
+                  "MOQT scope missing action list");
+            }
 
-              std::vector<int> actions;
-              auto actions_arr = cbor_array_get_owned(scope_arr.get(), 0);
-              if (actions_arr && cbor_isa_array(actions_arr.get())) {
-                constexpr size_t MAX_ACTIONS = 50;
-                size_t action_count = cbor_array_size(actions_arr.get());
-                if (action_count > MAX_ACTIONS) continue;
-                for (size_t ai = 0; ai < action_count; ++ai) {
-                  auto act = cbor_array_get_owned(actions_arr.get(), ai);
-                  if (act && cbor_isa_uint(act.get())) {
-                    uint64_t action_u64 = cbor_get_int(act.get());
-                    if (action_u64 <= static_cast<uint64_t>(
-                                          std::numeric_limits<int>::max())) {
-                      int action_val = static_cast<int>(action_u64);
-                      if (moqt_actions::is_valid_action(action_val)) {
-                        actions.push_back(action_val);
-                      }
-                    }
-                  }
+            std::vector<int> actions;
+            auto actions_arr = cbor_array_get_owned(scope_arr.get(), 0);
+            if (!actions_arr || !cbor_isa_array(actions_arr.get())) {
+              throw InvalidClaimValueError(
+                  "MOQT scope action list must be an array");
+            }
+            constexpr size_t MAX_ACTIONS = 50;
+            size_t action_count = cbor_array_size(actions_arr.get());
+            if (action_count > MAX_ACTIONS) {
+              throw InvalidClaimValueError(
+                  "MOQT scope has too many actions");
+            }
+            for (size_t ai = 0; ai < action_count; ++ai) {
+              auto act = cbor_array_get_owned(actions_arr.get(), ai);
+              if (!act || !cbor_isa_uint(act.get())) {
+                throw InvalidClaimValueError(
+                    "MOQT action must be an unsigned integer");
+              }
+              uint64_t action_u64 = cbor_get_int(act.get());
+              if (action_u64 > static_cast<uint64_t>(
+                                   std::numeric_limits<int>::max())) {
+                throw InvalidClaimValueError(
+                    "MOQT action exceeds int range");
+              }
+              int action_val = static_cast<int>(action_u64);
+              if (!moqt_actions::is_valid_action(action_val)) {
+                throw InvalidClaimValueError(
+                    "MOQT action id is not recognized");
+              }
+              actions.push_back(action_val);
+            }
+
+            auto parse_bin_match = [](cbor_item_t* item) -> MoqtBinaryMatch {
+              if (!item || cbor_is_null(item)) return MoqtBinaryMatch::any();
+              if (cbor_isa_bytestring(item)) {
+                std::string_view sv(reinterpret_cast<const char*>(
+                                        cbor_bytestring_handle(item)),
+                                    cbor_bytestring_length(item));
+                return MoqtBinaryMatch::exact(sv);
+              }
+              if (cbor_isa_array(item) && cbor_array_size(item) == 2) {
+                auto type_item = cbor_array_get_owned(item, 0);
+                auto val_item = cbor_array_get_owned(item, 1);
+                if (!type_item || !cbor_isa_uint(type_item.get()) ||
+                    !val_item || !cbor_isa_bytestring(val_item.get())) {
+                  throw InvalidClaimValueError(
+                      "MOQT match tuple must be (uint, bytestring)");
+                }
+                int type = static_cast<int>(cbor_get_int(type_item.get()));
+                std::string_view sv(
+                    reinterpret_cast<const char*>(
+                        cbor_bytestring_handle(val_item.get())),
+                    cbor_bytestring_length(val_item.get()));
+                switch (type) {
+                  case 1:
+                    return MoqtBinaryMatch::prefix(sv);
+                  case 2:
+                    return MoqtBinaryMatch::suffix(sv);
+                  case 3:
+                    return MoqtBinaryMatch::contains(sv);
+                  case 0:
+                    return MoqtBinaryMatch::exact(sv);
+                  default:
+                    throw InvalidClaimValueError(
+                        "MOQT match tuple has unknown type");
                 }
               }
+              throw InvalidClaimValueError(
+                  "MOQT match element must be a bytestring, null, or (uint, "
+                  "bytestring) tuple");
+            };
 
-              auto parse_bin_match = [](cbor_item_t* item) -> MoqtBinaryMatch {
-                if (!item || cbor_is_null(item)) return MoqtBinaryMatch::any();
-                if (cbor_isa_bytestring(item)) {
-                  std::string_view sv(reinterpret_cast<const char*>(
-                                          cbor_bytestring_handle(item)),
-                                      cbor_bytestring_length(item));
-                  return MoqtBinaryMatch::exact(sv);
-                }
-                if (cbor_isa_array(item) && cbor_array_size(item) == 2) {
-                  auto type_item = cbor_array_get_owned(item, 0);
-                  auto val_item = cbor_array_get_owned(item, 1);
-                  if (type_item && cbor_isa_uint(type_item.get()) && val_item &&
-                      cbor_isa_bytestring(val_item.get())) {
-                    int type = static_cast<int>(cbor_get_int(type_item.get()));
-                    std::string_view sv(
-                        reinterpret_cast<const char*>(
-                            cbor_bytestring_handle(val_item.get())),
-                        cbor_bytestring_length(val_item.get()));
-                    switch (type) {
-                      case 1:
-                        return MoqtBinaryMatch::prefix(sv);
-                      case 2:
-                        return MoqtBinaryMatch::suffix(sv);
-                      case 3:
-                        return MoqtBinaryMatch::contains(sv);
-                      default:
-                        return MoqtBinaryMatch::exact(sv);
-                    }
-                  }
-                }
-                return MoqtBinaryMatch::any();
-              };
+            MoqtCompoundMatch ns_match = MoqtCompoundMatch::any();
+            MoqtCompoundMatch track_match = MoqtCompoundMatch::any();
 
-              MoqtCompoundMatch ns_match = MoqtCompoundMatch::any();
-              MoqtCompoundMatch track_match = MoqtCompoundMatch::any();
-
-              if (scope_len >= 2) {
-                auto ns_arr = cbor_array_get_owned(scope_arr.get(), 1);
-                if (ns_arr && cbor_isa_array(ns_arr.get()) &&
-                    cbor_array_size(ns_arr.get()) > 0) {
-                  std::vector<MoqtBinaryMatch> ns_conditions;
-                  for (size_t ni = 0; ni < cbor_array_size(ns_arr.get());
-                       ++ni) {
-                    auto ns_elem = cbor_array_get_owned(ns_arr.get(), ni);
-                    auto m = parse_bin_match(ns_elem.get());
-                    if (!m.is_empty()) {
-                      ns_conditions.push_back(std::move(m));
-                    }
-                  }
-                  ns_match = MoqtCompoundMatch::all(std::move(ns_conditions));
-                }
+            if (scope_len >= 2) {
+              auto ns_arr = cbor_array_get_owned(scope_arr.get(), 1);
+              if (!ns_arr || !cbor_isa_array(ns_arr.get())) {
+                throw InvalidClaimValueError(
+                    "MOQT scope namespace element must be an array");
               }
-              if (scope_len >= 3) {
-                auto track_item = cbor_array_get_owned(scope_arr.get(), 2);
-                if (track_item && cbor_isa_array(track_item.get()) &&
-                    cbor_array_size(track_item.get()) > 0) {
-                  auto first = cbor_array_get_owned(track_item.get(), 0);
-                  if (first && cbor_isa_array(first.get())) {
-                    std::vector<MoqtBinaryMatch> tr_conditions;
-                    for (size_t ti = 0; ti < cbor_array_size(track_item.get());
-                         ++ti) {
-                      auto tr_elem = cbor_array_get_owned(track_item.get(), ti);
-                      auto m = parse_bin_match(tr_elem.get());
-                      if (!m.is_empty()) {
-                        tr_conditions.push_back(std::move(m));
-                      }
-                    }
-                    track_match =
-                        MoqtCompoundMatch::all(std::move(tr_conditions));
-                  } else {
-                    auto m = parse_bin_match(track_item.get());
+              size_t ns_count = cbor_array_size(ns_arr.get());
+              if (ns_count > 0) {
+                std::vector<MoqtBinaryMatch> ns_conditions;
+                for (size_t ni = 0; ni < ns_count; ++ni) {
+                  auto ns_elem = cbor_array_get_owned(ns_arr.get(), ni);
+                  auto m = parse_bin_match(ns_elem.get());
+                  if (!m.is_empty()) {
+                    ns_conditions.push_back(std::move(m));
+                  }
+                }
+                ns_match = MoqtCompoundMatch::all(std::move(ns_conditions));
+              }
+            }
+            if (scope_len >= 3) {
+              auto track_item = cbor_array_get_owned(scope_arr.get(), 2);
+              if (track_item && cbor_isa_array(track_item.get()) &&
+                  cbor_array_size(track_item.get()) > 0) {
+                auto first = cbor_array_get_owned(track_item.get(), 0);
+                if (first && cbor_isa_array(first.get())) {
+                  std::vector<MoqtBinaryMatch> tr_conditions;
+                  for (size_t ti = 0; ti < cbor_array_size(track_item.get());
+                       ++ti) {
+                    auto tr_elem = cbor_array_get_owned(track_item.get(), ti);
+                    auto m = parse_bin_match(tr_elem.get());
                     if (!m.is_empty()) {
-                      track_match = MoqtCompoundMatch::single(std::move(m));
+                      tr_conditions.push_back(std::move(m));
                     }
                   }
-                } else if (track_item &&
-                           cbor_isa_bytestring(track_item.get())) {
+                  track_match =
+                      MoqtCompoundMatch::all(std::move(tr_conditions));
+                } else {
                   auto m = parse_bin_match(track_item.get());
                   if (!m.is_empty()) {
                     track_match = MoqtCompoundMatch::single(std::move(m));
                   }
                 }
-              }
-
-              if (!actions.empty()) {
-                moqt_claims.addScope(actions, std::move(ns_match),
-                                     std::move(track_match));
+              } else if (track_item &&
+                         cbor_isa_bytestring(track_item.get())) {
+                auto m = parse_bin_match(track_item.get());
+                if (!m.is_empty()) {
+                  track_match = MoqtCompoundMatch::single(std::move(m));
+                }
+              } else if (track_item && !cbor_is_null(track_item.get())) {
+                throw InvalidClaimValueError(
+                    "MOQT scope track element must be null, bytestring, or "
+                    "array");
               }
             }
-            token.extended.setMoqtClaims(std::move(moqt_claims));
+
+            if (actions.empty()) {
+              throw InvalidClaimValueError(
+                  "MOQT scope must contain at least one action");
+            }
+            moqt_claims.addScope(actions, std::move(ns_match),
+                                 std::move(track_match));
           }
+          token.extended.setMoqtClaims(std::move(moqt_claims));
         }
+        break;
+
+      default:
+        // Unknown / unregistered claim ids are ignored (CTA-5007-B §4.5 —
+        // "unrecognized claims MUST NOT be processed"). This is *not* silent
+        // repair: unknown ids simply don't grant any authorization by
+        // themselves. Known-claim malformation is still rejected above. When
+        // typed representations land (task #13), add the registered CAT
+        // claims (CATNIP, CATM, CATALPN, CATH, CATGEOISO3166, CATIF, CATR)
+        // to this switch so their type is checked strictly.
+        CAT_LOG_DEBUG("Ignoring unregistered CAT claim id: {}", claim_id);
         break;
     }
   }
@@ -1427,7 +1536,19 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
 
 Cwt Cwt::validateCwtBase64(const std::string& encodedCwt,
                            const CryptographicAlgorithm& algorithm) {
+  // CTA-5007-B §4.3.1: reject oversized encoded CATs before spending any
+  // base64 or CBOR allocation on attacker-controlled input.
+  if (encodedCwt.size() > internal::kMaxEncodedTokenBytes) {
+    CAT_LOG_ERROR("Encoded CWT exceeds CTA-5007-B recommended maximum ({} > {})",
+                  encodedCwt.size(), internal::kMaxEncodedTokenBytes);
+    throw InvalidTokenFormatError();
+  }
   auto cwtBytes = base64UrlDecode(encodedCwt);
+  if (cwtBytes.size() > internal::kMaxDecodedCborBytes) {
+    CAT_LOG_ERROR("Decoded CWT exceeds internal ceiling ({} > {} bytes)",
+                  cwtBytes.size(), internal::kMaxDecodedCborBytes);
+    throw InvalidTokenFormatError();
+  }
   return validateCwt(cwtBytes, algorithm);
 }
 

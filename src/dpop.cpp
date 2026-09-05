@@ -7,6 +7,8 @@
  */
 
 #include "catapult/dpop.hpp"
+#include "catapult/internal/parse_limits.hpp"
+#include "catapult/logging.hpp"
 
 #include <cbor.h>
 #include <openssl/core_names.h>
@@ -468,7 +470,14 @@ DpopProof DpopProof::deserialize(std::string_view data) {
 }
 
 DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
+  // CTA-5007-B §4.3.1: cap encoded DPoP proofs before base64/CBOR work.
+  if (cwt_data.size() > internal::kMaxEncodedTokenBytes) {
+    throw InvalidTokenFormatError{};
+  }
   auto cose_bytes = base64UrlDecode(std::string(cwt_data));
+  if (cose_bytes.size() > internal::kMaxDecodedCborBytes) {
+    throw InvalidTokenFormatError{};
+  }
 
   cbor_load_result result;
   auto cose_array_ptr =
@@ -620,9 +629,10 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
 
 #ifdef CATAPULT_ENABLE_JSON
 DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
-  // Prevent DoS from oversized JWT input
-  constexpr size_t MAX_JWT_SIZE = 16384;  // 16KB reasonable limit
-  if (jwt_data.size() > MAX_JWT_SIZE) {
+  // CTA-5007-B §4.3.1: JWT-shaped DPoP proofs share the same encoded-size
+  // ceiling as CWT proofs. The previous local 16 KiB limit was strictly
+  // larger than the standard permits.
+  if (jwt_data.size() > internal::kMaxEncodedTokenBytes) {
     throw InvalidTokenFormatError{};
   }
 
@@ -713,6 +723,28 @@ bool DpopProofValidator::validate_proof(
     const std::string& expected_public_key_thumbprint) {
   // Basic structure validation
   if (!proof.is_valid(settings_)) {
+    return false;
+  }
+
+  // MANDATORY signature verification (CTA-5007-B / CAT-4-MOQT). Fail
+  // closed if verification cannot be performed. JWT proofs self-resolve
+  // their algorithm from the embedded JWK; CWT proofs require an external
+  // verifier to have been configured via `set_cwt_verifier`.
+  bool signature_ok = false;
+  if (proof.encoding() == DpopEncoding::CWT) {
+    if (cwt_verifier_ != nullptr) {
+      signature_ok = proof.verify_signature(*cwt_verifier_);
+    }
+  } else {
+    // DpopProof::verify_signature() constructs the verifier from the
+    // embedded JWK for JWT proofs; it returns false on any failure.
+    signature_ok = proof.verify_signature();
+  }
+  if (!signature_ok) {
+    CAT_LOG_ERROR(
+        "DPoP proof signature verification failed or was not possible; "
+        "rejecting proof (encoding={})",
+        proof.encoding() == DpopEncoding::CWT ? "CWT" : "JWT");
     return false;
   }
 

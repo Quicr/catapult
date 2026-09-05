@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(catapult VERSION 1.2.0 LANGUAGES C CXX)
+project(catapult VERSION 1.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,6 +7,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(ENABLE_LOGGING "Enable logging with spdlog" ON)
 option(CATAPULT_ENABLE_JSON "Enable JSON serialization support (requires nlohmann_json)" ON)
 option(CATAPULT_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+# WARNING: The legacy JWT-shaped token API (catapult::legacy::legacyJwtEncodeToken /
+# legacyJwtDecodeToken) emits and accepts a JWT-style three-part format that is NOT
+# a CTA-5007-B compliant CWT. It is retained solely for backwards compatibility with
+# pre-1.3 consumers and MUST NOT be used for interoperable CAT deployments. Leave
+# this OFF for any production build.
+option(CATAPULT_ENABLE_LEGACY_JWT_TOKEN
+       "Enable the non-standard legacy JWT-shaped CAT token API (INSECURE, off by default)"
+       OFF)
 
 # Dependency management
 find_package(OpenSSL REQUIRED)
@@ -49,8 +57,18 @@ endif()
 
 add_library(catapult STATIC ${CATAPULT_SOURCES})
 
+# Propagate the legacy-JWT flag to translation units that include validator.hpp
+# so callers see the deprecated declarations and the library exports the
+# corresponding definitions.
+if(CATAPULT_ENABLE_LEGACY_JWT_TOKEN)
+    target_compile_definitions(catapult PUBLIC CATAPULT_ENABLE_LEGACY_JWT_TOKEN)
+    message(WARNING
+        "CATAPULT_ENABLE_LEGACY_JWT_TOKEN is ON. The legacy JWT-shaped token "
+        "API is NOT CTA-5007-B compliant and MUST NOT be used in production.")
+endif()
+
 # Link libraries
-target_link_libraries(catapult 
+target_link_libraries(catapult
     cbor
     ${OPENSSL_LIBRARIES}
 )
@@ -150,6 +168,18 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 
     if(CATAPULT_ENABLE_JSON)
         list(APPEND CATAPULT_TEST_SOURCES tests/test_vectors.cpp)
+    endif()
+
+    # Tests exercise the legacy JWT-shaped token API for regression coverage.
+    # If the top-level build enables the tests, force the option on so that
+    # the library actually exports the legacy symbols the tests link against.
+    if(NOT CATAPULT_ENABLE_LEGACY_JWT_TOKEN)
+        message(STATUS
+            "Enabling CATAPULT_ENABLE_LEGACY_JWT_TOKEN for in-tree tests only. "
+            "Downstream consumers must opt in explicitly; the API is deprecated "
+            "and MUST NOT be used for production CAT deployments.")
+        set(CATAPULT_ENABLE_LEGACY_JWT_TOKEN ON CACHE BOOL "" FORCE)
+        target_compile_definitions(catapult PUBLIC CATAPULT_ENABLE_LEGACY_JWT_TOKEN)
     endif()
 
     add_executable(catapult_tests ${CATAPULT_TEST_SOURCES})
