@@ -37,7 +37,14 @@ using json = nlohmann::json;
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
+// The legacy JWT-shaped API is now double-gated: enabling the CMake
+// option is not enough. Every translation unit that uses it must also
+// acknowledge the insecurity by defining this macro before including
+// validator.hpp. Do that here for the regression suite only.
 #ifdef CATAPULT_ENABLE_LEGACY_JWT_TOKEN
+#ifndef CATAPULT_LEGACY_JWT_ACKNOWLEDGE_INSECURE
+#error "Test build force-enables the legacy JWT API; expected the ACKNOWLEDGE_INSECURE macro to have been defined by CMake."
+#endif
 using catapult::legacy::legacyJwtDecodeToken;
 using catapult::legacy::legacyJwtEncodeToken;
 // Compatibility aliases so existing tests keep reading naturally.

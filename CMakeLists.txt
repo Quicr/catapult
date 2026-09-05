@@ -215,7 +215,12 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 
     target_include_directories(catapult_tests PRIVATE ${OPENSSL_INCLUDE_DIR})
     target_compile_definitions(catapult_tests PRIVATE
-        TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/test_data")
+        TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/test_data"
+        # In-tree regression suite exercises the legacy JWT-shaped API.
+        # The library header requires this acknowledgement macro at every
+        # translation unit that touches the deprecated symbols; scope it
+        # to the test target only.
+        CATAPULT_LEGACY_JWT_ACKNOWLEDGE_INSECURE=1)
 
     if(CATAPULT_ENABLE_JSON AND TARGET nlohmann_json::nlohmann_json)
         target_link_libraries(catapult_tests nlohmann_json::nlohmann_json)

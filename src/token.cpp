@@ -10,6 +10,10 @@
 #include "catapult/cwt.hpp"
 #include "catapult/internal/parse_limits.hpp"
 #include "catapult/logging.hpp"
+// This translation unit defines the legacy JWT-shaped API when the build
+// option is enabled; opt into the acknowledgement macro so the
+// declarations in validator.hpp are visible here.
+#define CATAPULT_LEGACY_JWT_ACKNOWLEDGE_INSECURE 1
 #include "catapult/validator.hpp"
 
 namespace catapult {

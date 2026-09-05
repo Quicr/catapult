@@ -208,6 +208,28 @@ class CatTokenValidator {
 };
 
 #ifdef CATAPULT_ENABLE_LEGACY_JWT_TOKEN
+
+// Two-gate opt-in for the legacy JWT-shaped API.
+//
+// Gate 1 (build time): the CMake option `CATAPULT_ENABLE_LEGACY_JWT_TOKEN`
+// must be ON for these symbols to be linked at all.
+//
+// Gate 2 (per translation unit): the caller must additionally define
+// `CATAPULT_LEGACY_JWT_ACKNOWLEDGE_INSECURE` before including this header.
+// The macro name is intentionally long and self-documenting so a code
+// reviewer sees exactly what the file is opting into. Without it, the
+// declarations remain invisible and every legacy call site fails to
+// compile — deprecation warnings are easy to silence with a project-wide
+// `-Wno-deprecated-declarations`, whereas an unresolved reference is not.
+#ifndef CATAPULT_LEGACY_JWT_ACKNOWLEDGE_INSECURE
+#pragma message(                                                              \
+    "catapult: the legacy JWT-shaped token API (catapult::legacy::) is NOT " \
+    "CTA-5007-B compliant. To use it, define "                                \
+    "CATAPULT_LEGACY_JWT_ACKNOWLEDGE_INSECURE before including "              \
+    "catapult/validator.hpp. New code should use Cwt::createCwtBase64 / "     \
+    "Cwt::validateCwtBase64 instead.")
+#else
+
 namespace legacy {
 
 /**
@@ -223,7 +245,8 @@ namespace legacy {
  * conformance.
  *
  * Availability of this API is gated at build time by the CMake option
- * `CATAPULT_ENABLE_LEGACY_JWT_TOKEN` (OFF by default).
+ * `CATAPULT_ENABLE_LEGACY_JWT_TOKEN` (OFF by default) AND by the
+ * per-translation-unit macro `CATAPULT_LEGACY_JWT_ACKNOWLEDGE_INSECURE`.
  */
 [[deprecated(
     "Legacy JWT-shaped token format is not CTA-5007-B compliant. Use "
@@ -246,6 +269,8 @@ CatToken legacyJwtDecodeToken(const std::string& tokenStr,
                               CryptographicAlgorithm& algorithm);
 
 }  // namespace legacy
+
+#endif  // CATAPULT_LEGACY_JWT_ACKNOWLEDGE_INSECURE
 #endif  // CATAPULT_ENABLE_LEGACY_JWT_TOKEN
 
 /**
