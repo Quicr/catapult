@@ -357,20 +357,6 @@ SecureVector<uint8_t> HmacSha256Algorithm::generateSecureKey() {
   return key;
 }
 
-std::vector<uint8_t> HmacSha256Algorithm::generateKey() {
-  std::vector<uint8_t> key(crypto_constants::HMAC_KEY_SIZE);
-  if (RAND_bytes(key.data(), crypto_constants::HMAC_KEY_SIZE) != 1) {
-    unsigned long err = ERR_get_error();
-    if (err == 0) {
-      throwOsError("RAND_bytes");
-    } else {
-      throw CryptoError("Failed to generate random key: OpenSSL error " +
-                        std::to_string(err));
-    }
-  }
-  return key;
-}
-
 std::vector<uint8_t> HmacSha256Algorithm::signImpl(
     std::span<const uint8_t> data) const {
   // Use secure memory for intermediate computation to protect against memory
@@ -454,7 +440,7 @@ void Es256Algorithm::loadPublicKey(const uint8_t* keyData, size_t keySize) {
 
 Es256Algorithm::Es256Algorithm() {
   initializeImpl();
-  auto keyPair = generateKeyPair();
+  auto keyPair = generateSecureKeyPair();
   loadPrivateKey(keyPair.first.data(), keyPair.first.size());
   loadPublicKey(keyPair.second.data(), keyPair.second.size());
 }
@@ -488,61 +474,6 @@ Es256Algorithm& Es256Algorithm::operator=(Es256Algorithm&& other) noexcept {
     pImpl_ = std::move(other.pImpl_);
   }
   return *this;
-}
-
-std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
-Es256Algorithm::generateKeyPair() {
-  CAT_LOG_DEBUG("Generating ES256 key pair");
-  auto pctx = EvpPkeyCtxWrapper(EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr));
-  if (!pctx.get()) {
-    CAT_LOG_ERROR("Failed to create EC key context for ES256");
-    throw CryptoError("Failed to create EC key context");
-  }
-
-  if (EVP_PKEY_keygen_init(pctx.get()) <= 0) {
-    throw CryptoError("Failed to initialize EC key generation");
-  }
-
-  if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(pctx.get(),
-                                             NID_X9_62_prime256v1) <= 0) {
-    throw CryptoError("Failed to set EC curve");
-  }
-
-  EVP_PKEY* pkey = nullptr;
-  if (EVP_PKEY_keygen(pctx.get(), &pkey) <= 0) {
-    throw CryptoError("Failed to generate EC key pair");
-  }
-
-  // Extract private and public keys as DER using RAII wrappers
-  auto priv_bio = BioPtr(BIO_new(BIO_s_mem()));
-  auto pub_bio = BioPtr(BIO_new(BIO_s_mem()));
-  auto pkey_wrapper = EvpKeyPtr(pkey);  // Wrap for automatic cleanup
-
-  if (!priv_bio.get() || !pub_bio.get()) {
-    throw CryptoError("Failed to create BIO objects");
-  }
-
-  if (!i2d_PrivateKey_bio(priv_bio.get(), pkey) ||
-      !i2d_PUBKEY_bio(pub_bio.get(), pkey)) {
-    throw CryptoError("Failed to serialize keys");
-  }
-
-  char* priv_data;
-  char* pub_data;
-  long priv_len = BIO_get_mem_data(priv_bio.get(), &priv_data);
-  long pub_len = BIO_get_mem_data(pub_bio.get(), &pub_data);
-
-  std::vector<uint8_t> privateKey(priv_data, priv_data + priv_len);
-  std::vector<uint8_t> publicKey(pub_data, pub_data + pub_len);
-
-  // Securely clear BIO buffer containing private key before it's freed
-  BUF_MEM* bm = nullptr;
-  BIO_get_mem_ptr(priv_bio.get(), &bm);
-  if (bm && bm->data && bm->length > 0) {
-    OPENSSL_cleanse(bm->data, bm->length);
-  }
-
-  return {privateKey, publicKey};
 }
 
 std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>
@@ -810,7 +741,7 @@ void Ps256Algorithm::loadPublicKey(const uint8_t* keyData, size_t keySize) {
 
 Ps256Algorithm::Ps256Algorithm() {
   initializeImpl();
-  auto keyPair = generateKeyPair();
+  auto keyPair = generateSecureKeyPair();
   loadPrivateKey(keyPair.first.data(), keyPair.first.size());
   loadPublicKey(keyPair.second.data(), keyPair.second.size());
 }
@@ -844,57 +775,6 @@ Ps256Algorithm& Ps256Algorithm::operator=(Ps256Algorithm&& other) noexcept {
     pImpl_ = std::move(other.pImpl_);
   }
   return *this;
-}
-
-std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
-Ps256Algorithm::generateKeyPair() {
-  // Use RAII wrapper for automatic cleanup
-  auto pctx = EvpPkeyCtxWrapper(EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr));
-  if (!pctx.get()) throw CryptoError("Failed to create RSA key context");
-
-  if (EVP_PKEY_keygen_init(pctx.get()) <= 0) {
-    throw CryptoError("Failed to initialize RSA key generation");
-  }
-
-  if (EVP_PKEY_CTX_set_rsa_keygen_bits(pctx.get(), 2048) <= 0) {
-    throw CryptoError("Failed to set RSA key size");
-  }
-
-  EVP_PKEY* pkey = nullptr;
-  if (EVP_PKEY_keygen(pctx.get(), &pkey) <= 0) {
-    throw CryptoError("Failed to generate RSA key pair");
-  }
-
-  // Extract private and public keys as DER using RAII wrappers
-  auto priv_bio = BioPtr(BIO_new(BIO_s_mem()));
-  auto pub_bio = BioPtr(BIO_new(BIO_s_mem()));
-  auto pkey_wrapper = EvpKeyPtr(pkey);  // Wrap for automatic cleanup
-
-  if (!priv_bio.get() || !pub_bio.get()) {
-    throw CryptoError("Failed to create BIO objects");
-  }
-
-  if (!i2d_PrivateKey_bio(priv_bio.get(), pkey) ||
-      !i2d_PUBKEY_bio(pub_bio.get(), pkey)) {
-    throw CryptoError("Failed to serialize keys");
-  }
-
-  char* priv_data;
-  char* pub_data;
-  long priv_len = BIO_get_mem_data(priv_bio.get(), &priv_data);
-  long pub_len = BIO_get_mem_data(pub_bio.get(), &pub_data);
-
-  std::vector<uint8_t> privateKey(priv_data, priv_data + priv_len);
-  std::vector<uint8_t> publicKey(pub_data, pub_data + pub_len);
-
-  // Securely clear BIO buffer containing private key before it's freed
-  BUF_MEM* bm = nullptr;
-  BIO_get_mem_ptr(priv_bio.get(), &bm);
-  if (bm && bm->data && bm->length > 0) {
-    OPENSSL_cleanse(bm->data, bm->length);
-  }
-
-  return {privateKey, publicKey};
 }
 
 std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>

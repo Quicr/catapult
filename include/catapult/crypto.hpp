@@ -260,14 +260,6 @@ class HmacSha256Algorithm : public CryptographicAlgorithm {
    */
   static SecureVector<uint8_t> generateSecureKey();
 
-  /**
-   * @brief Generate a random HMAC key (backward compatibility)
-   * @deprecated Use generateSecureKey() for better security
-   * @return Generated key bytes
-   */
-  [[deprecated("Use generateSecureKey() for enhanced security")]]
-  static std::vector<uint8_t> generateKey();
-
   std::vector<uint8_t> signImpl(std::span<const uint8_t> data) const override;
   bool verifyImpl(std::span<const uint8_t> data,
                   std::span<const uint8_t> signature) const override;
@@ -332,15 +324,6 @@ class Es256Algorithm : public CryptographicAlgorithm {
 
   Es256Algorithm(const Es256Algorithm&) = delete;
   Es256Algorithm& operator=(const Es256Algorithm&) = delete;
-
-  /**
-   * @brief Generate an ES256 key pair
-   * @deprecated Use generateSecureKeyPair() for enhanced security
-   * @return Pair of (DER private key, DER public key)
-   */
-  [[deprecated("Use generateSecureKeyPair() for enhanced security")]]
-  static std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
-  generateKeyPair();
 
   /**
    * @brief Generate ES256 key pair with secure memory for private key
@@ -414,15 +397,6 @@ class Ps256Algorithm : public CryptographicAlgorithm {
 
   Ps256Algorithm(const Ps256Algorithm&) = delete;
   Ps256Algorithm& operator=(const Ps256Algorithm&) = delete;
-
-  /**
-   * @brief Generate a PS256 key pair
-   * @deprecated Use generateSecureKeyPair() for enhanced security
-   * @return Pair of (DER private key, DER public key)
-   */
-  [[deprecated("Use generateSecureKeyPair() for enhanced security")]]
-  static std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
-  generateKeyPair();
 
   /**
    * @brief Generate PS256 key pair with secure memory for private key

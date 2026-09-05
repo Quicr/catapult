@@ -39,7 +39,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         cwt.withKeyId("test-key-es256");
         
         // Generate ES256 key pair
-        auto keyPair = Es256Algorithm::generateKeyPair();
+        auto keyPair = Es256Algorithm::generateSecureKeyPair();
         Es256Algorithm es256Alg(keyPair.first, keyPair.second);
         
         // Create signed CWT according to RFC 8392 Section 7
@@ -85,7 +85,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         cwt.withKeyId("test-key-ps256");
         
         // Generate PS256 key pair
-        auto keyPair = Ps256Algorithm::generateKeyPair();
+        auto keyPair = Ps256Algorithm::generateSecureKeyPair();
         Ps256Algorithm ps256Alg(keyPair.first, keyPair.second);
         
         // Create signed CWT
@@ -104,7 +104,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         originalCwt.withKeyId("roundtrip-test-key");
         
         // Generate key pair for signing/verification
-        auto keyPair = Es256Algorithm::generateKeyPair();
+        auto keyPair = Es256Algorithm::generateSecureKeyPair();
         Es256Algorithm signingAlg(keyPair.first, keyPair.second);
         Es256Algorithm verificationAlg(keyPair.second); // Verification-only (public key only)
         
@@ -134,7 +134,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         originalCwt.withKeyId("hmac-roundtrip-test");
         
         // Generate shared HMAC key
-        auto sharedKey = HmacSha256Algorithm::generateKey();
+        auto sharedKey = HmacSha256Algorithm::generateSecureKey();
         HmacSha256Algorithm hmacAlg(sharedKey);
         
         // Step 1: Create MACed CWT
@@ -158,8 +158,8 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         Cwt cwt(ALG_ES256, token);
         
         // Generate two different key pairs
-        auto correctKeyPair = Es256Algorithm::generateKeyPair();
-        auto wrongKeyPair = Es256Algorithm::generateKeyPair();
+        auto correctKeyPair = Es256Algorithm::generateSecureKeyPair();
+        auto wrongKeyPair = Es256Algorithm::generateSecureKeyPair();
         
         Es256Algorithm correctAlg(correctKeyPair.first, correctKeyPair.second);
         Es256Algorithm wrongAlg(wrongKeyPair.second); // Wrong public key
@@ -175,7 +175,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         auto token = createTestToken();
         Cwt cwt(ALG_ES256, token);
         
-        auto keyPair = Es256Algorithm::generateKeyPair();
+        auto keyPair = Es256Algorithm::generateSecureKeyPair();
         Es256Algorithm es256Alg(keyPair.first, keyPair.second);
         
         // Create valid CWT
@@ -198,7 +198,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         auto token = createTestToken();
         Cwt cwt(ALG_HMAC256_256, token);
         
-        auto hmacKey = HmacSha256Algorithm::generateKey();
+        auto hmacKey = HmacSha256Algorithm::generateSecureKey();
         HmacSha256Algorithm hmacAlg(hmacKey);
         
         std::string encodedCwt = cwt.createCwtBase64(CwtMode::MACed, hmacAlg);
@@ -229,7 +229,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
     }
 
     TEST_CASE("RFC 8392 Section 7 - Invalid Base64url Input Should Fail") {
-        Es256Algorithm es256Alg(Es256Algorithm::generateKeyPair().second); // Public key only
+        Es256Algorithm es256Alg(Es256Algorithm::generateSecureKeyPair().second); // Public key only
         
         // Test various invalid base64url strings
         std::vector<std::string> invalidInputs = {
@@ -263,7 +263,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         Cwt largeCwt(ALG_ES256, largeToken);
         largeCwt.withKeyId("large-test-key-identifier");
         
-        auto keyPair = Es256Algorithm::generateKeyPair();
+        auto keyPair = Es256Algorithm::generateSecureKeyPair();
         Es256Algorithm es256Alg(keyPair.first, keyPair.second);
         
         REQUIRE_NOTHROW({
@@ -286,12 +286,12 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         
         // Create CWT with ES256
         Cwt es256Cwt(ALG_ES256, token);
-        auto es256KeyPair = Es256Algorithm::generateKeyPair();
+        auto es256KeyPair = Es256Algorithm::generateSecureKeyPair();
         Es256Algorithm es256Alg(es256KeyPair.first, es256KeyPair.second);
         std::string es256Token = es256Cwt.createCwtBase64(CwtMode::Signed, es256Alg);
         
         // Try to validate with HMAC algorithm - should fail
-        auto hmacKey = HmacSha256Algorithm::generateKey();
+        auto hmacKey = HmacSha256Algorithm::generateSecureKey();
         HmacSha256Algorithm hmacAlg(hmacKey);
         
         CHECK_THROWS(Cwt::validateCwtBase64(es256Token, hmacAlg));
@@ -459,7 +459,7 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         auto token = createTestToken();
         Cwt cwt(ALG_ES256, token);
         
-        auto keyPair = Es256Algorithm::generateKeyPair();
+        auto keyPair = Es256Algorithm::generateSecureKeyPair();
         Es256Algorithm es256Alg(keyPair.first, keyPair.second);
         
         // Encryption mode should throw for signature-only algorithms

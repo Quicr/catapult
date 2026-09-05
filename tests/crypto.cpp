@@ -91,13 +91,13 @@ TEST_CASE("HmacSha256AlgorithmId") {
 }
 
 TEST_CASE("Es256GenerateKeyPair") {
-    auto keyPair = Es256Algorithm::generateKeyPair();
+    auto keyPair = Es256Algorithm::generateSecureKeyPair();
     CHECK_FALSE(keyPair.first.empty());  // Private key
     CHECK_FALSE(keyPair.second.empty()); // Public key
-    
-    // Generate another key pair and verify they're different
-    auto keyPair2 = Es256Algorithm::generateKeyPair();
-    CHECK(keyPair.first != keyPair2.first);
+
+    auto keyPair2 = Es256Algorithm::generateSecureKeyPair();
+    CHECK(secure_utils::to_regular_vector(keyPair.first) !=
+          secure_utils::to_regular_vector(keyPair2.first));
     CHECK(keyPair.second != keyPair2.second);
 }
 
@@ -107,13 +107,13 @@ TEST_CASE("Es256AlgorithmId") {
 }
 
 TEST_CASE("Ps256GenerateKeyPair") {
-    auto keyPair = Ps256Algorithm::generateKeyPair();
+    auto keyPair = Ps256Algorithm::generateSecureKeyPair();
     CHECK_FALSE(keyPair.first.empty());  // Private key
     CHECK_FALSE(keyPair.second.empty()); // Public key
-    
-    // Generate another key pair and verify they're different
-    auto keyPair2 = Ps256Algorithm::generateKeyPair();
-    CHECK(keyPair.first != keyPair2.first);
+
+    auto keyPair2 = Ps256Algorithm::generateSecureKeyPair();
+    CHECK(secure_utils::to_regular_vector(keyPair.first) !=
+          secure_utils::to_regular_vector(keyPair2.first));
     CHECK(keyPair.second != keyPair2.second);
 }
 

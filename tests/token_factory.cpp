@@ -152,39 +152,23 @@ TEST_CASE("SecureMemory_HmacKeyGeneration") {
 }
 
 TEST_CASE("SecureMemory_Es256SecureKeyPair") {
-    // Test secure ES256 key pair generation
     auto [secure_private, public_key] = Es256Algorithm::generateSecureKeyPair();
-    auto [regular_private, regular_public] = Es256Algorithm::generateKeyPair();
-    
+
     CHECK(secure_private.size() > 0);
     CHECK(public_key.size() > 0);
-    CHECK(regular_private.size() > 0);
-    CHECK(regular_public.size() > 0);
-    
-    // Test constructor with secure private key
+
     Es256Algorithm secure_algo(secure_private, public_key);
-    Es256Algorithm regular_algo(regular_private, regular_public);
-    
     CHECK(secure_algo.algorithmId() == ALG_ES256);
-    CHECK(regular_algo.algorithmId() == ALG_ES256);
 }
 
 TEST_CASE("SecureMemory_Ps256SecureKeyPair") {
-    // Test secure PS256 key pair generation
     auto [secure_private, public_key] = Ps256Algorithm::generateSecureKeyPair();
-    auto [regular_private, regular_public] = Ps256Algorithm::generateKeyPair();
-    
+
     CHECK(secure_private.size() > 0);
     CHECK(public_key.size() > 0);
-    CHECK(regular_private.size() > 0);
-    CHECK(regular_public.size() > 0);
-    
-    // Test constructor with secure private key
+
     Ps256Algorithm secure_algo(secure_private, public_key);
-    Ps256Algorithm regular_algo(regular_private, regular_public);
-    
     CHECK(secure_algo.algorithmId() == ALG_PS256);
-    CHECK(regular_algo.algorithmId() == ALG_PS256);
 }
 
 TEST_CASE("SecureMemory_UtilityFunctions") {

@@ -134,13 +134,13 @@ TEST_CASE("MultiAlgorithmSupport") {
     
     // Test key generation
     REQUIRE_NOTHROW({
-        auto es256Keys = Es256Algorithm::generateKeyPair();
+        auto es256Keys = Es256Algorithm::generateSecureKeyPair();
         CHECK_FALSE(es256Keys.first.empty());
         CHECK_FALSE(es256Keys.second.empty());
     });
-    
+
     REQUIRE_NOTHROW({
-        auto ps256Keys = Ps256Algorithm::generateKeyPair();
+        auto ps256Keys = Ps256Algorithm::generateSecureKeyPair();
         CHECK_FALSE(ps256Keys.first.empty());
         CHECK_FALSE(ps256Keys.second.empty());
     });
