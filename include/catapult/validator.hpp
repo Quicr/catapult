@@ -199,7 +199,7 @@ class CatTokenValidator {
   void validateUsageLimits(const CatToken& token) const;
   void validateCompositeClaims(const CatToken& token) const;
 
-  // CAT-4-MOQT (draft-jennings-moq-cat-04) §`moqt-reval`: enforce that
+  // CAT-4-MOQT (draft-ietf-moq-c4m-01) §`moqt-reval`: enforce that
   // `iat + moqt-reval` has not elapsed. `now_epoch_seconds` is passed in
   // from `validate()` so that a single time snapshot is applied
   // consistently across `exp`, `nbf`, and reval checks.

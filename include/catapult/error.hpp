@@ -176,7 +176,7 @@ class TokenNotYetValidError : public CatError {
 /**
  * @brief The `moqt-reval` revalidation interval has elapsed.
  *
- * CAT-4-MOQT (draft-jennings-moq-cat-04) requires that when a token
+ * CAT-4-MOQT (draft-ietf-moq-c4m-01) requires that when a token
  * carries `moqt-reval`, the resource server (relay) MUST reject the
  * token once (`iat` + `moqt-reval`) is in the past. The client is
  * expected to obtain a fresh token from the issuer.

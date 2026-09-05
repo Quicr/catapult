@@ -3,6 +3,7 @@
 #include "catapult/validator.hpp"
 #include "catapult/error.hpp"
 #include "catapult/composite.hpp"
+#include "catapult/moqt_claims.hpp"
 
 using namespace catapult;
 using namespace catapult::composite_utils;
@@ -764,4 +765,88 @@ TEST_CASE("CompileTimeTypedCompositeWithMemoryPool") {
     pooledAnd.addToken(token2);
     CHECK(pooledAnd.claims.size() == 2);
     CHECK(pooledAnd.evaluate(validator) == true);
+}
+
+// draft-ietf-moq-c4m-01 §"MOQT Revalidation Claim": `moqt-reval` MUST NOT
+// appear inside a composite claim. The validator must reject a token whose
+// composite branch embeds an inner token carrying a moqt-reval interval,
+// regardless of whether that branch's authorization outcome would have
+// succeeded.
+TEST_CASE("Composite scope guard - moqt-reval inside OR is rejected") {
+    auto inner = createValidToken("issuer-embedded");
+    MoqtClaims moqt;
+    std::vector<int> actions = {moqt_actions::PUBLISH};
+    moqt.addScope(actions, MoqtBinaryMatch::any(), MoqtBinaryMatch::any());
+    moqt.setRevalidationInterval(std::chrono::seconds(300));
+    inner.extended.setMoqtClaims(std::move(moqt));
+
+    auto sibling = createValidToken("issuer-sibling");
+
+    CatToken outer = createValidToken("outer-issuer");
+    outer.composite.orClaim = std::make_unique<OrClaim>();
+    (*outer.composite.orClaim)->addToken(inner);
+    (*outer.composite.orClaim)->addToken(sibling);
+
+    auto validator = CatTokenValidator().withClockSkewTolerance(60);
+    CHECK_THROWS_AS(validator.validate(outer), InvalidClaimValueError);
+}
+
+TEST_CASE("Composite scope guard - moqt-reval inside AND is rejected") {
+    auto inner = createValidToken("issuer-embedded");
+    MoqtClaims moqt;
+    std::vector<int> actions = {moqt_actions::PUBLISH};
+    moqt.addScope(actions, MoqtBinaryMatch::any(), MoqtBinaryMatch::any());
+    moqt.setRevalidationInterval(std::chrono::seconds(300));
+    inner.extended.setMoqtClaims(std::move(moqt));
+
+    auto sibling = createValidToken("issuer-sibling");
+
+    CatToken outer = createValidToken("outer-issuer");
+    outer.composite.andClaim = std::make_unique<AndClaim>();
+    (*outer.composite.andClaim)->addToken(inner);
+    (*outer.composite.andClaim)->addToken(sibling);
+
+    auto validator = CatTokenValidator().withClockSkewTolerance(60);
+    CHECK_THROWS_AS(validator.validate(outer), InvalidClaimValueError);
+}
+
+TEST_CASE("Composite scope guard - moqt-reval inside nested OR-in-NOR is rejected") {
+    // Nested case: NOR contains an OR whose branch carries moqt-reval.
+    // The walk must descend into every composite layer, not just the
+    // immediate one, otherwise a hostile issuer could hide the reval
+    // interval one level deeper than the guard looks.
+    auto deep = createValidToken("issuer-deep");
+    MoqtClaims moqt;
+    std::vector<int> actions = {moqt_actions::PUBLISH};
+    moqt.addScope(actions, MoqtBinaryMatch::any(), MoqtBinaryMatch::any());
+    moqt.setRevalidationInterval(std::chrono::seconds(300));
+    deep.extended.setMoqtClaims(std::move(moqt));
+
+    auto innerOr = std::make_unique<OrClaim>();
+    innerOr->addToken(deep);
+
+    CatToken outer = createValidToken("outer-issuer");
+    outer.composite.norClaim = std::make_unique<NorClaim>();
+    (*outer.composite.norClaim)->claims.emplace_back(std::move(innerOr));
+
+    auto validator = CatTokenValidator().withClockSkewTolerance(60);
+    CHECK_THROWS_AS(validator.validate(outer), InvalidClaimValueError);
+}
+
+TEST_CASE("Composite scope guard - moqt without reval inside composite is fine") {
+    // A composite may legitimately carry `moqt` scopes (they're not the
+    // scoped-restricted claim). Only `moqt-reval` is; make sure the guard
+    // doesn't over-reject.
+    auto inner = createValidToken("issuer-embedded");
+    MoqtClaims moqt;
+    std::vector<int> actions = {moqt_actions::PUBLISH};
+    moqt.addScope(actions, MoqtBinaryMatch::any(), MoqtBinaryMatch::any());
+    inner.extended.setMoqtClaims(std::move(moqt));
+
+    CatToken outer = createValidToken("outer-issuer");
+    outer.composite.orClaim = std::make_unique<OrClaim>();
+    (*outer.composite.orClaim)->addToken(inner);
+
+    auto validator = CatTokenValidator().withClockSkewTolerance(60);
+    REQUIRE_NOTHROW(validator.validate(outer));
 }

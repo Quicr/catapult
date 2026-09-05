@@ -153,7 +153,7 @@ void CatTokenValidator::validate(const CatToken& token) const {
   validateMoqtRevalidation(token, now);
 }
 
-// CAT-4-MOQT (draft-jennings-moq-cat-04): if `moqt-reval` is present the
+// CAT-4-MOQT (draft-ietf-moq-c4m-01): if `moqt-reval` is present the
 // resource server MUST reject the token when
 // `iat + moqt-reval < now (adjusted by clock skew tolerance)`. The client
 // is then required to obtain a fresh token from the issuer.
@@ -291,6 +291,42 @@ void CatTokenValidator::validateUsageLimits(const CatToken& token) const {
   // In a real implementation, this would check against a usage tracking system
 }
 
+// draft-ietf-moq-c4m-01 §"MOQT Revalidation Claim": `moqt-reval` MUST NOT
+// appear inside a composite (OR / AND / NOR) claim; when it does, the
+// token is not well-formed. Walk every nested ClaimSet reachable from
+// this token and reject if any of them carries `moqt-reval`, so a hostile
+// or misconfigured issuer cannot smuggle a reval interval through a
+// composite branch that we would otherwise accept purely on its
+// authorization outcome.
+namespace {
+void assertNoMoqtRevalInClaimSet(const ClaimSet& claim_set);
+
+template <CompositeOperator Op>
+void assertNoMoqtRevalInComposite(const TypedCompositeClaim<Op>& composite) {
+  for (const auto& cs : composite.claims) {
+    assertNoMoqtRevalInClaimSet(cs);
+  }
+}
+
+void assertNoMoqtRevalInClaimSet(const ClaimSet& claim_set) {
+  if (claim_set.hasToken()) {
+    const auto* moqt = claim_set.token->extended.getMoqtClaimsReadOnly();
+    if (moqt && moqt->getRevalidationInterval().has_value()) {
+      throw InvalidClaimValueError(
+          "'moqt-reval' MUST NOT appear inside a composite claim");
+    }
+    return;
+  }
+  if (claim_set.orComposite) {
+    assertNoMoqtRevalInComposite(*claim_set.orComposite);
+  } else if (claim_set.andComposite) {
+    assertNoMoqtRevalInComposite(*claim_set.andComposite);
+  } else if (claim_set.norComposite) {
+    assertNoMoqtRevalInComposite(*claim_set.norComposite);
+  }
+}
+}  // namespace
+
 void CatTokenValidator::validateCompositeClaims(const CatToken& token) const {
   if (token.composite.hasComposites()) {
     // Check nesting depth limit using the provided utility
@@ -305,6 +341,16 @@ void CatTokenValidator::validateCompositeClaims(const CatToken& token) const {
     checkDepth(token.composite.orClaim);
     checkDepth(token.composite.norClaim);
     checkDepth(token.composite.andClaim);
+
+    if (token.composite.orClaim && *token.composite.orClaim) {
+      assertNoMoqtRevalInComposite(**token.composite.orClaim);
+    }
+    if (token.composite.norClaim && *token.composite.norClaim) {
+      assertNoMoqtRevalInComposite(**token.composite.norClaim);
+    }
+    if (token.composite.andClaim && *token.composite.andClaim) {
+      assertNoMoqtRevalInComposite(**token.composite.andClaim);
+    }
 
     // Validate all composite claims using the TokenValidator concept
     if (!token.composite.validateAll(*this)) {

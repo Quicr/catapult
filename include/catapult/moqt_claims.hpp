@@ -2,7 +2,7 @@
  * @file cat_moqt_claims.hpp
  * @brief MOQT-specific claim definitions and structures for CAT tokens
  *
- * This file implements the MOQT claims as defined in draft-law-moq-cat4moqt.
+ * This file implements the MOQT claims as defined in draft-ietf-moq-c4m-01.
  */
 
 #pragma once

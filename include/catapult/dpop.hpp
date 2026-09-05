@@ -4,7 +4,7 @@
  *
  * This file implements DPoP functionality as defined in
  * https://www.ietf.org/archive/id/draft-nandakumar-moq-generic-dpop-proof-00.html
- * and integrated with CAT tokens according to draft-law-moq-cat4moqt
+ * and integrated with CAT tokens according to draft-ietf-moq-c4m-01
  * specification.
  *
  * Supports both JWT and CWT encoding formats:
@@ -504,7 +504,7 @@ template <MoqtActionType ActionT>
   }
 }
 
-// CAT-4-MOQT (draft-jennings-moq-cat-04) §DPoP resource identifiers: the
+// CAT-4-MOQT (draft-ietf-moq-c4m-01) §DPoP resource identifiers: the
 // resource URI is `moqt://<endpoint>` with the track namespace and track
 // name carried as `tns` / `tn` query parameters. The earlier path form
 // (`moqt://endpoint/ns/track`) is ambiguous — a slash inside a

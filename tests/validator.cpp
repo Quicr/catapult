@@ -922,7 +922,7 @@ TEST_CASE("ValidatedCatToken is move-only") {
                   "ValidatedCatToken must be move-assignable");
 }
 
-// CAT-4-MOQT (draft-jennings-moq-cat-04): `moqt-reval` bounds how long a
+// CAT-4-MOQT (draft-ietf-moq-c4m-01): `moqt-reval` bounds how long a
 // relay may cache the authorization decision without re-checking with the
 // issuer. The validator must reject a token once `iat + moqt-reval` is in
 // the past, must require `iat`, and must fold in the clock-skew tolerance

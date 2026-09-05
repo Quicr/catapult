@@ -570,7 +570,7 @@ class ClaimProcessor {
  private:
   static void processExtendedClaims(CborMapBuilder& builder,
                                     const ExtendedCatClaims& extended) {
-    // CAT-4-MOQT (draft-jennings-moq-cat-04): the `moqt` claim value is a
+    // CAT-4-MOQT (draft-ietf-moq-c4m-01): the `moqt` claim value is a
     // native CBOR array of scope arrays (not a nested bytestring), and the
     // revalidation interval is a separate top-level claim `moqt-reval`
     // (uint seconds). Emit both directly into the CWT claim set.
@@ -629,7 +629,7 @@ class ClaimProcessor {
   }
 
   // Build the CBOR item for the `moqt` claim as a native array of scope
-  // tuples, per CAT-4-MOQT `draft-jennings-moq-cat-04`. The revalidation
+  // tuples, per CAT-4-MOQT `draft-ietf-moq-c4m-01`. The revalidation
   // interval is NOT included here — it is emitted as the separate
   // `moqt-reval` claim by processExtendedClaims().
   static CborItemPtr buildMoqtClaimItem(const MoqtClaims& moqt_claims) {
@@ -863,7 +863,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
   // be rejected. Widening the acceptance set is exactly the class of bug that
   // lets an attacker smuggle scope past authorization checks.
   //
-  // CAT-4-MOQT (draft-jennings-moq-cat-04) emits `moqt-reval` as a separate
+  // CAT-4-MOQT (draft-ietf-moq-c4m-01) emits `moqt-reval` as a separate
   // top-level claim. CBOR map ordering is not fixed, so buffer any reval
   // value we see and apply it after the loop — `moqt-reval` is meaningful
   // only in the presence of a `moqt` scope set, but we accept either
@@ -1557,7 +1557,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         break;
 
       case CLAIM_MOQT:
-        // CAT-4-MOQT (draft-jennings-moq-cat-04): the `moqt` claim value is
+        // CAT-4-MOQT (draft-ietf-moq-c4m-01): the `moqt` claim value is
         // a native CBOR array. Historically we wrapped this in a bytestring
         // and appended the reval interval as a concatenated CBOR value —
         // that was not a valid CWT and is no longer accepted.
@@ -1617,7 +1617,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
             }
 
             auto parse_bin_match = [](cbor_item_t* item) -> MoqtBinaryMatch {
-              // CAT-4-MOQT (draft-jennings-moq-cat-04) assigns `nil` in a
+              // CAT-4-MOQT (draft-ietf-moq-c4m-01) assigns `nil` in a
               // bin-match position a specific "exact zero-length" meaning.
               // Silently returning `any()` would widen authorization to
               // every namespace, which is exactly the failure mode that
@@ -1744,7 +1744,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         break;
 
       case CLAIM_MOQT_REVAL:
-        // CAT-4-MOQT (draft-jennings-moq-cat-04): `moqt-reval` is a top-level
+        // CAT-4-MOQT (draft-ietf-moq-c4m-01): `moqt-reval` is a top-level
         // uint claim carrying the revalidation interval in seconds. Buffer
         // it here; it is applied to the MoqtClaims object after the map
         // walk completes, so ordering with `moqt` in the CBOR map is not
@@ -1778,7 +1778,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
   }
 
   // Apply any buffered `moqt-reval` value. Per CAT-4-MOQT
-  // draft-jennings-moq-cat-04, the interval is only meaningful when a
+  // draft-ietf-moq-c4m-01, the interval is only meaningful when a
   // `moqt` scope set is present; a `moqt-reval` without `moqt` is a
   // structural error rather than a silent no-op.
   if (pending_moqt_reval_seconds.has_value()) {
