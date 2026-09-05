@@ -41,6 +41,7 @@ set(CATAPULT_SOURCES
     src/dpop.cpp
     src/error.cpp
     src/moqt_claims.cpp
+    src/strict_cbor.cpp
     src/token.cpp
     src/trie.cpp
     src/uri.cpp
@@ -160,6 +161,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         tests/memory_pool.cpp
         tests/moqt_claims.cpp
         tests/secure_vector.cpp
+        tests/strict_cbor.cpp
         tests/token.cpp
         tests/token_factory.cpp
         tests/trie.cpp
