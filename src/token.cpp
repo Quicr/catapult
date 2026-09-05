@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <sstream>
 
 #include "catapult/claims.hpp"
@@ -204,10 +205,43 @@ void CatTokenValidator::validateGeographicRestrictions(
   if (token.cat.catgeocoord) {
     const auto& coords = *token.cat.catgeocoord;
 
-    // Use runtime validation that matches the compile-time checks
+    // NaN / ±Inf must be rejected explicitly. Range comparisons against
+    // NaN always yield false, so a plain `< -90 || > 90` bounds check
+    // would silently accept a NaN latitude.
+    if (!std::isfinite(coords.lat) || !std::isfinite(coords.lon)) {
+      throw GeographicValidationError("Non-finite coordinates");
+    }
     if (coords.lat < -90.0 || coords.lat > 90.0 || coords.lon < -180.0 ||
         coords.lon > 180.0) {
       throw GeographicValidationError("Invalid coordinates");
+    }
+    // Radius is metres. A negative or non-finite radius is nonsense; a
+    // radius wider than half the Earth's circumference (≈2e7 m) makes the
+    // "restriction" meaningless and typically indicates a producer bug or
+    // an attempt to bypass geo enforcement by widening the accepted zone
+    // beyond the planet.
+    if (coords.radius.has_value()) {
+      const double r = *coords.radius;
+      if (!std::isfinite(r) || r < 0.0 || r > 2.0e7) {
+        throw GeographicValidationError("Invalid coordinate radius");
+      }
+    }
+  }
+
+  if (token.cat.catgeoalt) {
+    // Altitude in metres. Bounds reflect physical plausibility: below the
+    // Mariana Trench (~-11 km) or above the Kármán line + margin (~100
+    // km + some) is not a location a resource server would meaningfully
+    // gate on and is more likely to indicate a malformed token.
+    const auto& alt = *token.cat.catgeoalt;
+    if (alt.altitude < -12000 || alt.altitude > 500000) {
+      throw GeographicValidationError("Altitude out of plausible range");
+    }
+    if (alt.deviation.has_value()) {
+      const int32_t d = *alt.deviation;
+      if (d < 0 || d > 500000) {
+        throw GeographicValidationError("Altitude deviation out of range");
+      }
     }
   }
 
@@ -229,7 +263,19 @@ void CatTokenValidator::validateGeographicRestrictions(
     if (gh.isString()) {
       validate(gh.asString());
     } else {
-      for (const auto& s : gh.asArray()) {
+      // Array form: reject an empty array (issuer emitted the structured
+      // form but populated nothing — indistinguishable from "no
+      // restriction" but wire-forms as one, so the safe interpretation is
+      // to reject rather than silently allow everywhere) and cap the
+      // number of alternatives to bound validator work.
+      const auto& arr = gh.asArray();
+      if (arr.empty()) {
+        throw GeographicValidationError("Empty geohash array");
+      }
+      if (arr.size() > 64) {
+        throw GeographicValidationError("Too many geohash alternatives");
+      }
+      for (const auto& s : arr) {
         validate(s);
       }
     }
