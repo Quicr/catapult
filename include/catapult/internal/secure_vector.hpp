@@ -59,26 +59,37 @@ class SecureAllocator {
   T* allocate(size_t n) {
     if (n == 0) return nullptr;
 
-    // Check for integer overflow before multiplication
     if (n > std::numeric_limits<size_t>::max() / sizeof(T)) {
       throw std::bad_alloc();
     }
 
-    // Calculate aligned size for better performance and security
     size_t size = n * sizeof(T);
     size_t page_size = getPageSize();
 
-    // Check for overflow in alignment calculation
+    // Small-allocation fast path: an HMAC key is 32 bytes; page-rounding it
+    // to 4 KiB inflates the footprint of every issuer key ~128x. When the
+    // request already fits inside a page we allocate at the value's natural
+    // alignment. mlock() on POSIX rounds to page boundaries internally, so
+    // the secret is still resident even without a page-aligned base.
+    if (size < page_size) {
+      size_t alloc_align = alignof(T) < alignof(std::max_align_t)
+                               ? alignof(std::max_align_t)
+                               : alignof(T);
+      size_t alloc_size = ((size + alloc_align - 1) / alloc_align) * alloc_align;
+      T* ptr = static_cast<T*>(std::aligned_alloc(alloc_align, alloc_size));
+      if (!ptr) throw std::bad_alloc();
+      lockMemory(ptr, size);
+      return ptr;
+    }
+
     if (size > SIZE_MAX - page_size) {
       throw std::bad_alloc();
     }
     size_t aligned_size = ((size + page_size - 1) / page_size) * page_size;
 
-    // Allocate memory with proper alignment
     T* ptr = static_cast<T*>(std::aligned_alloc(page_size, aligned_size));
     if (!ptr) throw std::bad_alloc();
 
-    // Lock memory to prevent swapping (best effort - failure is not fatal)
     lockMemory(ptr, aligned_size);
 
     return ptr;
@@ -93,12 +104,19 @@ class SecureAllocator {
     if (ptr) {
       size_t size = n * sizeof(T);
       size_t page_size = getPageSize();
+
+      if (size < page_size) {
+        // Small-alloc path: unlock and zero exactly the requested bytes; the
+        // kernel handles page-granular mlock/munlock rounding internally.
+        secureZero(ptr, size);
+        unlockMemory(ptr, size);
+        std::free(ptr);
+        return;
+      }
+
       size_t aligned_size = ((size + page_size - 1) / page_size) * page_size;
 
-      // Secure zeroing of entire aligned region
       secureZero(ptr, aligned_size);
-
-      // Unlock the same aligned size that was locked in allocate()
       unlockMemory(ptr, aligned_size);
 
       std::free(ptr);
