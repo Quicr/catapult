@@ -754,10 +754,51 @@ TEST_CASE("ValidatorNegativeTests - Edge Cases and Error Conditions") {
             .withGeoCoordinate(40.7128, -74.0060, 10.0) // NYC coordinates
             .withGeohash(GeohashClaimValue{std::string{"9q8yy"}}) // San Francisco geohash
             .withCwtIdString("conflicting-geo-token");
-            
-            
+
+
         CatTokenValidator validator;
         // Current implementation doesn't validate geohash/coordinate consistency
         REQUIRE_NOTHROW(validator.validate(conflictingToken));
     }
+}
+
+TEST_CASE("ValidatedCatToken exposes only-const access") {
+    auto validToken = createValidToken();
+    CatTokenValidator validator;
+
+    ValidatedCatToken vt = validator.intoValidated(std::move(validToken));
+
+    CHECK(vt.core().iss.has_value());
+    CHECK(*vt.core().iss == "https://trusted-issuer.com");
+    CHECK(vt.cat().catv.has_value());
+    CHECK(*vt.cat().catv == 1u);
+
+    // Compile-time: none of the getters return non-const references. Read
+    // access through token() must also be const.
+    const CatToken& underlying = vt.token();
+    CHECK(underlying.core.iss.has_value());
+}
+
+TEST_CASE("ValidatedCatToken cannot be produced for an invalid token") {
+    // exp before nbf — validate() must reject this.
+    auto now = std::chrono::system_clock::now();
+    auto broken = CatToken()
+                      .withIssuer("iss")
+                      .withAudience({"aud"})
+                      .withExpiration(now)
+                      .withNotBefore(now + std::chrono::hours(1))
+                      .withCwtIdString("broken");
+    CatTokenValidator validator;
+    CHECK_THROWS_AS(validator.intoValidated(std::move(broken)), CatError);
+}
+
+TEST_CASE("ValidatedCatToken is move-only") {
+    static_assert(!std::is_copy_constructible_v<ValidatedCatToken>,
+                  "ValidatedCatToken must not be copyable");
+    static_assert(!std::is_copy_assignable_v<ValidatedCatToken>,
+                  "ValidatedCatToken must not be copy-assignable");
+    static_assert(std::is_move_constructible_v<ValidatedCatToken>,
+                  "ValidatedCatToken must be move-constructible");
+    static_assert(std::is_move_assignable_v<ValidatedCatToken>,
+                  "ValidatedCatToken must be move-assignable");
 }
