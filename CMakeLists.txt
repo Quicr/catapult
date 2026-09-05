@@ -81,9 +81,9 @@ if(CATAPULT_ENABLE_JSON AND TARGET nlohmann_json::nlohmann_json)
 endif()
 
 # Set up include directories for the library
-target_include_directories(catapult 
+target_include_directories(catapult
     PUBLIC include
-    PRIVATE ${OPENSSL_INCLUDE_DIR}
+    PUBLIC ${OPENSSL_INCLUDE_DIR}
 )
 
 # Add spdlog if logging is enabled

@@ -105,44 +105,6 @@ struct ClaimSet {
 };
 
 /**
- * @brief Get thread-local memory pool for ClaimSet allocations
- *
- * Returns a reference to the thread-local memory pool used for ClaimSet
- * object allocation. This pool provides:
- * - Zero contention between threads (thread-local storage)
- * - O(1) allocation/deallocation performance
- * - Reduced heap fragmentation
- * - Better cache locality through spatial locality
- * - Pool size of 512 ClaimSet objects per thread (increased capacity)
- *
- * @return Reference to the thread-local ClaimSet memory pool
- */
-inline ThreadLocalMemoryPool<ClaimSet, 512>& getClaimSetPool() {
-  static thread_local ThreadLocalMemoryPool<ClaimSet, 512> pool;
-  return pool;
-}
-
-/**
- * @brief Get thread-local memory pool for TypedCompositeClaim allocations
- *
- * Returns a reference to the thread-local memory pool used for composite claim
- * object allocation. This provides:
- * - Zero contention between threads (thread-local storage)
- * - O(1) allocation/deallocation performance for OR/AND/NOR claims
- * - Reduced heap fragmentation
- * - Better cache locality
- * - Pool size of 256 composite claims per thread
- *
- * @return Reference to the thread-local composite claim memory pool
- */
-template <CompositeOperator Op>
-inline ThreadLocalMemoryPool<TypedCompositeClaim<Op>, 256>&
-getCompositeClaimPool() {
-  static thread_local ThreadLocalMemoryPool<TypedCompositeClaim<Op>, 256> pool;
-  return pool;
-}
-
-/**
  * @brief Compile-time constants for composite claim validation
  */
 namespace composite_constants {
@@ -457,70 +419,29 @@ constexpr bool validateDepth(const T& claim) noexcept {
 }
 
 /**
- * @brief Runtime utility functions using TypedCompositeClaim
+ * @brief Runtime utility functions using TypedCompositeClaim.
  *
- * These functions create typed composite claims from collections of claim sets
- * or tokens. The `usePool` parameter is currently a no-op (Phase 0 security
- * fix, C-06): pool-backed allocation returned pooled storage inside a
- * default-deleter std::unique_ptr, which is UB on destruction. Every path
- * uses standard allocation regardless; passing usePool=true will emit a
- * warning log and behave identically to usePool=false. Full pool support will
- * return once the ownership model is rewritten (see remediation task #24).
+ * These factories create typed composite claims from collections of claim
+ * sets or tokens.
  */
 
-/**
- * @brief Create an OR composite claim from claim sets
- * @param claimSets Vector of claim sets to include
- * @param usePool Whether to use memory pool for allocations (default: false)
- * @return Unique pointer to the created OR composite claim
- */
 [[nodiscard]] std::unique_ptr<OrClaim> createOrComposite(
-    const std::vector<ClaimSet>& claimSets, bool usePool = false);
+    const std::vector<ClaimSet>& claimSets);
 
-/**
- * @brief Create a NOR composite claim from claim sets
- * @param claimSets Vector of claim sets to include
- * @param usePool Whether to use memory pool for allocations (default: false)
- * @return Unique pointer to the created NOR composite claim
- */
 [[nodiscard]] std::unique_ptr<NorClaim> createNorComposite(
-    const std::vector<ClaimSet>& claimSets, bool usePool = false);
+    const std::vector<ClaimSet>& claimSets);
 
-/**
- * @brief Create an AND composite claim from claim sets
- * @param claimSets Vector of claim sets to include
- * @param usePool Whether to use memory pool for allocations (default: false)
- * @return Unique pointer to the created AND composite claim
- */
 [[nodiscard]] std::unique_ptr<AndClaim> createAndComposite(
-    const std::vector<ClaimSet>& claimSets, bool usePool = false);
+    const std::vector<ClaimSet>& claimSets);
 
-/**
- * @brief Create an OR composite claim from tokens
- * @param tokens Vector of tokens to wrap in claim sets
- * @param usePool Whether to use memory pool for allocations (default: false)
- * @return Unique pointer to the created OR composite claim
- */
 [[nodiscard]] std::unique_ptr<OrClaim> createOrFromTokens(
-    const std::vector<CatToken>& tokens, bool usePool = false);
+    const std::vector<CatToken>& tokens);
 
-/**
- * @brief Create a NOR composite claim from tokens
- * @param tokens Vector of tokens to wrap in claim sets
- * @param usePool Whether to use memory pool for allocations (default: false)
- * @return Unique pointer to the created NOR composite claim
- */
 [[nodiscard]] std::unique_ptr<NorClaim> createNorFromTokens(
-    const std::vector<CatToken>& tokens, bool usePool = false);
+    const std::vector<CatToken>& tokens);
 
-/**
- * @brief Create an AND composite claim from tokens
- * @param tokens Vector of tokens to wrap in claim sets
- * @param usePool Whether to use memory pool for allocations (default: false)
- * @return Unique pointer to the created AND composite claim
- */
 [[nodiscard]] std::unique_ptr<AndClaim> createAndFromTokens(
-    const std::vector<CatToken>& tokens, bool usePool = false);
+    const std::vector<CatToken>& tokens);
 
 /**
  * @brief Constexpr composite claim factory with enhanced type safety
@@ -579,51 +500,5 @@ constexpr auto make_validated_composite(ClaimSets&&... claimSets)
 }
 
 }  // namespace composite_utils
-
-/**
- * @brief Usage Examples for Memory Pool Optimization with TypedCompositeClaim
- *
- * @code
- * // Basic usage without pool (default behavior)
- * auto orComposite = std::make_unique<OrClaim>();
- * orComposite->addToken(token1);
- * orComposite->addToken(token2);
- *
- * // With memory pool optimization for high-frequency scenarios
- * auto pooledComposite = std::make_unique<AndClaim>(true);  // Enable pool
- * pooledComposite->addToken(token1);  // Uses thread-local memory pool
- * pooledComposite->addToken(token2);  // Uses thread-local memory pool
- *
- * // Using utility functions with pool optimization
- * std::vector<CatToken> tokens = {token1, token2, token3};
- * auto orComposite = createOrFromTokens(tokens, true);    // Pool enabled
- * auto andComposite = createAndFromTokens(tokens, false); // Pool disabled
- *
- * // Compile-time typed composites with pool optimization
- * OrClaim orClaim(true);  // Enable pool allocation
- * orClaim.addToken(token1);
- * orClaim.addToken(token2);
- *
- * // Compile-time factory functions
- * auto composite = composite_utils::createOrCompositeTyped(claimSet1,
- * claimSet2);
- *
- * // When to use pool optimization:
- * // - High-frequency composite claim creation/destruction
- * // - Processing many tokens in batch operations
- * // - Performance-critical token validation paths
- * // - Reducing heap fragmentation in long-running services
- *
- * // Performance considerations:
- * // - Pool allocation: O(1) thread-local, no contention
- * // - Heap allocation: O(log n) with potential contention
- * // - Pool reduces cache misses due to spatial locality
- * // - Pool eliminates malloc/free overhead for both ClaimSet and composite
- * objects
- * @endcode
- */
-
-// Template method implementations that need full CatToken definition
-// These will be explicitly instantiated in the implementation files
 
 }  // namespace catapult

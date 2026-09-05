@@ -5,6 +5,9 @@
 
 #pragma once
 
+#include <openssl/crypto.h>
+
+#include <atomic>
 #include <concepts>
 #include <cstdlib>
 #include <cstring>
@@ -128,16 +131,44 @@ class SecureAllocator {
   }
 
   /**
-   * @brief Lock memory to prevent swapping (best effort)
-   * @param ptr Pointer to memory to lock
-   * @param size Size of memory region
+   * @brief Lock memory to prevent swapping.
+   *
+   * Best-effort: on hardened kernels or under an RLIMIT_MEMLOCK cap the
+   * syscall fails and the region will still be pageable. Callers relying on
+   * out-of-swap semantics should check `mlockAvailable()`.
    */
   static void lockMemory(void* ptr, size_t size) noexcept {
 #ifdef _WIN32
-    VirtualLock(ptr, size);  // Ignore failures - best effort
+    if (VirtualLock(ptr, size) == 0) {
+      recordLockFailure();
+    }
 #else
-    mlock(ptr, size);  // Ignore failures - best effort
+    if (mlock(ptr, size) != 0) {
+      recordLockFailure();
+    }
 #endif
+  }
+
+ public:
+  /**
+   * @brief Report whether every prior `mlock`/`VirtualLock` call succeeded.
+   *
+   * Callers can query this at startup to decide whether to trust the
+   * allocator for key material. It becomes `false` on the first failure and
+   * stays `false` for the process lifetime.
+   */
+  static bool mlockAvailable() noexcept {
+    return !mlockFailed().load(std::memory_order_acquire);
+  }
+
+ private:
+  static std::atomic<bool>& mlockFailed() noexcept {
+    static std::atomic<bool> flag{false};
+    return flag;
+  }
+
+  static void recordLockFailure() noexcept {
+    mlockFailed().store(true, std::memory_order_release);
   }
 
   /**
@@ -178,34 +209,27 @@ using SecureVector = std::vector<T, SecureAllocator<T>>;
  */
 namespace secure_utils {
 /**
- * @brief Constant-time memory comparison to prevent timing attacks
- * @param a First memory region
- * @param b Second memory region
- * @param size Size of regions to compare
- * @return 0 if equal, non-zero if different (timing independent)
+ * @brief Constant-time comparison of two equal-length byte regions.
+ *
+ * Backed by OpenSSL's `CRYPTO_memcmp`, which is the vetted primitive for
+ * comparing secrets of a fixed public length. Not constant-time in the
+ * *length* of the inputs — callers must ensure `size` is not a secret.
+ *
+ * @return 0 if the regions are byte-for-byte equal, non-zero otherwise.
  */
 inline int constantTimeCompare(const void* a, const void* b,
                                size_t size) noexcept {
-  const volatile unsigned char* va =
-      static_cast<const volatile unsigned char*>(a);
-  const volatile unsigned char* vb =
-      static_cast<const volatile unsigned char*>(b);
-  unsigned char result = 0;
-
-  // Use volatile to  compiler optimization
-  for (size_t i = 0; i < size; ++i) {
-    result |= va[i] ^ vb[i];
-  }
-
-  return result;
+  if (size == 0) return 0;
+  return CRYPTO_memcmp(a, b, size);
 }
 
 /**
- * @brief Constant-time comparison for vectors
- * @param a First vector
- * @param b Second vector
- * @return true if equal, false otherwise (timing independent for content)
- * @note Size comparison is constant-time to prevent length oracle attacks
+ * @brief Compare two vectors for equality without leaking content timing.
+ *
+ * Uses `CRYPTO_memcmp` on the shared prefix. The lengths themselves are
+ * treated as public: a caller receiving a variable-length secret should
+ * arrange for it to be padded to a fixed public size before comparison, or
+ * accept that length information may be revealed.
  */
 template <typename T>
 inline bool constantTimeEqual(const std::vector<T>& a,
@@ -227,11 +251,9 @@ inline bool constantTimeEqual(const std::vector<T>& a,
 }
 
 /**
- * @brief Constant-time comparison for spans
- * @param a First span
- * @param b Second span
- * @return true if equal, false otherwise (timing independent for content)
- * @note Size comparison is constant-time to prevent length oracle attacks
+ * @brief Compare two spans for equality without leaking content timing.
+ *
+ * See `constantTimeEqual(vector, vector)` for the length-oracle caveat.
  */
 template <typename T>
 inline bool constantTimeEqual(std::span<const T> a,
