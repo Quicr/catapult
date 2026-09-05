@@ -148,7 +148,7 @@ consteval bool is_valid_usage_limit(uint32_t limit) noexcept {
 }
 
 template <size_t N>
-consteval bool is_valid_string_length(const char (&str)[N]) noexcept {
+consteval bool is_valid_string_length(const char (&)[N]) noexcept {
   return N > 1 && N <= 1024;  // Reasonable bounds
 }
 

@@ -8,6 +8,8 @@ option(ENABLE_LOGGING "Enable logging with spdlog" ON)
 option(CATAPULT_ENABLE_JSON "Enable JSON serialization support (requires nlohmann_json)" ON)
 option(CATAPULT_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(CATAPULT_ENABLE_TSAN "Enable ThreadSanitizer (mutually exclusive with ASan/UBSan)" OFF)
+option(CATAPULT_ENABLE_WERROR "Treat compiler warnings as errors in library and test builds" OFF)
+option(CATAPULT_ENABLE_LTO "Enable interprocedural optimization (LTO) for library targets" OFF)
 # WARNING: The legacy JWT-shaped token API (catapult::legacy::legacyJwtEncodeToken /
 # legacyJwtDecodeToken) emits and accepts a JWT-style three-part format that is NOT
 # a CTA-5007-B compliant CWT. It is retained solely for backwards compatibility with
@@ -98,19 +100,48 @@ endif()
 
 # Set compiler flags with enhanced security and warnings
 target_compile_options(catapult PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wconversion -Wsign-conversion>
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wformat=2 -Wformat-security>
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wnull-dereference -Wdouble-promotion>
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wshadow -Wcast-align -Wcast-qual>
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wconversion -Wsign-conversion>
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wformat=2 -Wformat-security>
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wnull-dereference -Wdouble-promotion>
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wshadow -Wcast-align -Wcast-qual>
     # Security hardening flags
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-fstack-protector-strong>
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-D_FORTIFY_SOURCE=2>
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fstack-protector-strong>
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-D_FORTIFY_SOURCE=2>
     # MSVC specific flags
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /analyze>
     $<$<CXX_COMPILER_ID:MSVC>:/GS /guard:cf>
 )
 
+if(CATAPULT_ENABLE_WERROR)
+    # A narrow allowlist of warnings-as-errors. Blanket -Werror would trip on
+    # signed/unsigned churn at OpenSSL/libcbor boundaries that is well
+    # understood; the classes below correspond to real correctness hazards
+    # (dropped return values from warn_unused_result / nodiscard functions,
+    # missing return statements, uninitialised reads, unhandled fallthroughs,
+    # and undefined behaviour).
+    set(CATAPULT_WERROR_FLAGS
+        -Werror=unused-result
+        -Werror=return-type
+        -Werror=uninitialized
+        -Werror=implicit-fallthrough
+        -Werror=undef
+    )
+    target_compile_options(catapult PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:${CATAPULT_WERROR_FLAGS}>
+        $<$<CXX_COMPILER_ID:MSVC>:/WX>
+    )
+endif()
+
+if(CATAPULT_ENABLE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT catapult_ipo_supported OUTPUT catapult_ipo_error)
+    if(catapult_ipo_supported)
+        set_property(TARGET catapult PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    else()
+        message(WARNING "CATAPULT_ENABLE_LTO requested but not supported: ${catapult_ipo_error}")
+    endif()
+endif()
 
 if(CATAPULT_ENABLE_SANITIZERS AND CATAPULT_ENABLE_TSAN)
     message(FATAL_ERROR
@@ -227,11 +258,18 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     endif()
 
     # Apply same security flags to tests
-    target_compile_options(catapult_tests PRIVATE 
-        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
-        $<$<CXX_COMPILER_ID:GNU,Clang>:-fstack-protector-strong>
+    target_compile_options(catapult_tests PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fstack-protector-strong>
         $<$<CXX_COMPILER_ID:MSVC>:/W4 /GS>
     )
+
+    if(CATAPULT_ENABLE_WERROR)
+        target_compile_options(catapult_tests PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:${CATAPULT_WERROR_FLAGS}>
+            $<$<CXX_COMPILER_ID:MSVC>:/WX>
+        )
+    endif()
 
     # Add test
     add_test(NAME catapult_unit_tests COMMAND catapult_tests)

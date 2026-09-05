@@ -260,7 +260,7 @@ inline bool constantTimeEqual(const std::vector<T>& a,
   // Compare up to the smaller size, then factor in size equality
   // Use volatile variables consistently for timing safety
   size_t min_size = (size_a < size_b) ? size_a : size_b;
-  unsigned char content_equal =
+  int content_equal =
       (min_size == 0)
           ? 0
           : constantTimeCompare(a.data(), b.data(), min_size * sizeof(T));
@@ -284,7 +284,7 @@ inline bool constantTimeEqual(std::span<const T> a,
   // Compare up to the smaller size, then factor in size equality
   // Use volatile variables consistently for timing safety
   size_t min_size = (size_a < size_b) ? size_a : size_b;
-  unsigned char content_equal =
+  int content_equal =
       (min_size == 0)
           ? 0
           : constantTimeCompare(a.data(), b.data(), min_size * sizeof(T));

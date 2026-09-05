@@ -907,7 +907,8 @@ TEST_CASE("ValidatedCatToken cannot be produced for an invalid token") {
                       .withNotBefore(now + std::chrono::hours(1))
                       .withCwtIdString("broken");
     CatTokenValidator validator;
-    CHECK_THROWS_AS(validator.intoValidated(std::move(broken)), CatError);
+    CHECK_THROWS_AS(
+        (void)validator.intoValidated(std::move(broken)), CatError);
 }
 
 TEST_CASE("ValidatedCatToken is move-only") {

@@ -47,7 +47,7 @@ jobs:
       run: |
         mkdir build
         cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON ..
+        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON -DCATAPULT_ENABLE_WERROR=ON ..
 
     - name: Configure CMake (Windows)
       if: matrix.os == 'windows-latest'
