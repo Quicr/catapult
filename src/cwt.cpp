@@ -806,13 +806,12 @@ std::vector<uint8_t> Cwt::encodePayload() const {
   }
 }
 
-CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
+CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
   // Strict load enforces empty/oversize rejection, definite-length forms,
   // no duplicate keys, no unrecognized tags, no trailing bytes, and the
   // per-token size cap. This is the primary CAT payload parse entry
   // point so all downstream extraction runs on a canonical DOM.
-  auto item = catapult::internal::loadStrict(
-      std::span<const uint8_t>(cborData.data(), cborData.size()));
+  auto item = catapult::internal::loadStrict(cborData);
 
   if (!cbor_isa_map(item.get())) {
     throw InvalidTokenFormatError();
@@ -2227,9 +2226,13 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       throw InvalidTokenFormatError();
     }
 
-    // Step 3: Handle different COSE structures
-    std::vector<uint8_t> protectedHeaderBytes;
-    std::vector<uint8_t> payloadBytes;
+    // Step 3: Handle different COSE structures. Wire bytes are kept as spans
+    // into the CBOR DOM so we do not allocate a fresh vector per request just
+    // to hand them to a helper that copies again. Only the AEAD-decrypted
+    // plaintext needs to be owned; everything else lives in `coseItem`.
+    std::span<const uint8_t> protectedHeaderBytes;
+    std::span<const uint8_t> payloadBytes;
+    std::vector<uint8_t> decryptedPayload;
     bool isEncrypted = false;
     bool isMultiSigned = false;
     std::vector<CoseSignature> validatedSignatures;
@@ -2254,8 +2257,7 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
         throw InvalidTokenFormatError();
       }
       protectedHeaderBytes =
-          std::vector<uint8_t>(cbor_bytestring_handle(coseArray[0]),
-                               cbor_bytestring_handle(coseArray[0]) +
+          std::span<const uint8_t>(cbor_bytestring_handle(coseArray[0]),
                                    cbor_bytestring_length(coseArray[0]));
 
       // Extract IV from unprotected header (map)
@@ -2263,7 +2265,7 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
         throw InvalidTokenFormatError();
       }
 
-      std::vector<uint8_t> iv;
+      std::span<const uint8_t> iv;
       struct cbor_pair* pairs = cbor_map_handle(coseArray[1]);
       size_t map_size = cbor_map_size(coseArray[1]);
 
@@ -2271,10 +2273,9 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
         if (cbor_isa_uint(pairs[i].key) &&
             cbor_get_int(pairs[i].key) == 5) {  // IV label
           if (cbor_isa_bytestring(pairs[i].value)) {
-            iv = std::vector<uint8_t>(
+            iv = std::span<const uint8_t>(
                 cbor_bytestring_handle(pairs[i].value),
-                cbor_bytestring_handle(pairs[i].value) +
-                    cbor_bytestring_length(pairs[i].value));
+                cbor_bytestring_length(pairs[i].value));
             break;
           }
         }
@@ -2288,10 +2289,9 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       if (!cbor_isa_bytestring(coseArray[2])) {
         throw InvalidTokenFormatError();
       }
-      auto ciphertext =
-          std::vector<uint8_t>(cbor_bytestring_handle(coseArray[2]),
-                               cbor_bytestring_handle(coseArray[2]) +
-                                   cbor_bytestring_length(coseArray[2]));
+      std::span<const uint8_t> ciphertext(
+          cbor_bytestring_handle(coseArray[2]),
+          cbor_bytestring_length(coseArray[2]));
 
       // Decrypt with Enc_structure as AAD to authenticate the protected
       // header (RFC 8152 §5.3). Producers built after this change will
@@ -2299,7 +2299,8 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       // which is the intended outcome — accepting them would silently
       // drop protected-header authentication.
       auto encAad = createCoseEncrypt0Aad(protectedHeaderBytes);
-      payloadBytes = algorithm.decrypt(ciphertext, iv, encAad);
+      decryptedPayload = algorithm.decrypt(ciphertext, iv, encAad);
+      payloadBytes = decryptedPayload;
 
     } else if (arraySize == 4) {
       cbor_item_t** coseArray = cbor_array_handle(coseItem.get());
@@ -2312,8 +2313,7 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
         throw InvalidTokenFormatError();
       }
       protectedHeaderBytes =
-          std::vector<uint8_t>(cbor_bytestring_handle(coseArray[0]),
-                               cbor_bytestring_handle(coseArray[0]) +
+          std::span<const uint8_t>(cbor_bytestring_handle(coseArray[0]),
                                    cbor_bytestring_length(coseArray[0]));
 
       // Payload (bytestring)
@@ -2321,8 +2321,7 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
         throw InvalidTokenFormatError();
       }
       payloadBytes =
-          std::vector<uint8_t>(cbor_bytestring_handle(coseArray[2]),
-                               cbor_bytestring_handle(coseArray[2]) +
+          std::span<const uint8_t>(cbor_bytestring_handle(coseArray[2]),
                                    cbor_bytestring_length(coseArray[2]));
 
       // Check if the 4th element is an array (COSE_Sign) or bytestring
@@ -2332,10 +2331,9 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
         throw InvalidTokenFormatError();
       } else if (cbor_isa_bytestring(coseArray[3])) {
         // COSE_Sign1/COSE_Mac0
-        auto signatureBytes =
-            std::vector<uint8_t>(cbor_bytestring_handle(coseArray[3]),
-                                 cbor_bytestring_handle(coseArray[3]) +
-                                     cbor_bytestring_length(coseArray[3]));
+        std::span<const uint8_t> signatureBytes(
+            cbor_bytestring_handle(coseArray[3]),
+            cbor_bytestring_length(coseArray[3]));
 
         // Route to the correct RFC 8152 structure for the supplied
         // algorithm: MAC0 for symmetric MAC algs, Sign1 for signatures.
@@ -2359,18 +2357,15 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       throw InvalidTokenFormatError();
     }
 
-    coseItem.reset();
-
-    // Step 4: Decode payload and create CWT
+    // Step 4: Decode payload and create CWT. Do this before releasing
+    // coseItem, since payloadBytes may point into it.
     auto decodedPayload = decodePayload(payloadBytes);
 
     // Parse protected header to get algorithm — strict parse rejects
     // indefinite-length maps, duplicate keys, and trailing bytes.
     CborItemPtr headerItem;
     try {
-      headerItem = catapult::internal::loadStrict(
-          std::span<const uint8_t>(protectedHeaderBytes.data(),
-                                   protectedHeaderBytes.size()));
+      headerItem = catapult::internal::loadStrict(protectedHeaderBytes);
     } catch (const InvalidCborError&) {
       throw;
     }

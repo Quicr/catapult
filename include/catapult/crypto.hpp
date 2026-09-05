@@ -427,10 +427,10 @@ class Ps256Algorithm : public CryptographicAlgorithm {
  * @return COSE Sig_structure as CBOR-encoded bytes for COSE_Sign
  */
 std::vector<uint8_t> createCoseSignInput(
-    const std::vector<uint8_t>& bodyProtectedHeader,
-    const std::vector<uint8_t>& signatureProtectedHeader,
-    const std::vector<uint8_t>& externalAAD,
-    const std::vector<uint8_t>& payload);
+    std::span<const uint8_t> bodyProtectedHeader,
+    std::span<const uint8_t> signatureProtectedHeader,
+    std::span<const uint8_t> externalAAD,
+    std::span<const uint8_t> payload);
 
 /**
  * @brief Create COSE Sig_structure for COSE_Sign1 (single signature)
@@ -440,9 +440,9 @@ std::vector<uint8_t> createCoseSignInput(
  * @return COSE Sig_structure as CBOR-encoded bytes
  */
 std::vector<uint8_t> createCoseSign1Input(
-    const std::vector<uint8_t>& protectedHeader,
-    const std::vector<uint8_t>& payload,
-    const std::vector<uint8_t>& externalAAD = {});
+    std::span<const uint8_t> protectedHeader,
+    std::span<const uint8_t> payload,
+    std::span<const uint8_t> externalAAD = {});
 
 /**
  * @brief Create COSE_Mac0 MAC_structure per RFC 8152 §6.3
@@ -455,9 +455,9 @@ std::vector<uint8_t> createCoseSign1Input(
  * @return Serialized MAC_structure to be MACed
  */
 std::vector<uint8_t> createCoseMac0Input(
-    const std::vector<uint8_t>& protectedHeader,
-    const std::vector<uint8_t>& payload,
-    const std::vector<uint8_t>& externalAAD = {});
+    std::span<const uint8_t> protectedHeader,
+    std::span<const uint8_t> payload,
+    std::span<const uint8_t> externalAAD = {});
 
 /**
  * @brief Create COSE_Encrypt0 Enc_structure per RFC 8152 §5.3
@@ -474,8 +474,8 @@ std::vector<uint8_t> createCoseMac0Input(
  * @return Serialized Enc_structure to use as AEAD associated data
  */
 std::vector<uint8_t> createCoseEncrypt0Aad(
-    const std::vector<uint8_t>& protectedHeader,
-    const std::vector<uint8_t>& externalAAD = {});
+    std::span<const uint8_t> protectedHeader,
+    std::span<const uint8_t> externalAAD = {});
 
 /**
  * @brief Create JWT-style signing input (legacy, for backward compatibility)

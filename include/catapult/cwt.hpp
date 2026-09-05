@@ -152,7 +152,7 @@ class Cwt {
    * @param cborData CBOR-encoded data
    * @return Decoded CAT token
    */
-  static CatToken decodePayload(const std::vector<uint8_t>& cborData);
+  static CatToken decodePayload(std::span<const uint8_t> cborData);
 
   /**
    * @brief Create and sign/MAC/encrypt a CWT (RFC 8392)

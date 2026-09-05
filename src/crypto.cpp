@@ -111,7 +111,7 @@ class SigStructureBuilder {
     }
   }
 
-  void addByteString(CborItemPtr& array, const std::vector<uint8_t>& data) {
+  void addByteString(CborItemPtr& array, std::span<const uint8_t> data) {
     auto item = cbor_build_bytestring_owned(data.data(), data.size());
     if (!item || !cbor_array_push(array.get(), item.get())) {
       throw InvalidCborError("Failed to add bytestring to Sig_structure");
@@ -141,37 +141,26 @@ class SigStructureBuilder {
 // Single signature implementation
 class SingleSignatureStructureBuilder : public SigStructureBuilder {
  private:
-  std::vector<uint8_t> protectedHeader_;
-  std::vector<uint8_t> externalAAD_;
-  std::vector<uint8_t> payload_;
+  std::span<const uint8_t> protectedHeader_;
+  std::span<const uint8_t> externalAAD_;
+  std::span<const uint8_t> payload_;
 
  public:
-  SingleSignatureStructureBuilder(const std::vector<uint8_t>& protectedHeader,
-                                  const std::vector<uint8_t>& externalAAD,
-                                  const std::vector<uint8_t>& payload)
+  SingleSignatureStructureBuilder(std::span<const uint8_t> protectedHeader,
+                                  std::span<const uint8_t> externalAAD,
+                                  std::span<const uint8_t> payload)
       : protectedHeader_(protectedHeader),
         externalAAD_(externalAAD),
         payload_(payload) {}
 
   std::vector<uint8_t> build() override {
     try {
-      // Create 4-element array for COSE_Sign1
       auto sigStructure = createArray(4);
-
-      // Add context "Signature1"
       addString(sigStructure, "Signature1");
-
-      // Add body_protected
       addByteString(sigStructure, protectedHeader_);
-
-      // Add external_aad
       addByteString(sigStructure, externalAAD_);
-
-      // Add payload
       addByteString(sigStructure, payload_);
-
       return serialize(sigStructure);
-
     } catch (const std::exception& e) {
       CAT_LOG_ERROR("Failed to create COSE_Sign1 Sig_structure: {}", e.what());
       throw InvalidCborError(
@@ -184,14 +173,14 @@ class SingleSignatureStructureBuilder : public SigStructureBuilder {
 //   MAC_structure = [ context: "MAC0", protected, external_aad, payload ]
 class Mac0StructureBuilder : public SigStructureBuilder {
  private:
-  std::vector<uint8_t> protectedHeader_;
-  std::vector<uint8_t> externalAAD_;
-  std::vector<uint8_t> payload_;
+  std::span<const uint8_t> protectedHeader_;
+  std::span<const uint8_t> externalAAD_;
+  std::span<const uint8_t> payload_;
 
  public:
-  Mac0StructureBuilder(const std::vector<uint8_t>& protectedHeader,
-                       const std::vector<uint8_t>& externalAAD,
-                       const std::vector<uint8_t>& payload)
+  Mac0StructureBuilder(std::span<const uint8_t> protectedHeader,
+                       std::span<const uint8_t> externalAAD,
+                       std::span<const uint8_t> payload)
       : protectedHeader_(protectedHeader),
         externalAAD_(externalAAD),
         payload_(payload) {}
@@ -218,12 +207,12 @@ class Mac0StructureBuilder : public SigStructureBuilder {
 // not include the plaintext.
 class Enc0StructureBuilder : public SigStructureBuilder {
  private:
-  std::vector<uint8_t> protectedHeader_;
-  std::vector<uint8_t> externalAAD_;
+  std::span<const uint8_t> protectedHeader_;
+  std::span<const uint8_t> externalAAD_;
 
  public:
-  Enc0StructureBuilder(const std::vector<uint8_t>& protectedHeader,
-                       const std::vector<uint8_t>& externalAAD)
+  Enc0StructureBuilder(std::span<const uint8_t> protectedHeader,
+                       std::span<const uint8_t> externalAAD)
       : protectedHeader_(protectedHeader), externalAAD_(externalAAD) {}
 
   std::vector<uint8_t> build() override {
@@ -246,17 +235,16 @@ class Enc0StructureBuilder : public SigStructureBuilder {
 // Multi-signature implementation
 class MultiSignatureStructureBuilder : public SigStructureBuilder {
  private:
-  std::vector<uint8_t> bodyProtectedHeader_;
-  std::vector<uint8_t> signatureProtectedHeader_;
-  std::vector<uint8_t> externalAAD_;
-  std::vector<uint8_t> payload_;
+  std::span<const uint8_t> bodyProtectedHeader_;
+  std::span<const uint8_t> signatureProtectedHeader_;
+  std::span<const uint8_t> externalAAD_;
+  std::span<const uint8_t> payload_;
 
  public:
-  MultiSignatureStructureBuilder(
-      const std::vector<uint8_t>& bodyProtectedHeader,
-      const std::vector<uint8_t>& signatureProtectedHeader,
-      const std::vector<uint8_t>& externalAAD,
-      const std::vector<uint8_t>& payload)
+  MultiSignatureStructureBuilder(std::span<const uint8_t> bodyProtectedHeader,
+                                 std::span<const uint8_t> signatureProtectedHeader,
+                                 std::span<const uint8_t> externalAAD,
+                                 std::span<const uint8_t> payload)
       : bodyProtectedHeader_(bodyProtectedHeader),
         signatureProtectedHeader_(signatureProtectedHeader),
         externalAAD_(externalAAD),
@@ -292,36 +280,34 @@ class MultiSignatureStructureBuilder : public SigStructureBuilder {
   }
 };
 
-std::vector<uint8_t> createCoseSign1Input(
-    const std::vector<uint8_t>& protectedHeader,
-    const std::vector<uint8_t>& payload,
-    const std::vector<uint8_t>& externalAAD) {
+std::vector<uint8_t> createCoseSign1Input(std::span<const uint8_t> protectedHeader,
+                                          std::span<const uint8_t> payload,
+                                          std::span<const uint8_t> externalAAD) {
   SingleSignatureStructureBuilder builder(protectedHeader, externalAAD,
                                           payload);
   return builder.build();
 }
 
 std::vector<uint8_t> createCoseSignInput(
-    const std::vector<uint8_t>& bodyProtectedHeader,
-    const std::vector<uint8_t>& signatureProtectedHeader,
-    const std::vector<uint8_t>& externalAAD,
-    const std::vector<uint8_t>& payload) {
+    std::span<const uint8_t> bodyProtectedHeader,
+    std::span<const uint8_t> signatureProtectedHeader,
+    std::span<const uint8_t> externalAAD,
+    std::span<const uint8_t> payload) {
   MultiSignatureStructureBuilder builder(
       bodyProtectedHeader, signatureProtectedHeader, externalAAD, payload);
   return builder.build();
 }
 
-std::vector<uint8_t> createCoseMac0Input(
-    const std::vector<uint8_t>& protectedHeader,
-    const std::vector<uint8_t>& payload,
-    const std::vector<uint8_t>& externalAAD) {
+std::vector<uint8_t> createCoseMac0Input(std::span<const uint8_t> protectedHeader,
+                                         std::span<const uint8_t> payload,
+                                         std::span<const uint8_t> externalAAD) {
   Mac0StructureBuilder builder(protectedHeader, externalAAD, payload);
   return builder.build();
 }
 
 std::vector<uint8_t> createCoseEncrypt0Aad(
-    const std::vector<uint8_t>& protectedHeader,
-    const std::vector<uint8_t>& externalAAD) {
+    std::span<const uint8_t> protectedHeader,
+    std::span<const uint8_t> externalAAD) {
   Enc0StructureBuilder builder(protectedHeader, externalAAD);
   return builder.build();
 }
