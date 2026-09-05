@@ -76,10 +76,9 @@ jobs:
           build/Testing/Temporary/LastTest.log
 
   tsan:
-    # ThreadSanitizer is advisory until the lock-free pool (M-04) is replaced.
-    # The job runs on every push/PR so the signal is visible, but a failure
-    # here does not block merge.
-    continue-on-error: true
+    # ThreadSanitizer failures block merge. The former atomic Treiber free
+    # list was replaced by a mutex-guarded bounded object pool, so this job
+    # is now enforcing rather than advisory.
     strategy:
       fail-fast: false
       matrix:
