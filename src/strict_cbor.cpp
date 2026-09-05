@@ -129,7 +129,7 @@ CborItemPtr loadStrict(std::span<const uint8_t> data,
   if (data.empty()) {
     throw InvalidCborError("Empty CBOR input");
   }
-  if (data.size() > kMaxDecodedCborBytes) {
+  if (data.size() > opts.max_bytes) {
     throw InvalidCborError("CBOR input exceeds strict size limit");
   }
 

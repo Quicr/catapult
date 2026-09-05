@@ -2060,11 +2060,20 @@ std::string Cwt::createCwtBase64(
 }
 
 CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
+  // Outer COSE bytes carry an RFC 8152 tag (16/17/18) so the strict loader
+  // cannot handle them directly, but we still enforce the CTA-5007-B
+  // encoded-size bound and require full input consumption.
+  if (cwtBytes.size() > catapult::internal::kMaxDecodedCborBytes) {
+    throw InvalidCborError("COSE input exceeds decoded-bytes limit");
+  }
   struct cbor_load_result result;
   auto coseItem = cbor_load_owned(cwtBytes, result);
 
   if (result.error.code != CBOR_ERR_NONE || !coseItem) {
     throw InvalidCborError("Failed to parse COSE structure");
+  }
+  if (result.read != cwtBytes.size()) {
+    throw InvalidCborError("Trailing bytes after COSE root item");
   }
 
   // Peel a COSE tag (16/17/18) if present — see validateCwt for rationale.
@@ -2098,13 +2107,18 @@ CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
 
   coseItem.reset();
 
-  // Decode the protected header map
-  struct cbor_load_result headerResult;
-  auto headerItem = cbor_load_owned(protectedHeaderBytes.data(),
-                                    protectedHeaderBytes.size(), headerResult);
-
-  if (headerResult.error.code != CBOR_ERR_NONE || !headerItem ||
-      !cbor_isa_map(headerItem.get())) {
+  // Decode the protected header map under strict rules: attacker-controlled
+  // bytes must reject indefinite-length forms, duplicate keys, trailing
+  // bytes, and unrecognised CBOR tags.
+  CborItemPtr headerItem;
+  try {
+    headerItem = catapult::internal::loadStrict(
+        std::span<const uint8_t>(protectedHeaderBytes.data(),
+                                 protectedHeaderBytes.size()));
+  } catch (const InvalidCborError&) {
+    throw InvalidTokenFormatError();
+  }
+  if (!headerItem || !cbor_isa_map(headerItem.get())) {
     throw InvalidTokenFormatError();
   }
 
@@ -2155,12 +2169,20 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
     // and CAT-4-MOQT (draft-ietf-moq-c4m) test vectors are emitted with
     // the tag. Peel the tag if present so the inner array is uniformly
     // dispatched by size below; require the tag number to be one of the
-    // three registered COSE single-recipient types when present.
+    // three registered COSE single-recipient types when present. The outer
+    // COSE tag prevents use of loadStrict here, but we still cap the input
+    // size and reject trailing bytes.
+    if (cwtBytes.size() > catapult::internal::kMaxDecodedCborBytes) {
+      throw InvalidCborError("COSE input exceeds decoded-bytes limit");
+    }
     struct cbor_load_result result;
     auto coseItem = cbor_load_owned(cwtBytes, result);
 
     if (result.error.code != CBOR_ERR_NONE || !coseItem) {
       throw InvalidCborError("Failed to parse COSE structure");
+    }
+    if (result.read != cwtBytes.size()) {
+      throw InvalidCborError("Trailing bytes after COSE root item");
     }
 
     if (cbor_isa_tag(coseItem.get())) {
@@ -2316,13 +2338,17 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
     // Step 4: Decode payload and create CWT
     auto decodedPayload = decodePayload(payloadBytes);
 
-    // Parse protected header to get algorithm
-    struct cbor_load_result headerResult;
-    auto headerItem = cbor_load_owned(
-        protectedHeaderBytes.data(), protectedHeaderBytes.size(), headerResult);
-
-    if (headerResult.error.code != CBOR_ERR_NONE || !headerItem ||
-        !cbor_isa_map(headerItem.get())) {
+    // Parse protected header to get algorithm — strict parse rejects
+    // indefinite-length maps, duplicate keys, and trailing bytes.
+    CborItemPtr headerItem;
+    try {
+      headerItem = catapult::internal::loadStrict(
+          std::span<const uint8_t>(protectedHeaderBytes.data(),
+                                   protectedHeaderBytes.size()));
+    } catch (const InvalidCborError&) {
+      throw;
+    }
+    if (!headerItem || !cbor_isa_map(headerItem.get())) {
       throw InvalidCborError("Invalid COSE protected header");
     }
 
@@ -2498,12 +2524,16 @@ Cwt Cwt::validateMultiSignedCwt(
       bool algFound = false;
 
       if (!sigProtectedHeader.empty()) {
-        struct cbor_load_result sigHeaderResult;
-        auto sigHeaderItem =
-            cbor_load_owned(sigProtectedHeader.data(),
-                            sigProtectedHeader.size(), sigHeaderResult);
-        if (sigHeaderResult.error.code == CBOR_ERR_NONE && sigHeaderItem &&
-            cbor_isa_map(sigHeaderItem.get())) {
+        // Per-signature protected header: strict parse.
+        CborItemPtr sigHeaderItem;
+        try {
+          sigHeaderItem = catapult::internal::loadStrict(
+              std::span<const uint8_t>(sigProtectedHeader.data(),
+                                       sigProtectedHeader.size()));
+        } catch (const InvalidCborError&) {
+          throw InvalidTokenFormatError();
+        }
+        if (sigHeaderItem && cbor_isa_map(sigHeaderItem.get())) {
           struct cbor_pair* pairs = cbor_map_handle(sigHeaderItem.get());
           size_t mapSize = cbor_map_size(sigHeaderItem.get());
 

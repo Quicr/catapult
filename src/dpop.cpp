@@ -31,6 +31,7 @@ using json = nlohmann::json;
 #include "catapult/crypto.hpp"
 #include "catapult/cwt.hpp"
 #include "catapult/internal/cbor_owned.hpp"
+#include "catapult/internal/strict_cbor.hpp"
 #include "catapult/moqt_claims.hpp"
 
 namespace catapult {
@@ -619,12 +620,16 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   {
     size_t prot_len = cbor_bytestring_length(protected_bstr.get());
     if (prot_len > 0) {
-      cbor_load_result prot_result;
-      auto prot_map = cbor_load_owned(
-          cbor_bytestring_handle(protected_bstr.get()), prot_len, prot_result);
-      if (prot_result.error.code != CBOR_ERR_NONE ||
-          prot_result.read != prot_len || !prot_map ||
-          !cbor_isa_map(prot_map.get())) {
+      // Attacker-controlled protected header: enforce definite-length,
+      // duplicate-key, trailing-byte, and nesting-depth bounds.
+      CborItemPtr prot_map;
+      try {
+        prot_map = catapult::internal::loadStrict(std::span<const uint8_t>(
+            cbor_bytestring_handle(protected_bstr.get()), prot_len));
+      } catch (const InvalidCborError&) {
+        throw InvalidTokenFormatError{};
+      }
+      if (!prot_map || !cbor_isa_map(prot_map.get())) {
         throw InvalidTokenFormatError{};
       }
       size_t map_size = cbor_map_size(prot_map.get());
@@ -663,11 +668,15 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   }
   {
     size_t pay_len = cbor_bytestring_length(payload_bstr.get());
-    cbor_load_result pay_result;
-    auto pay_map = cbor_load_owned(cbor_bytestring_handle(payload_bstr.get()),
-                                   pay_len, pay_result);
-    if (pay_result.error.code != CBOR_ERR_NONE || pay_result.read != pay_len ||
-        !pay_map || !cbor_isa_map(pay_map.get())) {
+    // Attacker-controlled payload map: enforce strict CBOR rules.
+    CborItemPtr pay_map;
+    try {
+      pay_map = catapult::internal::loadStrict(std::span<const uint8_t>(
+          cbor_bytestring_handle(payload_bstr.get()), pay_len));
+    } catch (const InvalidCborError&) {
+      throw InvalidTokenFormatError{};
+    }
+    if (!pay_map || !cbor_isa_map(pay_map.get())) {
       throw InvalidTokenFormatError{};
     }
     {

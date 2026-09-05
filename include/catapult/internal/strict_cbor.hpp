@@ -29,12 +29,15 @@
 
 namespace catapult::internal {
 
-/// Options controlling strictness. Currently only a maximum nesting depth
-/// is exposed; other checks are always on.
+/// Options controlling strictness. Maximum nesting depth and the total
+/// input ceiling are sourced from ParseLimits by default; other checks
+/// are always on.
 struct StrictCborOptions {
-  /// Maximum nested container depth. CTA-5007-B tokens do not exceed 8
-  /// levels in practice; we keep a small margin.
-  std::size_t max_depth = 16;
+  /// Maximum nested container depth. Defaults to ParseLimits::max_cbor_depth.
+  std::size_t max_depth = kMaxCborDepth;
+  /// Maximum raw CBOR input in bytes. Defaults to
+  /// ParseLimits::max_decoded_cbor_bytes.
+  std::size_t max_bytes = kMaxDecodedCborBytes;
   /// If true, forbid indefinite-length arrays/maps/bytestrings/strings.
   /// Required by RFC 8949 §4.2.
   bool require_definite_length = true;
@@ -44,6 +47,14 @@ struct StrictCborOptions {
   /// no tags are allowed (CAT/COSE do not use tag numbers in the CWT
   /// payload; the outer COSE tag is handled separately).
   bool forbid_unrecognized_tags = true;
+
+  /// Derive strict options from an aggregated ParseLimits struct.
+  static StrictCborOptions fromLimits(const ParseLimits& limits) noexcept {
+    StrictCborOptions o;
+    o.max_depth = limits.max_cbor_depth;
+    o.max_bytes = limits.max_decoded_cbor_bytes;
+    return o;
+  }
 };
 
 /**

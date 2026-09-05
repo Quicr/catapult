@@ -4,20 +4,20 @@
 
 #include "catapult/crypto.hpp"
 #include "catapult/error.hpp"
+#include "catapult/internal/parse_limits.hpp"
 
 namespace catapult {
 
 namespace {
-// Maximum regex pattern length to prevent ReDoS attacks
-constexpr size_t MAX_REGEX_PATTERN_LENGTH = 256;
-// Maximum number of regex patterns to prevent memory exhaustion
-constexpr size_t MAX_REGEX_PATTERNS = 50;
-// Maximum URI length for matching to prevent DoS
-constexpr size_t MAX_URI_LENGTH = 8192;
+using catapult::internal::kMaxRegexPatternLength;
+using catapult::internal::kMaxRegexPatterns;
+using catapult::internal::kMaxUriLength;
 
-// Validate regex pattern for potentially dangerous constructs
+// Validate regex pattern for potentially dangerous constructs.
+// std::regex has no bounded-worst-case matcher; a component-aware URI
+// matcher that avoids std::regex on the hot path is planned separately.
 bool isRegexPatternSafe(const std::string& pattern) {
-  if (pattern.length() > MAX_REGEX_PATTERN_LENGTH) {
+  if (pattern.length() > kMaxRegexPatternLength) {
     return false;
   }
 
@@ -119,19 +119,21 @@ void UriMatcher::addPattern(const UriPattern& pattern) {
       suffixTrie.insert(pattern.pattern, pattern.pattern);
       break;
     case UriPatternType::Regex:
-      // Limit number of regex patterns
-      if (regexPatterns.size() >= MAX_REGEX_PATTERNS) {
+      if (regexPatterns.size() >= kMaxRegexPatterns) {
         throw InvalidClaimValueError("Too many regex patterns");
       }
-      // Validate pattern safety
       if (!isRegexPatternSafe(pattern.pattern)) {
         throw InvalidClaimValueError("Regex pattern rejected for safety");
       }
+      // Compilation failures previously fell through silently, letting the
+      // matcher accept the claim while retaining zero patterns — a partially
+      // populated matcher which would then pass through unrelated exact/
+      // prefix/suffix entries. Surface the error instead.
       try {
         regexPatterns.emplace_back(std::regex(pattern.pattern),
                                    pattern.pattern);
       } catch (const std::regex_error&) {
-        // Invalid regex pattern, skip
+        throw InvalidClaimValueError("Regex pattern failed to compile");
       }
       break;
     case UriPatternType::Hash:
@@ -142,7 +144,7 @@ void UriMatcher::addPattern(const UriPattern& pattern) {
 
 bool UriMatcher::matches(const std::string& uri) const {
   // Reject oversized URIs to prevent DoS
-  if (uri.length() > MAX_URI_LENGTH) {
+  if (uri.length() > kMaxUriLength) {
     return false;
   }
 
@@ -184,7 +186,7 @@ std::vector<std::string> UriMatcher::getMatchingPatterns(
   std::vector<std::string> matches;
 
   // Reject oversized URIs to prevent DoS
-  if (uri.length() > MAX_URI_LENGTH) {
+  if (uri.length() > kMaxUriLength) {
     return matches;
   }
 
