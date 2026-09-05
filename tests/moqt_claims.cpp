@@ -604,7 +604,7 @@ cbor_item_t* build_scope_with_ns_match(int action, cbor_item_t* bin_match_owned)
 
 }  // namespace
 
-TEST_SUITE("MOQT wire-format hardening (C-05)") {
+TEST_SUITE("MOQT wire-format hardening") {
   TEST_CASE("Decoder rejects nil in bin-match position (fail-closed)") {
     // A `nil` in the bin-match list has a specific "exact zero-length"
     // meaning in the current CAT-4-MOQT draft. The internal model cannot
