@@ -570,21 +570,29 @@ class ClaimProcessor {
  private:
   static void processExtendedClaims(CborMapBuilder& builder,
                                     const ExtendedCatClaims& extended) {
-    // Process MOQT claims if present
+    // CAT-4-MOQT (draft-jennings-moq-cat-04): the `moqt` claim value is a
+    // native CBOR array of scope arrays (not a nested bytestring), and the
+    // revalidation interval is a separate top-level claim `moqt-reval`
+    // (uint seconds). Emit both directly into the CWT claim set.
     if (extended.hasMoqtClaims()) {
-      auto moqt_cbor =
-          serializeMoqtClaimsToCbor(*extended.getMoqtClaimsReadOnly());
-      addClaimRaw(builder, CLAIM_MOQT, moqt_cbor);
-    }
-  }
+      const MoqtClaims& moqt = *extended.getMoqtClaimsReadOnly();
+      auto moqt_item = buildMoqtClaimItem(moqt);
+      auto moqt_key = CborItemPtr(cbor_build_uint64(CLAIM_MOQT));
+      builder.addPairToMap(builder.root_.get(), std::move(moqt_key),
+                           std::move(moqt_item));
 
-  static void addClaimRaw(CborMapBuilder& builder, int64_t claim_id,
-                          const std::vector<uint8_t>& data) {
-    if (!data.empty()) {
-      auto key = CborItemPtr(cbor_build_uint64(claim_id));
-      auto val = cbor_build_bytestring_owned(data.data(), data.size());
-
-      builder.addPairToMap(builder.root_.get(), std::move(key), std::move(val));
+      if (auto reval = moqt.getRevalidationInterval(); reval.has_value()) {
+        const int64_t secs = reval->count();
+        if (secs < 0) {
+          throw InvalidClaimValueError(
+              "'moqt-reval' revalidation interval must be non-negative");
+        }
+        auto reval_key = CborItemPtr(cbor_build_uint64(CLAIM_MOQT_REVAL));
+        auto reval_val =
+            CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(secs)));
+        builder.addPairToMap(builder.root_.get(), std::move(reval_key),
+                             std::move(reval_val));
+      }
     }
   }
 
@@ -612,15 +620,13 @@ class ClaimProcessor {
     return arr;
   }
 
-  static std::vector<uint8_t> serializeMoqtClaimsToCbor(
-      const MoqtClaims& moqt_claims) {
+  // Build the CBOR item for the `moqt` claim as a native array of scope
+  // tuples, per CAT-4-MOQT `draft-jennings-moq-cat-04`. The revalidation
+  // interval is NOT included here — it is emitted as the separate
+  // `moqt-reval` claim by processExtendedClaims().
+  static CborItemPtr buildMoqtClaimItem(const MoqtClaims& moqt_claims) {
     const auto& scopes = moqt_claims.getScopes();
-    auto revalidation_interval = moqt_claims.getRevalidationInterval();
-
-    auto moqt_array = CborItemPtr(cbor_new_definite_array(scopes.size()));
-    if (!moqt_array) {
-      throw InvalidCborError("Failed to create MOQT claims array");
-    }
+    auto moqt_array = cbor_new_definite_array_owned(scopes.size());
 
     for (const auto& scope : scopes) {
       size_t scope_len = 1;
@@ -629,87 +635,73 @@ class ClaimProcessor {
       if (has_ns || has_track) scope_len = 2;
       if (has_track) scope_len = 3;
 
-      auto scope_array = CborItemPtr(cbor_new_definite_array(scope_len));
+      auto scope_array = cbor_new_definite_array_owned(scope_len);
 
       auto actions_array =
-          CborItemPtr(cbor_new_definite_array(scope.actions.size()));
+          cbor_new_definite_array_owned(scope.actions.size());
       for (int action : scope.actions) {
         auto action_item =
-            CborItemPtr(cbor_build_uint8(static_cast<uint8_t>(action)));
-        (void)cbor_array_push(actions_array.get(), action_item.get());
+            cbor_build_uint8_owned(static_cast<uint8_t>(action));
+        if (!cbor_array_push(actions_array.get(), action_item.get())) {
+          throw InvalidCborError("Failed to push MOQT action");
+        }
       }
-      (void)cbor_array_push(scope_array.get(), actions_array.get());
+      if (!cbor_array_push(scope_array.get(), actions_array.get())) {
+        throw InvalidCborError("Failed to push MOQT action list");
+      }
 
       if (scope_len >= 2) {
         const auto& ns_conditions = scope.namespace_match.conditions();
         auto ns_matches =
-            CborItemPtr(cbor_new_definite_array(ns_conditions.size()));
+            cbor_new_definite_array_owned(ns_conditions.size());
         for (const auto& cond : ns_conditions) {
           auto ns_item = serializeBinaryMatch(cond);
-          if (ns_item) {
-            (void)cbor_array_push(ns_matches.get(), ns_item.get());
-          } else {
-            auto null_item = CborItemPtr(cbor_new_null());
-            (void)cbor_array_push(ns_matches.get(), null_item.get());
+          if (!ns_item) {
+            ns_item = CborItemPtr(cbor_new_null());
+          }
+          if (!cbor_array_push(ns_matches.get(), ns_item.get())) {
+            throw InvalidCborError("Failed to push MOQT namespace match");
           }
         }
-        (void)cbor_array_push(scope_array.get(), ns_matches.get());
+        if (!cbor_array_push(scope_array.get(), ns_matches.get())) {
+          throw InvalidCborError("Failed to push MOQT namespace match list");
+        }
       }
 
       if (scope_len >= 3) {
         const auto& tr_conditions = scope.track_match.conditions();
         if (tr_conditions.size() == 1) {
           auto track_item = serializeBinaryMatch(tr_conditions[0]);
-          if (track_item) {
-            (void)cbor_array_push(scope_array.get(), track_item.get());
-          } else {
-            auto null_item = CborItemPtr(cbor_new_null());
-            (void)cbor_array_push(scope_array.get(), null_item.get());
+          if (!track_item) {
+            track_item = CborItemPtr(cbor_new_null());
+          }
+          if (!cbor_array_push(scope_array.get(), track_item.get())) {
+            throw InvalidCborError("Failed to push MOQT track match");
           }
         } else {
           auto tr_matches =
-              CborItemPtr(cbor_new_definite_array(tr_conditions.size()));
+              cbor_new_definite_array_owned(tr_conditions.size());
           for (const auto& cond : tr_conditions) {
             auto tr_item = serializeBinaryMatch(cond);
-            if (tr_item) {
-              (void)cbor_array_push(tr_matches.get(), tr_item.get());
-            } else {
-              auto null_item = CborItemPtr(cbor_new_null());
-              (void)cbor_array_push(tr_matches.get(), null_item.get());
+            if (!tr_item) {
+              tr_item = CborItemPtr(cbor_new_null());
+            }
+            if (!cbor_array_push(tr_matches.get(), tr_item.get())) {
+              throw InvalidCborError("Failed to push MOQT track match");
             }
           }
-          (void)cbor_array_push(scope_array.get(), tr_matches.get());
+          if (!cbor_array_push(scope_array.get(), tr_matches.get())) {
+            throw InvalidCborError("Failed to push MOQT track match list");
+          }
         }
       }
 
-      (void)cbor_array_push(moqt_array.get(), scope_array.get());
-    }
-
-    std::vector<uint8_t> result;
-    unsigned char* raw_buffer;
-    size_t buffer_size;
-    size_t length =
-        cbor_serialize_alloc(moqt_array.get(), &raw_buffer, &buffer_size);
-    if (length == 0) {
-      throw InvalidCborError("Failed to serialize MOQT claims CBOR");
-    }
-    result.assign(raw_buffer, raw_buffer + length);
-    free(raw_buffer);
-
-    if (revalidation_interval.has_value()) {
-      auto reval =
-          CborItemPtr(cbor_build_uint64(revalidation_interval->count()));
-      unsigned char* reval_buf;
-      size_t reval_size;
-      size_t reval_len =
-          cbor_serialize_alloc(reval.get(), &reval_buf, &reval_size);
-      if (reval_len > 0) {
-        result.insert(result.end(), reval_buf, reval_buf + reval_len);
-        free(reval_buf);
+      if (!cbor_array_push(moqt_array.get(), scope_array.get())) {
+        throw InvalidCborError("Failed to push MOQT scope");
       }
     }
 
-    return result;
+    return moqt_array;
   }
 };
 
@@ -863,6 +855,13 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
   // range integer, unknown/experimental claim id) causes the whole token to
   // be rejected. Widening the acceptance set is exactly the class of bug that
   // lets an attacker smuggle scope past authorization checks.
+  //
+  // CAT-4-MOQT (draft-jennings-moq-cat-04) emits `moqt-reval` as a separate
+  // top-level claim. CBOR map ordering is not fixed, so buffer any reval
+  // value we see and apply it after the loop — `moqt-reval` is meaningful
+  // only in the presence of a `moqt` scope set, but we accept either
+  // ordering during decode.
+  std::optional<int64_t> pending_moqt_reval_seconds;
   for (size_t i = 0; i < map_size; i++) {
     cbor_item_t* key_item = pairs[i].key;
     cbor_item_t* value_item = pairs[i].value;
@@ -1551,29 +1550,24 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
         break;
 
       case CLAIM_MOQT:
-        if (!cbor_isa_bytestring(value_item)) {
-          throw InvalidClaimValueError("'moqt' must be a byte string");
+        // CAT-4-MOQT (draft-jennings-moq-cat-04): the `moqt` claim value is
+        // a native CBOR array. Historically we wrapped this in a bytestring
+        // and appended the reval interval as a concatenated CBOR value —
+        // that was not a valid CWT and is no longer accepted.
+        if (!cbor_isa_array(value_item)) {
+          throw InvalidClaimValueError("'moqt' must be a CBOR array");
         }
         {
-          auto moqt_data = extract_bytestring(value_item);
-          cbor_load_result moqt_result;
-          auto moqt_array = cbor_load_owned(
-              reinterpret_cast<const uint8_t*>(moqt_data.data()),
-              moqt_data.size(), moqt_result);
-          if (!moqt_array || moqt_result.error.code != CBOR_ERR_NONE ||
-              !cbor_isa_array(moqt_array.get())) {
-            throw InvalidClaimValueError(
-                "'moqt' payload must decode to a CBOR array");
-          }
+          cbor_item_t* const moqt_array_ptr = value_item;
 
           constexpr size_t MAX_MOQT_SCOPES = 100;
-          size_t moqt_scope_count = cbor_array_size(moqt_array.get());
+          size_t moqt_scope_count = cbor_array_size(moqt_array_ptr);
           if (moqt_scope_count > MAX_MOQT_SCOPES) {
             throw InvalidClaimValueError("Too many MOQT scopes");
           }
           auto moqt_claims = MoqtClaims::create(moqt_scope_count);
           for (size_t si = 0; si < moqt_scope_count; ++si) {
-            auto scope_arr = cbor_array_get_owned(moqt_array.get(), si);
+            auto scope_arr = cbor_array_get_owned(moqt_array_ptr, si);
             if (!scope_arr || !cbor_isa_array(scope_arr.get())) {
               throw InvalidClaimValueError("MOQT scope must be an array");
             }
@@ -1724,6 +1718,27 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
         }
         break;
 
+      case CLAIM_MOQT_REVAL:
+        // CAT-4-MOQT (draft-jennings-moq-cat-04): `moqt-reval` is a top-level
+        // uint claim carrying the revalidation interval in seconds. Buffer
+        // it here; it is applied to the MoqtClaims object after the map
+        // walk completes, so ordering with `moqt` in the CBOR map is not
+        // significant.
+        if (!cbor_isa_uint(value_item)) {
+          throw InvalidClaimValueError(
+              "'moqt-reval' must be an unsigned integer");
+        }
+        {
+          uint64_t reval_u = cbor_get_int(value_item);
+          if (reval_u > static_cast<uint64_t>(
+                            std::numeric_limits<int64_t>::max())) {
+            throw InvalidClaimValueError(
+                "'moqt-reval' exceeds int64 range");
+          }
+          pending_moqt_reval_seconds = static_cast<int64_t>(reval_u);
+        }
+        break;
+
       default:
         // Unknown / unregistered claim ids are ignored (CTA-5007-B §4.5 —
         // "unrecognized claims MUST NOT be processed"). This is *not* silent
@@ -1735,6 +1750,19 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
         CAT_LOG_DEBUG("Ignoring unregistered CAT claim id: {}", claim_id);
         break;
     }
+  }
+
+  // Apply any buffered `moqt-reval` value. Per CAT-4-MOQT
+  // draft-jennings-moq-cat-04, the interval is only meaningful when a
+  // `moqt` scope set is present; a `moqt-reval` without `moqt` is a
+  // structural error rather than a silent no-op.
+  if (pending_moqt_reval_seconds.has_value()) {
+    if (!token.extended.hasMoqtClaims()) {
+      throw InvalidClaimValueError(
+          "'moqt-reval' present without 'moqt' scope claim");
+    }
+    token.extended.getMoqtClaims().setRevalidationInterval(
+        std::chrono::seconds{*pending_moqt_reval_seconds});
   }
 
   return token;
