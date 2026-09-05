@@ -9,6 +9,7 @@
 #include "catapult/composite_impl.hpp"
 #include "catapult/cwt.hpp"
 #include "catapult/internal/parse_limits.hpp"
+#include "catapult/internal/safe_arith.hpp"
 #include "catapult/logging.hpp"
 // This translation unit defines the legacy JWT-shaped API when the build
 // option is enabled; opt into the acknowledgement macro so the
@@ -94,7 +95,7 @@ void CatTokenValidator::validate(const CatToken& token) const {
   if (token.core.exp) {
     const int64_t exp = *token.core.exp;
     int64_t exp_deadline;
-    if (__builtin_add_overflow(exp, clockSkewTolerance_, &exp_deadline)) {
+    if (internal::addOverflow(exp, clockSkewTolerance_, exp_deadline)) {
       // Overflow implies an implausibly distant future — treat as invalid
       // rather than accept a token whose deadline cannot be represented.
       throw InvalidClaimValueError(
@@ -109,7 +110,7 @@ void CatTokenValidator::validate(const CatToken& token) const {
   if (token.core.nbf) {
     const int64_t nbf = *token.core.nbf;
     int64_t nbf_floor;
-    if (__builtin_sub_overflow(nbf, clockSkewTolerance_, &nbf_floor)) {
+    if (internal::subOverflow(nbf, clockSkewTolerance_, nbf_floor)) {
       throw InvalidClaimValueError(
           "'nbf' - clock skew tolerance overflows int64_t");
     }
@@ -186,7 +187,7 @@ void CatTokenValidator::validateMoqtRevalidation(
   // wrapping to a small deadline (which would masquerade as a valid,
   // near-future revalidation window).
   int64_t deadline;
-  if (__builtin_add_overflow(iat, reval, &deadline)) {
+  if (internal::addOverflow(iat, reval, deadline)) {
     throw InvalidClaimValueError(
         "'iat + moqt-reval' overflows int64_t");
   }
@@ -194,8 +195,8 @@ void CatTokenValidator::validateMoqtRevalidation(
   // direction as `exp`: extend the acceptance window forward. Overflow
   // here is again treated as invalid rather than wrapping.
   int64_t deadline_with_skew;
-  if (__builtin_add_overflow(deadline, clockSkewTolerance_,
-                             &deadline_with_skew)) {
+  if (internal::addOverflow(deadline, clockSkewTolerance_,
+                            deadline_with_skew)) {
     throw InvalidClaimValueError(
         "'iat + moqt-reval + skew' overflows int64_t");
   }

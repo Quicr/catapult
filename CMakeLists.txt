@@ -130,6 +130,15 @@ if(CATAPULT_ENABLE_WERROR)
         -Werror=uninitialized
         -Werror=implicit-fallthrough
         -Werror=undef
+        # Real hazards flagged by the C-08 audit: dropping a value that only
+        # exists as a side effect, mismatched delete[]/delete, comparing an
+        # array pointer to zero as if it were a scalar, and switching over
+        # an enum with a missing case.
+        -Werror=unused-value
+        -Werror=delete-non-virtual-dtor
+        -Werror=switch
+        -Werror=address
+        -Werror=parentheses
     )
     target_compile_options(catapult PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:${CATAPULT_WERROR_FLAGS}>

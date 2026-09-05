@@ -29,15 +29,20 @@ fi
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
-# Configure build
+# Configure build. Options here must match those declared in the top-level
+# CMakeLists; stale flags (ENABLE_TRIE_MEMORY_POOL, BUILD_TESTING,
+# BUILD_BENCHMARKS) were silently ignored by CMake and hid the fact that
+# this script had drifted from the source tree.
 echo "Configuring build with CMake..."
 cmake \
     -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
     -DCMAKE_CXX_STANDARD=20 \
-    -DENABLE_TRIE_MEMORY_POOL="${ENABLE_TRIE_MEMORY_POOL:-ON}" \
     -DENABLE_LOGGING="${ENABLE_LOGGING:-ON}" \
-    -DBUILD_TESTING=ON \
-    -DBUILD_BENCHMARKS=ON \
+    -DCATAPULT_ENABLE_JSON="${CATAPULT_ENABLE_JSON:-ON}" \
+    -DCATAPULT_ENABLE_WERROR="${CATAPULT_ENABLE_WERROR:-OFF}" \
+    -DCATAPULT_ENABLE_LTO="${CATAPULT_ENABLE_LTO:-OFF}" \
+    -DCATAPULT_ENABLE_SANITIZERS="${CATAPULT_ENABLE_SANITIZERS:-OFF}" \
+    -DCATAPULT_ENABLE_TSAN="${CATAPULT_ENABLE_TSAN:-OFF}" \
     "${PROJECT_ROOT}"
 
 # Build project

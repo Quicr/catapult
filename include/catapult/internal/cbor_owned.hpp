@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <type_traits>
 
 #include "catapult/cwt.hpp"
 
@@ -63,6 +64,20 @@ inline CborItemPtr cbor_build_uint64_owned(uint64_t value) {
     return CborItemPtr(cbor_build_uint32(static_cast<uint32_t>(value)));
   }
   return CborItemPtr(cbor_build_uint64(value));
+}
+
+// Signed overload for call sites that carry claim IDs or timestamps as
+// int64_t but are logically non-negative. Rejects negatives so a caller
+// bug cannot silently wrap into a huge positive. Also accepts plain `int`
+// literals to disambiguate calls like `cbor_build_uint64_owned(0)`.
+template <typename T>
+  requires std::is_integral_v<T> && std::is_signed_v<T>
+inline CborItemPtr cbor_build_uint64_owned(T value) {
+  if (value < 0) {
+    throw InvalidCborError(
+        "cbor_build_uint64_owned received a negative value");
+  }
+  return cbor_build_uint64_owned(static_cast<uint64_t>(value));
 }
 
 // Same principle for negints: the wire value is `-1 - n` encoded in the

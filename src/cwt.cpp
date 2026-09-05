@@ -825,19 +825,6 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
     return {reinterpret_cast<const char*>(data), length};
   };
 
-  auto extract_bytestring = [](cbor_item_t* str_item) -> std::string {
-    if (!str_item) return {};
-    size_t length = cbor_bytestring_length(str_item);
-    if (length > MAX_STRING_LENGTH) {
-      throw InvalidClaimValueError("Bytestring value exceeds maximum length");
-    }
-    const unsigned char* data = cbor_bytestring_handle(str_item);
-    if (!data && length > 0) {
-      throw InvalidClaimValueError("Invalid bytestring data pointer");
-    }
-    return {reinterpret_cast<const char*>(data), length};
-  };
-
   // Parse into CatToken
   CatToken token;
   struct cbor_pair* pairs = cbor_map_handle(item.get());
@@ -1907,26 +1894,26 @@ std::vector<uint8_t> Cwt::createCwt(
     auto coseHeader = createCoseHeader();
 
     // Step 2: Encode payload
-    auto payload = encodePayload();
+    auto payloadBytes = encodePayload();
 
     // Step 3 & 4: Handle different COSE modes with appropriate signing input
-    std::vector<uint8_t> signature;
+    std::vector<uint8_t> signatureBytes;
     std::vector<uint8_t> encryptedPayload;
     std::vector<uint8_t> iv;
 
     switch (mode) {
       case CwtMode::Signed: {
         // Use COSE_Sign1 Sig_structure (RFC 8152 §4.4).
-        auto signingInput = createCoseSign1Input(coseHeader, payload);
-        signature = algorithm.sign(signingInput);
+        auto signingInput = createCoseSign1Input(coseHeader, payloadBytes);
+        signatureBytes = algorithm.sign(signingInput);
         break;
       }
       case CwtMode::MACed: {
         // Use COSE_Mac0 MAC_structure (RFC 8152 §6.3). Previously this path
         // reused the "Signature1" context, which is non-conformant and
         // opens the door to cross-context tag confusion.
-        auto macInput = createCoseMac0Input(coseHeader, payload);
-        signature = algorithm.sign(macInput);
+        auto macInput = createCoseMac0Input(coseHeader, payloadBytes);
+        signatureBytes = algorithm.sign(macInput);
         break;
       }
       case CwtMode::MultiSigned:
@@ -1958,7 +1945,7 @@ std::vector<uint8_t> Cwt::createCwt(
           // AAD (RFC 8152 §5.3). Without this, an attacker can substitute the
           // alg/kid in the protected header without invalidating the tag.
           auto encAad = createCoseEncrypt0Aad(coseHeader);
-          encryptedPayload = algorithm.encrypt(payload, iv, encAad);
+          encryptedPayload = algorithm.encrypt(payloadBytes, iv, encAad);
         }
         break;
     }
@@ -1987,8 +1974,8 @@ std::vector<uint8_t> Cwt::createCwt(
       }
 
       // Add payload (encoded as bstr)
-      auto payloadBstr =
-          CborItemPtr(cbor_build_bytestring(payload.data(), payload.size()));
+      auto payloadBstr = CborItemPtr(
+          cbor_build_bytestring(payloadBytes.data(), payloadBytes.size()));
       if (!cbor_array_push(coseStructure.get(), payloadBstr.get())) {
         throw InvalidCborError("Failed to add payload to COSE_Sign structure");
       }
@@ -2086,15 +2073,15 @@ std::vector<uint8_t> Cwt::createCwt(
       }
 
       // Add payload (encoded as bstr)
-      auto payloadBstr =
-          CborItemPtr(cbor_build_bytestring(payload.data(), payload.size()));
+      auto payloadBstr = CborItemPtr(
+          cbor_build_bytestring(payloadBytes.data(), payloadBytes.size()));
       if (!cbor_array_push(coseStructure.get(), payloadBstr.get())) {
         throw InvalidCborError("Failed to add payload to COSE structure");
       }
 
       // Add signature (encoded as bstr)
-      auto signatureBstr = CborItemPtr(
-          cbor_build_bytestring(signature.data(), signature.size()));
+      auto signatureBstr = CborItemPtr(cbor_build_bytestring(
+          signatureBytes.data(), signatureBytes.size()));
       if (!cbor_array_push(coseStructure.get(), signatureBstr.get())) {
         throw InvalidCborError("Failed to add signature to COSE structure");
       }
@@ -2280,7 +2267,6 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
     std::span<const uint8_t> protectedHeaderBytes;
     std::span<const uint8_t> payloadBytes;
     std::vector<uint8_t> decryptedPayload;
-    bool isEncrypted = false;
     bool isMultiSigned = false;
     std::vector<CoseSignature> validatedSignatures;
 
@@ -2299,7 +2285,6 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
         throw CryptoError(
             "Algorithm does not support decryption for COSE_Encrypt0");
       }
-      isEncrypted = true;
 
       cbor_item_t** coseArray = cbor_array_handle(coseItem.get());
       if (!coseArray) {

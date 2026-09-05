@@ -12,19 +12,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu builds
+          # Linux x86_64 (GitHub-hosted, Ubuntu 24.04)
           - os: ubuntu-latest
             arch: x64
-          - os: ubuntu-latest
+          # Linux arm64 (GitHub-hosted ARM runners, publicly available since 2025-01)
+          - os: ubuntu-24.04-arm
             arch: arm64
-          # macOS builds  
+          # macOS arm64 (macos-latest is Apple Silicon since macos-14)
           - os: macos-latest
+            arch: arm64
+          # macOS x86_64 pinned to macos-13 to keep coverage on Intel hardware
+          - os: macos-13
             arch: x64
-          - os: macos-latest
-            arch: arm64
-    
+
     runs-on: ${{ matrix.os }}
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -32,29 +34,21 @@ jobs:
         submodules: recursive
 
     - name: Set up dependencies (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
+      if: startsWith(matrix.os, 'ubuntu-')
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake build-essential libssl-dev clang-format
 
     - name: Set up dependencies (macOS)
-      if: matrix.os == 'macos-latest'
+      if: startsWith(matrix.os, 'macos-')
       run: |
         brew install cmake openssl clang-format
 
-    - name: Configure CMake (Ubuntu/macOS)
-      if: matrix.os != 'windows-latest'
+    - name: Configure CMake
       run: |
         mkdir build
         cd build
         cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON -DCATAPULT_ENABLE_WERROR=ON ..
-
-    - name: Configure CMake (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        mkdir build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON -A ${{ matrix.arch == 'arm64' && 'ARM64' || 'x64' }} -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ..
 
     - name: Build
       run: |
