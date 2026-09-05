@@ -157,6 +157,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         tests/cwt_crypto.cpp
         tests/cwt_encode_decode.cpp
         tests/cwt_signing.cpp
+        tests/dpop.cpp
         tests/rfc8152_compliance.cpp
         tests/memory_pool.cpp
         tests/moqt_claims.cpp
