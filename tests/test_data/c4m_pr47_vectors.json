@@ -1,0 +1,706 @@
+{
+  "description": "CAT-4-MOQT interoperability test vectors (imported from draft-ietf-moq-c4m PR #47).",
+  "source_pr": "https://github.com/moq-wg/CAT-4-MOQT/pull/47",
+  "source_commit": "e1514280bbf84d71e255f72b8435f01693c78fab",
+  "keys": {
+    "es256_private_key": "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721",
+    "es256_public_key_x": "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+    "es256_public_key_y": "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+    "hmac_sha256": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  },
+  "vectors": {
+    "cbor_encoding": [
+      {
+        "id": "cbor_issuer_only",
+        "description": "Minimaltokenwithonlyissuerclaim",
+        "claims": {
+          "iss": "https://auth.example.com"
+        },
+        "payload_cbor_hex": "a101781868747470733a2f2f617574682e6578616d706c652e636f6d"
+      },
+      {
+        "id": "cbor_core_claims",
+        "description": "AllcoreCWTclaims(iss,aud,exp,nbf,cti)",
+        "claims": {
+          "iss": "https://auth.example.com",
+          "aud": [
+            "https://relay.example.com"
+          ],
+          "exp": 1700086400,
+          "nbf": 1700000000,
+          "cti": "test-token-001"
+        },
+        "payload_cbor_hex": "a501781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280051a6553f100074e746573742d746f6b656e2d303031"
+      },
+      {
+        "id": "cbor_cat_version_uri",
+        "description": "CATversion(uint1)andURImatchrule",
+        "claims": {
+          "catv": 1,
+          "catu": {
+            "host": "example.com"
+          }
+        },
+        "payload_cbor_hex": "a219013601190138a101a1006b6578616d706c652e636f6d"
+      },
+      {
+        "id": "cbor_network_identifiers",
+        "description": "Networkidentifiers:IP,CIDR,ASN,ASNrange",
+        "claims": {
+          "catnip": [
+            {
+              "type": "ip_address",
+              "value": "192.168.1.100"
+            },
+            {
+              "type": "ip_range",
+              "value": "10.0.0.0/8"
+            },
+            {
+              "type": "asn",
+              "value": 64512
+            },
+            {
+              "type": "asn_range",
+              "value": [
+                64512,
+                64768
+              ]
+            }
+          ]
+        },
+        "payload_cbor_hex": "a119013784d83444c0a80164d834a108410a19fc008219fc0019fd00"
+      },
+      {
+        "id": "cbor_geographic_claims",
+        "description": "Geographicclaims:coordinates,geohash,ISO3166,altitude",
+        "claims": {
+          "geohash": "9q8yyk",
+          "catgeoiso3166": [
+            "US",
+            "CA"
+          ],
+          "catgeocoord": {
+            "lat": 37.7749,
+            "lon": -122.4194,
+            "accuracy": 100.0
+          },
+          "catgeoalt": 10
+        },
+        "payload_cbor_hex": "a419011a6639713879796b19013c8262555362434119013d8183fb4042e32fec56d5d0fbc05e9ad77318fc50186419013e820a05"
+      },
+      {
+        "id": "cbor_uri_match_rules",
+        "description": "URImatchrules:hostexact,pathprefix,extensionexact",
+        "claims": {
+          "catu": [
+            {
+              "component": "host",
+              "match": "exact",
+              "value": "example.com"
+            },
+            {
+              "component": "path",
+              "match": "prefix",
+              "value": "/vod/"
+            },
+            {
+              "component": "extension",
+              "match": "exact",
+              "value": "m3u8"
+            }
+          ]
+        },
+        "payload_cbor_hex": "a1190138a301a1006b6578616d706c652e636f6d03a101652f766f642f08a100646d337538"
+      },
+      {
+        "id": "cbor_alpn",
+        "description": "ALPNprotocolidentifiers",
+        "claims": {
+          "catalpn": [
+            "moq-00",
+            "h3"
+          ]
+        },
+        "payload_cbor_hex": "a119013a82466d6f712d3030426833"
+      }
+    ],
+    "token_structure": [
+      {
+        "id": "token_hmac_minimal",
+        "description": "MinimalCOSE_Mac0tokensignedwithHMAC-SHA256",
+        "algorithm": "HMAC-SHA256",
+        "algorithm_id": 5,
+        "claims": {
+          "iss": "https://auth.example.com",
+          "aud": [
+            "https://relay.example.com"
+          ],
+          "exp": 1700086400
+        },
+        "header_cbor_hex": "a201051063434154",
+        "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280",
+        "tag_hex": "16ca16a2d4e2476528ae858d91b00f257a507fe57284bfb13d7d6ca1f065e230",
+        "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "cose_hex": "d18448a201051063434154a0583fa301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280582016ca16a2d4e2476528ae858d91b00f257a507fe57284bfb13d7d6ca1f065e230",
+        "cose_b64": "0YRIogEFEGNDQVSgWD-jAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoBYIBbKFqLU4kdlKK6FjZGwDyV6UH_lcoS_sT19bKHwZeIw",
+        "valid": true,
+        "expected_mac0_tag_hex": "16ca16a2d4e2476528ae858d91b00f257a507fe57284bfb13d7d6ca1f065e230"
+      },
+      {
+        "id": "token_hmac_full",
+        "description": "COSE_Mac0tokenwithcore+CAT+informationalclaims,HMAC-SHA256",
+        "algorithm": "HMAC-SHA256",
+        "algorithm_id": 5,
+        "claims": {
+          "iss": "https://issuer.moq.example",
+          "sub": "user:alice@example.com",
+          "aud": [
+            "https://relay1.example.com",
+            "https://relay2.example.com"
+          ],
+          "exp": 1700086400,
+          "nbf": 1700000000,
+          "iat": 1700000000,
+          "cti": "vector-002",
+          "catv": 1,
+          "catnip": [
+            {
+              "type": "ip_address",
+              "value": "203.0.113.50"
+            }
+          ],
+          "catu": {
+            "path": "/live/"
+          }
+        },
+        "header_cbor_hex": "a201051063434154",
+        "payload_cbor_hex": "aa01781a68747470733a2f2f6973737565722e6d6f712e6578616d706c650276757365723a616c696365406578616d706c652e636f6d0382781a68747470733a2f2f72656c6179312e6578616d706c652e636f6d781a68747470733a2f2f72656c6179322e6578616d706c652e636f6d041a65554280051a6553f100061a6553f100074a766563746f722d3030321901360119013781d83444cb007132190138a103a101662f6c6976652f",
+        "tag_hex": "29c1a6612ce6d49273fd8c0116b9decbc287662d5ba5d67defafaf6ff0c11278",
+        "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "cose_hex": "d18448a201051063434154a058abaa01781a68747470733a2f2f6973737565722e6d6f712e6578616d706c650276757365723a616c696365406578616d706c652e636f6d0382781a68747470733a2f2f72656c6179312e6578616d706c652e636f6d781a68747470733a2f2f72656c6179322e6578616d706c652e636f6d041a65554280051a6553f100061a6553f100074a766563746f722d3030321901360119013781d83444cb007132190138a103a101662f6c6976652f582029c1a6612ce6d49273fd8c0116b9decbc287662d5ba5d67defafaf6ff0c11278",
+        "cose_b64": "0YRIogEFEGNDQVSgWKuqAXgaaHR0cHM6Ly9pc3N1ZXIubW9xLmV4YW1wbGUCdnVzZXI6YWxpY2VAZXhhbXBsZS5jb20DgngaaHR0cHM6Ly9yZWxheTEuZXhhbXBsZS5jb214Gmh0dHBzOi8vcmVsYXkyLmV4YW1wbGUuY29tBBplVUKABRplU_EABhplU_EAB0p2ZWN0b3ItMDAyGQE2ARkBN4HYNETLAHEyGQE4oQOhAWYvbGl2ZS9YICnBpmEs5tSSc_2MARa53svCh2YtW6XWfe-vr2_wwRJ4",
+        "valid": true,
+        "expected_mac0_tag_hex": "29c1a6612ce6d49273fd8c0116b9decbc287662d5ba5d67defafaf6ff0c11278"
+      },
+      {
+        "id": "token_es256",
+        "description": "COSE_Sign1tokensignedwithES256(P-256ECDSA,deterministicRFC6979)",
+        "algorithm": "ES256",
+        "algorithm_id": -7,
+        "claims": {
+          "iss": "https://auth.example.com",
+          "aud": [
+            "https://moq-relay.example.com"
+          ],
+          "exp": 1700086400,
+          "nbf": 1700000000
+        },
+        "header_cbor_hex": "a201261063434154",
+        "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d0381781d68747470733a2f2f6d6f712d72656c61792e6578616d706c652e636f6d041a65554280051a6553f100",
+        "signature_hex": "ed8cf586f32ba410f2b3097642eb32255c8dc555e9e058c48084809df557887bc5ee4974a9ef5c4557c1557de799628b634cafaa1b74c936968e0c9c3a48f222",
+        "private_key_hex": "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721",
+        "public_key_x_hex": "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+        "public_key_y_hex": "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+        "cose_hex": "d28448a201261063434154a05849a401781868747470733a2f2f617574682e6578616d706c652e636f6d0381781d68747470733a2f2f6d6f712d72656c61792e6578616d706c652e636f6d041a65554280051a6553f1005840ed8cf586f32ba410f2b3097642eb32255c8dc555e9e058c48084809df557887bc5ee4974a9ef5c4557c1557de799628b634cafaa1b74c936968e0c9c3a48f222",
+        "cose_b64": "0oRIogEmEGNDQVSgWEmkAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4HWh0dHBzOi8vbW9xLXJlbGF5LmV4YW1wbGUuY29tBBplVUKABRplU_EAWEDtjPWG8yukEPKzCXZC6zIlXI3FVengWMSAhICd9VeIe8XuSXSp71xFV8FVfeeZYotjTK-qG3TJNpaODJw6SPIi",
+        "valid": true,
+        "expected_mac0_tag_hex": "230166230d7dd94224779a01f4cf90ca024e2b3c341d45876af12d5079c9f3d0"
+      }
+    ],
+    "dpop_binding": [
+      {
+        "id": "dpop_jwk_binding",
+        "description": "TokenwithDPoPkeybinding(JWKthumbprintincnfclaim)",
+        "dpop": {
+          "cnf_jkt_hex": "a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1",
+          "window_seconds": 60,
+          "honor_jti": true
+        },
+        "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a11901435820a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1190141a200183c0101",
+        "cose_hex": "d18448a201051063434154a05852a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a11901435820a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1190141a200183c010158203566b86cfff58bbafc41f95a4ae21de501a16cabe0a4b15086940bfb8fea92d9",
+        "cose_b64": "0YRIogEFEGNDQVSgWFKkAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKACKEZAUNYIKCxwtPk9aa3yNng8aKzxNXm96i5wNHi86S1xtfo-aCxGQFBogAYPAEBWCA1Zrhs__WLuvxB-VpK4h3lAaFsq-CksVCGlAv7j-qS2Q"
+      },
+      {
+        "id": "dpop_no_jti",
+        "description": "DPoPbindingwithlongerwindow,JTIprocessingdisabled",
+        "dpop": {
+          "cnf_jkt_hex": "3c82dfd6358ba804bd90879c34e743bbe13aeab7980664944f37a0ec0063fe95",
+          "cnf_jkt_source": "SHA-256of'test-public-key-material'",
+          "window_seconds": 300,
+          "honor_jti": false
+        },
+        "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a119014358203c82dfd6358ba804bd90879c34e743bbe13aeab7980664944f37a0ec0063fe95190141a20019012c0100",
+        "cose_hex": "d18448a201051063434154a05853a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a119014358203c82dfd6358ba804bd90879c34e743bbe13aeab7980664944f37a0ec0063fe95190141a20019012c01005820ecb7a5b5667b95f20c673417718eac9f5d997fd427485942a61048cdd8c50e0c",
+        "cose_b64": "0YRIogEFEGNDQVSgWFOkAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKACKEZAUNYIDyC39Y1i6gEvZCHnDTnQ7vhOuq3mAZklE83oOwAY_6VGQFBogAZASwBAFgg7LeltWZ7lfIMZzQXcY6sn12Zf9QnSFlCphBIzdjFDgw"
+      },
+      {
+        "id": "dpop_es256_real_binding",
+        "description": "ES256tokenwithrealJWKthumbprintbindingtothesigningkey",
+        "algorithm": "ES256",
+        "jwk_thumbprint_input": "{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\"YP7UuiVanTHJYet0xjVtaMBJuJI7Yfps5mliLmDyn7Y\",\"y\":\"eQP-EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk\"}",
+        "dpop": {
+          "cnf_jkt_hex": "0cebf1bc9880748a95588905b79843b42ba75cb174055e3e246bf87fe00b4a6d",
+          "window_seconds": 120,
+          "honor_jti": null
+        },
+        "public_key_x_hex": "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+        "public_key_y_hex": "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+        "payload_cbor_hex": "a501781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a6555428008a119014358200cebf1bc9880748a95588905b79843b42ba75cb174055e3e246bf87fe00b4a6d190141a1001878",
+        "cose_hex": "d28448a201261063434154a0586da501781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a6555428008a119014358200cebf1bc9880748a95588905b79843b42ba75cb174055e3e246bf87fe00b4a6d190141a10018785840cdb69dc3db876b1d05a8f808e5286a861026fc8b58b9a9aa97f23bdf0253ff56357f9129ee9b09667701357c8d700721b3029928d4fe573d56a88744dce04f82",
+        "cose_b64": "0oRIogEmEGNDQVSgWG2lAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoAIoRkBQ1ggDOvxvJiAdIqVWIkFt5hDtCunXLF0BV4-JGv4f-ALSm0ZAUGhABh4WEDNtp3D24drHQWo-AjlKGqGECb8i1i5qaqX8jvfAlP_VjV_kSnumwlmdwE1fI1wByGzApko1P5XPVaoh0Tc4E-C"
+      }
+    ],
+    "moqt_scopes": [
+      {
+        "id": "moqt_publisher_exact",
+        "description": "Publisherscope:exactnamespacematch,prefixtrackmatch",
+        "moqt_scopes": [
+          {
+            "actions": [
+              2,
+              6
+            ],
+            "action_names": [
+              "PublishNamespace",
+              "Publish"
+            ],
+            "namespace_matches": [
+              {
+                "type": "exact",
+                "pattern_utf8": "example.com",
+                "pattern_hex": "6578616d706c652e636f6d"
+              },
+              {
+                "type": "exact",
+                "pattern_utf8": "alice",
+                "pattern_hex": "616c696365"
+              }
+            ],
+            "track_match": {
+              "type": "prefix",
+              "pattern_utf8": "video-",
+              "pattern_hex": "766964656f2d"
+            }
+          }
+        ],
+        "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542801901478183820206824b6578616d706c652e636f6d45616c696365820146766964656f2d",
+        "cose_hex": "d18448a201051063434154a05846a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542801901478183820206824b6578616d706c652e636f6d45616c696365820146766964656f2d5820e6ef1eb0edbd76e780a9e46f7077edcab091b55d7991aa9c1ba5d2b17711e59a",
+        "cose_b64": "0YRIogEFEGNDQVSgWEajAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAGQFHgYOCAgaCS2V4YW1wbGUuY29tRWFsaWNlggFGdmlkZW8tWCDm7x6w7b1254Cp5G9wd-3KsJG1XXmRqpwbpdKxdxHlmg",
+        "authorization_tests": [
+          {
+            "action": 2,
+            "namespace": [
+              "example.com",
+              "alice"
+            ],
+            "track": "video-hd",
+            "expected": true
+          },
+          {
+            "action": 6,
+            "namespace": [
+              "example.com",
+              "alice"
+            ],
+            "track": "video-sd",
+            "expected": true
+          },
+          {
+            "action": 6,
+            "namespace": [
+              "example.com",
+              "alice"
+            ],
+            "track": "audio-main",
+            "expected": false
+          },
+          {
+            "action": 4,
+            "namespace": [
+              "example.com",
+              "alice"
+            ],
+            "track": "video-hd",
+            "expected": false
+          },
+          {
+            "action": 6,
+            "namespace": [
+              "example.com",
+              "bob"
+            ],
+            "track": "video-hd",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "id": "moqt_subscriber_prefix",
+        "description": "Subscriberscope:prefixnamespacematch,anytrack",
+        "moqt_scopes": [
+          {
+            "actions": [
+              3,
+              4,
+              7
+            ],
+            "action_names": [
+              "SubscribeNamespace",
+              "Subscribe",
+              "Fetch"
+            ],
+            "namespace_matches": [
+              {
+                "type": "prefix",
+                "pattern_utf8": "conference.example",
+                "pattern_hex": "636f6e666572656e63652e6578616d706c65"
+              }
+            ],
+            "track_match": null
+          }
+        ],
+        "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014781828303040781820152636f6e666572656e63652e6578616d706c65",
+        "cose_hex": "d18448a201051063434154a05841a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014781828303040781820152636f6e666572656e63652e6578616d706c655820a517009dece13f143b06cd1f9e5fd861a29338174b77ed7c0d0478f1bc55fea2",
+        "cose_b64": "0YRIogEFEGNDQVSgWEGjAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAGQFHgYKDAwQHgYIBUmNvbmZlcmVuY2UuZXhhbXBsZVggpRcAnezhPxQ7Bs0fnl_YYaKTOBdLd-18DQR48bxV_qI",
+        "authorization_tests": [
+          {
+            "action": 4,
+            "namespace": [
+              "conference.example.room1"
+            ],
+            "track": "audio",
+            "expected": true
+          },
+          {
+            "action": 7,
+            "namespace": [
+              "conference.example.room2"
+            ],
+            "track": "video",
+            "expected": true
+          },
+          {
+            "action": 4,
+            "namespace": [
+              "other.domain"
+            ],
+            "track": "audio",
+            "expected": false
+          },
+          {
+            "action": 6,
+            "namespace": [
+              "conference.example.room1"
+            ],
+            "track": "audio",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "id": "moqt_multi_scope",
+        "description": "Multi-scopetoken:publishtospecificnamespace,subscribetoprefix,withrevalidation",
+        "moqt_reval": 300.0,
+        "moqt_scopes": [
+          {
+            "actions": [
+              2,
+              6
+            ],
+            "action_names": [
+              "PublishNamespace",
+              "Publish"
+            ],
+            "namespace_matches": [
+              {
+                "type": "exact",
+                "pattern_utf8": "live.example",
+                "pattern_hex": "6c6976652e6578616d706c65"
+              },
+              {
+                "type": "exact",
+                "pattern_utf8": "studio-a",
+                "pattern_hex": "73747564696f2d61"
+              }
+            ],
+            "track_match": null
+          },
+          {
+            "actions": [
+              4,
+              7
+            ],
+            "action_names": [
+              "Subscribe",
+              "Fetch"
+            ],
+            "namespace_matches": [
+              {
+                "type": "prefix",
+                "pattern_utf8": "live.example",
+                "pattern_hex": "6c6976652e6578616d706c65"
+              }
+            ],
+            "track_match": null
+          }
+        ],
+        "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542801901478282820206824c6c6976652e6578616d706c654873747564696f2d61828204078182014c6c6976652e6578616d706c6519014819012c",
+        "cose_hex": "d18448a201051063434154a0585ba401781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542801901478282820206824c6c6976652e6578616d706c654873747564696f2d61828204078182014c6c6976652e6578616d706c6519014819012c58204d0c6f8c520acc9647637833b1773a2bad38595a261f3cdddfcf6edecf312b4e",
+        "cose_b64": "0YRIogEFEGNDQVSgWFukAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAGQFHgoKCAgaCTGxpdmUuZXhhbXBsZUhzdHVkaW8tYYKCBAeBggFMbGl2ZS5leGFtcGxlGQFIGQEsWCBNDG-MUgrMlkdjeDOxdzorrThZWiYfPN3fz27ezzErTg",
+        "authorization_tests": [
+          {
+            "action": 6,
+            "namespace": [
+              "live.example",
+              "studio-a"
+            ],
+            "track": "cam1",
+            "expected": true
+          },
+          {
+            "action": 4,
+            "namespace": [
+              "live.example.studio-b"
+            ],
+            "track": "cam1",
+            "expected": true
+          },
+          {
+            "action": 6,
+            "namespace": [
+              "live.example",
+              "studio-b"
+            ],
+            "track": "cam1",
+            "expected": false
+          },
+          {
+            "action": 2,
+            "namespace": [
+              "other.example",
+              "studio-a"
+            ],
+            "track": "",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "id": "moqt_admin_wildcard",
+        "description": "Adminscope:allactions,nonamespace/trackrestriction",
+        "moqt_scopes": [
+          {
+            "actions": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8
+            ],
+            "action_names": [
+              "ClientSetup",
+              "ServerSetup",
+              "PublishNamespace",
+              "SubscribeNamespace",
+              "Subscribe",
+              "RequestUpdate",
+              "Publish",
+              "Fetch",
+              "TrackStatus"
+            ],
+            "namespace_matches": [],
+            "track_match": null
+          }
+        ],
+        "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a65554280190147818189000102030405060708",
+        "cose_hex": "d18448a201051063434154a05831a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014781818900010203040506070858202bacff08b2be7762aa9ec246bbf0c2d8e12b05e14a7bf5b73f85c89f7d6d61fd",
+        "cose_b64": "0YRIogEFEGNDQVSgWDGjAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAGQFHgYGJAAECAwQFBgcIWCArrP8Isr53Yqqewka78MLY4SsF4Up79bc_hciffW1h_Q",
+        "authorization_tests": [
+          {
+            "action": 0,
+            "namespace": [
+              "any.namespace"
+            ],
+            "track": "any-track",
+            "expected": true
+          },
+          {
+            "action": 6,
+            "namespace": [
+              "any.namespace"
+            ],
+            "track": "any-track",
+            "expected": true
+          },
+          {
+            "action": 8,
+            "namespace": [
+              "any.namespace"
+            ],
+            "track": "status",
+            "expected": true
+          }
+        ]
+      },
+      {
+        "id": "moqt_suffix_match",
+        "description": "Suffixmatchingonbothnamespaceandtrack",
+        "moqt_scopes": [
+          {
+            "actions": [
+              4
+            ],
+            "action_names": [
+              "Subscribe"
+            ],
+            "namespace_matches": [
+              {
+                "type": "suffix",
+                "pattern_utf8": ".example.com",
+                "pattern_hex": "2e6578616d706c652e636f6d"
+              }
+            ],
+            "track_match": {
+              "type": "suffix",
+              "pattern_utf8": "-audio",
+              "pattern_hex": "2d617564696f"
+            }
+          }
+        ],
+        "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a65554280190147818381048182024c2e6578616d706c652e636f6d8202462d617564696f",
+        "cose_hex": "d18448a201051063434154a05842a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a65554280190147818381048182024c2e6578616d706c652e636f6d8202462d617564696f58206fa8148350e44c3bae4c92753fd292c358776beacb6866a4c6738d80a51b9cd8",
+        "cose_b64": "0YRIogEFEGNDQVSgWEKjAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAGQFHgYOBBIGCAkwuZXhhbXBsZS5jb22CAkYtYXVkaW9YIG-oFINQ5Ew7rkySdT_SksNYd2vqy2hmpMZzjYClG5zY",
+        "authorization_tests": [
+          {
+            "action": 4,
+            "namespace": [
+              "cdn.example.com"
+            ],
+            "track": "stream1-audio",
+            "expected": true
+          },
+          {
+            "action": 4,
+            "namespace": [
+              "cdn.example.com"
+            ],
+            "track": "stream1-video",
+            "expected": false
+          },
+          {
+            "action": 4,
+            "namespace": [
+              "cdn.other.org"
+            ],
+            "track": "stream1-audio",
+            "expected": false
+          }
+        ]
+      }
+    ],
+    "validation": [
+      {
+        "id": "valid_basic",
+        "description": "Validtokenwithcorrectissuer,audience,andtimebounds",
+        "token": "0YRIogEFEGNDQVSgWEWkAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoAFGmVT8QBYIP30vfENhlwaLMuZjMPeYXjz8QWuqCDlyzStGQVQ4_xi",
+        "validation": {
+          "reference_time": 1700003600,
+          "expected_issuers": [
+            "https://auth.example.com"
+          ],
+          "expected_audiences": [
+            "https://relay.example.com"
+          ],
+          "expected_result": "valid"
+        }
+      },
+      {
+        "id": "invalid_expired",
+        "description": "Tokenwithexpirationinthepast",
+        "token": "0YRIogEFEGNDQVSgWCKiAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBpfXhAAWCDNInUDQ2qsHo8l8Gj0tzb1HIYIpBheVbVoItgT7Ua6aA",
+        "validation": {
+          "reference_time": 1700000000,
+          "expected_result": "error",
+          "expected_error": "TokenExpired"
+        }
+      },
+      {
+        "id": "invalid_not_yet_valid",
+        "description": "Tokenwithnot-beforeinthefuture",
+        "token": "0YRIogEFEGNDQVSgWCijAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVpQABRplVUKAWCArREpqUH1KiIrMzevyeLr6t_y-L6oheaJGUU9hwhYRbg",
+        "validation": {
+          "reference_time": 1700000000,
+          "expected_result": "error",
+          "expected_error": "TokenNotYetValid"
+        }
+      },
+      {
+        "id": "invalid_wrong_issuer",
+        "description": "Tokenfromuntrustedissuer",
+        "token": "0YRIogEFEGNDQVSgWD-jAXgYaHR0cHM6Ly9ldmlsLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoBYIOmQtbjAMxCnCDlMbHiF-XZlN1SV6QSqkZWTguttCpaC",
+        "validation": {
+          "reference_time": 1700003600,
+          "expected_issuers": [
+            "https://auth.example.com"
+          ],
+          "expected_result": "error",
+          "expected_error": "InvalidIssuer"
+        }
+      },
+      {
+        "id": "invalid_wrong_audience",
+        "description": "Tokennotintendedforthisaudience",
+        "token": "0YRIogEFEGNDQVSgWEWjAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4H2h0dHBzOi8vb3RoZXItcmVsYXkuZXhhbXBsZS5jb20EGmVVQoBYIOeCJJJNAkaNHBBkOdcSFVXKNNj0D8GdGkLmOriIB2pX",
+        "validation": {
+          "reference_time": 1700003600,
+          "expected_issuers": [
+            "https://auth.example.com"
+          ],
+          "expected_audiences": [
+            "https://relay.example.com"
+          ],
+          "expected_result": "error",
+          "expected_error": "InvalidAudience"
+        }
+      },
+      {
+        "id": "invalid_tampered_signature",
+        "description": "COSE_Mac0tokenwithcorruptedtag(firstbyteflipped)",
+        "original_cose_hex": "d18448a201051063434154a0583fa301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280582016ca16a2d4e2476528ae858d91b00f257a507fe57284bfb13d7d6ca1f065e230",
+        "token": "0YRIogEFEGNDQVSgWD-jAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoBYIOnKFqLU4kdlKK6FjZGwDyV6UH_lcoS_sT19bKHwZeIw",
+        "validation": {
+          "expected_result": "error",
+          "expected_error": "SignatureVerificationFailed",
+          "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        }
+      },
+      {
+        "id": "invalid_wrong_key",
+        "description": "Tokenverifiedwithincorrectkey",
+        "token": "0YRIogEFEGNDQVSgWCKiAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAWCCqD2TUB2jOEalC6kta2ptR7vx6flZ0I9L0RV3MCbZ-Aw",
+        "validation": {
+          "correct_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "wrong_key_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "expected_result": "error",
+          "expected_error": "SignatureVerificationFailed"
+        }
+      },
+      {
+        "id": "invalid_algorithm_mismatch",
+        "description": "COSE_Mac0tokenbutverifierexpectsCOSE_Sign1/ES256",
+        "token": "0YRIogEFEGNDQVSgWCKiAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAWCCqD2TUB2jOEalC6kta2ptR7vx6flZ0I9L0RV3MCbZ-Aw",
+        "validation": {
+          "token_algorithm_id": 5,
+          "verifier_algorithm_id": -7,
+          "expected_result": "error",
+          "expected_error": "InvalidTokenFormat"
+        }
+      }
+    ]
+  }
+}

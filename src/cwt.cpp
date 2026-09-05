@@ -2067,6 +2067,16 @@ CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
     throw InvalidCborError("Failed to parse COSE structure");
   }
 
+  // Peel a COSE tag (16/17/18) if present — see validateCwt for rationale.
+  if (cbor_isa_tag(coseItem.get())) {
+    const uint64_t tagValue = cbor_tag_value(coseItem.get());
+    if (tagValue != 16 && tagValue != 17 && tagValue != 18) {
+      throw InvalidTokenFormatError();
+    }
+    CborItemPtr innerOwned(cbor_tag_item(coseItem.get()));
+    coseItem = std::move(innerOwned);
+  }
+
   if (!cbor_isa_array(coseItem.get())) {
     throw InvalidTokenFormatError();
   }
@@ -2139,12 +2149,30 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
   try {
     CAT_LOG_DEBUG("Validating CWT token of {} bytes", cwtBytes.size());
 
-    // Parse COSE structure from raw CBOR bytes (RFC 8392 Section 9.2)
+    // Parse COSE structure from raw CBOR bytes (RFC 8392 Section 9.2).
+    // Accept both the tagged and untagged forms: RFC 8152 registers
+    // COSE_Sign1 (tag 18), COSE_Mac0 (tag 17), and COSE_Encrypt0 (tag 16),
+    // and CAT-4-MOQT (draft-ietf-moq-c4m) test vectors are emitted with
+    // the tag. Peel the tag if present so the inner array is uniformly
+    // dispatched by size below; require the tag number to be one of the
+    // three registered COSE single-recipient types when present.
     struct cbor_load_result result;
     auto coseItem = cbor_load_owned(cwtBytes, result);
 
     if (result.error.code != CBOR_ERR_NONE || !coseItem) {
       throw InvalidCborError("Failed to parse COSE structure");
+    }
+
+    if (cbor_isa_tag(coseItem.get())) {
+      const uint64_t tagValue = cbor_tag_value(coseItem.get());
+      if (tagValue != 16 && tagValue != 17 && tagValue != 18) {
+        throw InvalidTokenFormatError();
+      }
+      cbor_item_t* inner = cbor_tag_item(coseItem.get());
+      // cbor_tag_item returns an owned reference; wrap it before releasing
+      // the tag so ownership is single-rooted.
+      CborItemPtr innerOwned(inner);
+      coseItem = std::move(innerOwned);
     }
 
     if (!cbor_isa_array(coseItem.get())) {
