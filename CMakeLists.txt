@@ -17,10 +17,25 @@ find_package(OpenSSL REQUIRED)
 # Align libcbor's sanitizer option with ours
 set(SANITIZE ${CATAPULT_ENABLE_SANITIZERS} CACHE BOOL "" FORCE)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+
+# libcbor: only the static `cbor` target is linked into catapult. Its
+# defaults would build ~10 example binaries and emit install rules for
+# headers and pkg-config; force them off so an in-tree rebuild does not
+# spend time on artefacts we never ship.
+set(WITH_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(WITH_TESTS OFF CACHE BOOL "" FORCE)
+set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON CACHE BOOL "" FORCE)
 add_subdirectory(external/libcbor)
 
 if(CATAPULT_ENABLE_JSON)
     if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND NOT TARGET nlohmann_json::nlohmann_json)
+        # nlohmann_json is header-only (INTERFACE) so the compiled bloat is
+        # already zero, but its own CMake exposes JSON_BuildTests /
+        # JSON_Install knobs whose defaults track MAIN_PROJECT. Pin them off
+        # so a parent build that flips MAIN_PROJECT (or a future upstream
+        # default change) cannot silently pull tests or install rules in.
+        set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+        set(JSON_Install OFF CACHE BOOL "" FORCE)
         add_subdirectory(external/nlohmann_json)
     endif()
 endif()
@@ -72,8 +87,16 @@ target_include_directories(catapult
 
 # Add spdlog if logging is enabled
 if(ENABLE_LOGGING)
-    # Add spdlog as submodule if not already added
+    # Add spdlog as submodule if not already added. Its defaults for
+    # tests/bench/example/install/shared already resolve to OFF via
+    # SPDLOG_MASTER_PROJECT, but pin them explicitly so a parent build or
+    # a future upstream default cannot silently reintroduce those targets.
     if(NOT TARGET spdlog::spdlog)
+        set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+        set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+        set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+        set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
         add_subdirectory(external/spdlog)
     endif()
     target_link_libraries(catapult spdlog::spdlog)
@@ -157,13 +180,23 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     # Enable testing
     enable_testing()
 
-    # Add Doctest
+    # Add Doctest. Its own examples/tests default off when it is a
+    # submodule (via MAIN_PROJECT), but DOCTEST_NO_INSTALL defaults OFF —
+    # skip its install() rules so `cmake --install` reflects catapult only.
     if(NOT TARGET doctest::doctest)
+        set(DOCTEST_WITH_TESTS OFF CACHE BOOL "" FORCE)
+        set(DOCTEST_NO_INSTALL ON CACHE BOOL "" FORCE)
         add_subdirectory(external/doctest)
     endif()
 
-    # Add spdlog if logging is enabled and not already added
+    # Add spdlog if logging is enabled and not already added. Guards match
+    # the earlier block; both may run depending on how catapult is embedded.
     if(ENABLE_LOGGING AND NOT TARGET spdlog::spdlog)
+        set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+        set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+        set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+        set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
         add_subdirectory(external/spdlog)
     endif()
 
