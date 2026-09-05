@@ -590,20 +590,19 @@ TEST_CASE("ValidatorNegativeTests - Geographic Validation") {
         REQUIRE_THROWS_AS(validator.validate(invalidLonToken2), GeographicValidationError);
     }
     
-    SUBCASE("Invalid altitude values") {
-        // The current validator only checks lat/lon bounds, not altitude
-        // This test documents current behavior - altitude validation may be added later
-        auto negativeAltToken = CatToken()
+    SUBCASE("Invalid radius values") {
+        // Third arg to withGeoCoordinate is radius (metres), not altitude.
+        // Negative radius is nonsense; the validator now rejects it.
+        auto negativeRadiusToken = CatToken()
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"https://trusted-service.com"})
             .withExpiration(exp)
-            .withGeoCoordinate(0.0, 0.0, -20000.0) // Extreme negative altitude
-            .withCwtIdString("negative-alt-token");
-            
-            
+            .withGeoCoordinate(0.0, 0.0, -20000.0)
+            .withCwtIdString("negative-radius-token");
+
         CatTokenValidator validator;
-        // Current implementation doesn't validate altitude bounds
-        REQUIRE_NOTHROW(validator.validate(negativeAltToken));
+        REQUIRE_THROWS_AS(validator.validate(negativeRadiusToken),
+                          GeographicValidationError);
     }
     
     SUBCASE("Invalid geohash formats") {
@@ -640,6 +639,124 @@ TEST_CASE("ValidatorNegativeTests - Geographic Validation") {
 
         // This now throws because validator checks character set
         REQUIRE_THROWS_AS(validator.validate(invalidCharSetToken), GeographicValidationError);
+    }
+
+    SUBCASE("Non-finite coordinate values are rejected") {
+        // Range comparisons against NaN always yield false, so a plain
+        // `< -90 || > 90` bounds check would silently accept a NaN latitude.
+        const double nan_val = std::numeric_limits<double>::quiet_NaN();
+        const double inf_val = std::numeric_limits<double>::infinity();
+
+        CatTokenValidator validator;
+
+        auto nanLatToken = CatToken()
+            .withIssuer("https://trusted-issuer.com")
+            .withAudience({"https://trusted-service.com"})
+            .withExpiration(exp)
+            .withGeoCoordinate(nan_val, 0.0)
+            .withCwtIdString("nan-lat-token");
+        REQUIRE_THROWS_AS(validator.validate(nanLatToken),
+                          GeographicValidationError);
+
+        auto infLonToken = CatToken()
+            .withIssuer("https://trusted-issuer.com")
+            .withAudience({"https://trusted-service.com"})
+            .withExpiration(exp)
+            .withGeoCoordinate(0.0, inf_val)
+            .withCwtIdString("inf-lon-token");
+        REQUIRE_THROWS_AS(validator.validate(infLonToken),
+                          GeographicValidationError);
+
+        auto nanRadiusToken = CatToken()
+            .withIssuer("https://trusted-issuer.com")
+            .withAudience({"https://trusted-service.com"})
+            .withExpiration(exp)
+            .withGeoCoordinate(0.0, 0.0, nan_val)
+            .withCwtIdString("nan-radius-token");
+        REQUIRE_THROWS_AS(validator.validate(nanRadiusToken),
+                          GeographicValidationError);
+    }
+
+    SUBCASE("Excessive radius is rejected") {
+        // A radius > half the Earth's circumference (~2e7 m) is a meaningless
+        // "restriction" and typically indicates a producer bug or an attempt
+        // to widen the accepted zone beyond the planet.
+        auto oversizedRadiusToken = CatToken()
+            .withIssuer("https://trusted-issuer.com")
+            .withAudience({"https://trusted-service.com"})
+            .withExpiration(exp)
+            .withGeoCoordinate(0.0, 0.0, 3.0e7)
+            .withCwtIdString("oversized-radius-token");
+
+        CatTokenValidator validator;
+        REQUIRE_THROWS_AS(validator.validate(oversizedRadiusToken),
+                          GeographicValidationError);
+    }
+
+    SUBCASE("Altitude out of physical range is rejected") {
+        CatTokenValidator validator;
+
+        auto tooLowToken = CatToken()
+            .withIssuer("https://trusted-issuer.com")
+            .withAudience({"https://trusted-service.com"})
+            .withExpiration(exp)
+            .withGeoAltitude(GeoAltitude{-20000})
+            .withCwtIdString("altitude-too-low-token");
+        REQUIRE_THROWS_AS(validator.validate(tooLowToken),
+                          GeographicValidationError);
+
+        auto tooHighToken = CatToken()
+            .withIssuer("https://trusted-issuer.com")
+            .withAudience({"https://trusted-service.com"})
+            .withExpiration(exp)
+            .withGeoAltitude(GeoAltitude{600000})
+            .withCwtIdString("altitude-too-high-token");
+        REQUIRE_THROWS_AS(validator.validate(tooHighToken),
+                          GeographicValidationError);
+
+        auto negativeDeviationToken = CatToken()
+            .withIssuer("https://trusted-issuer.com")
+            .withAudience({"https://trusted-service.com"})
+            .withExpiration(exp)
+            .withGeoAltitude(GeoAltitude{0, -1})
+            .withCwtIdString("altitude-neg-dev-token");
+        REQUIRE_THROWS_AS(validator.validate(negativeDeviationToken),
+                          GeographicValidationError);
+
+        auto hugeDeviationToken = CatToken()
+            .withIssuer("https://trusted-issuer.com")
+            .withAudience({"https://trusted-service.com"})
+            .withExpiration(exp)
+            .withGeoAltitude(GeoAltitude{0, 600000})
+            .withCwtIdString("altitude-huge-dev-token");
+        REQUIRE_THROWS_AS(validator.validate(hugeDeviationToken),
+                          GeographicValidationError);
+    }
+
+    SUBCASE("Structured geohash array bounds") {
+        CatTokenValidator validator;
+
+        // Empty array wire-forms as a restriction but expresses none —
+        // reject rather than silently allow everywhere.
+        auto emptyArrayToken = CatToken()
+            .withIssuer("https://trusted-issuer.com")
+            .withAudience({"https://trusted-service.com"})
+            .withExpiration(exp)
+            .withGeohash(GeohashClaimValue{std::vector<std::string>{}})
+            .withCwtIdString("empty-gh-array-token");
+        REQUIRE_THROWS_AS(validator.validate(emptyArrayToken),
+                          GeographicValidationError);
+
+        // Array larger than the validator's cap of 64 alternatives.
+        std::vector<std::string> many(65, "9q8yy");
+        auto tooManyToken = CatToken()
+            .withIssuer("https://trusted-issuer.com")
+            .withAudience({"https://trusted-service.com"})
+            .withExpiration(exp)
+            .withGeohash(GeohashClaimValue{std::move(many)})
+            .withCwtIdString("too-many-gh-token");
+        REQUIRE_THROWS_AS(validator.validate(tooManyToken),
+                          GeographicValidationError);
     }
 }
 
