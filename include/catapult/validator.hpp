@@ -18,6 +18,60 @@ namespace catapult {
 
 // Forward declarations
 class CatToken;
+class CatTokenValidator;
+
+/**
+ * @brief Immutable, validated view of a CAT token.
+ *
+ * A `ValidatedCatToken` can only be produced by `CatTokenValidator::intoValidated`,
+ * which enforces every semantic check the validator performs. Once
+ * constructed, the underlying claims are read-only: callers cannot mutate
+ * fields around the checks that were applied.
+ *
+ * This addresses catapult_analysis M-01: parsed authorization objects must
+ * not expose mutable state that lets callers write invalid values after
+ * `build()` has done only structural validation. Relay code should prefer
+ * this type over passing a mutable `CatToken` around after validation.
+ *
+ * The token is stored by value, so `ValidatedCatToken` is move-only. It is
+ * safe to `const&`-share across threads.
+ */
+class ValidatedCatToken {
+ public:
+  ValidatedCatToken(const ValidatedCatToken&) = delete;
+  ValidatedCatToken& operator=(const ValidatedCatToken&) = delete;
+  ValidatedCatToken(ValidatedCatToken&&) noexcept = default;
+  ValidatedCatToken& operator=(ValidatedCatToken&&) noexcept = default;
+  ~ValidatedCatToken() = default;
+
+  const CoreClaims& core() const noexcept { return token_.core; }
+  const CatClaims& cat() const noexcept { return token_.cat; }
+  const InformationalClaims& informational() const noexcept {
+    return token_.informational;
+  }
+  const DpopClaims& dpop() const noexcept { return token_.dpop; }
+  const RequestClaims& request() const noexcept { return token_.request; }
+  const CompositeClaims& composite() const noexcept { return token_.composite; }
+  const ExtendedCatClaims& extended() const noexcept { return token_.extended; }
+  const std::unordered_map<int64_t, std::string>& custom() const noexcept {
+    return token_.custom;
+  }
+
+  /**
+   * @brief Access the underlying `CatToken` as an immutable reference.
+   *
+   * Retained for interop with APIs that take `const CatToken&`. Callers
+   * MUST NOT `const_cast` the reference — doing so re-introduces the M-01
+   * mutable-state hazard.
+   */
+  const CatToken& token() const noexcept { return token_; }
+
+ private:
+  friend class CatTokenValidator;
+  explicit ValidatedCatToken(CatToken token) noexcept
+      : token_(std::move(token)) {}
+  CatToken token_;
+};
 
 /**
  * @brief Validator for CAT tokens with configurable validation rules
@@ -65,6 +119,19 @@ class CatTokenValidator {
    * @throws Various CatError subclasses on validation failure
    */
   void validate(const CatToken& token) const;
+
+  /**
+   * @brief Validate a token and consume it into an immutable
+   *        `ValidatedCatToken`.
+   *
+   * On success the returned wrapper takes ownership of the claims and is the
+   * only handle from which they can be read. On failure the same exceptions
+   * as `validate()` are thrown; the caller loses the moved-from token, which
+   * is the intended contract — an invalid token has no defined content.
+   *
+   * @throws Various CatError subclasses on validation failure
+   */
+  [[nodiscard]] ValidatedCatToken intoValidated(CatToken token) const;
 
   /**
    * @brief Validate multiple typed composite claims using CompositeClaimType

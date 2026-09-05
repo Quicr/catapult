@@ -211,6 +211,14 @@ void CatTokenValidator::validateCompositeClaims(const CatToken& token) const {
   }
 }
 
+ValidatedCatToken CatTokenValidator::intoValidated(CatToken token) const {
+  // Run every semantic check first. If validate() throws, `token` is
+  // destroyed with the exception and no ValidatedCatToken is produced —
+  // callers cannot observe partially-validated state.
+  validate(token);
+  return ValidatedCatToken(std::move(token));
+}
+
 bool CatTokenValidator::validateTypedOrClaim(const OrClaim& orClaim) const {
   return validateTypedCompositeClaim(orClaim, *this);
 }
