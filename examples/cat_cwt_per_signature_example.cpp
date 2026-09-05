@@ -27,8 +27,13 @@ int main() {
     token.core.iss = "multi-alg-authority";
     token.core.aud = {"service-a", "service-b"};
     token.core.exp = 1234567890;
-    token.cat.catv = "2.0";
-    token.cat.catu = 100;
+    token.cat.catv = 2u;
+    {
+      CatUriMatchMap catu;
+      catu.components[3] =
+          UriComponentMatch{UriMatchType::Exact, {'/', 'a', 'p', 'i'}};
+      token.cat.catu = catu;
+    }
 
     CAT_LOG_INFO("Created CAT token with issuer: {}",
                  token.core.iss.value_or("none"));
@@ -91,9 +96,13 @@ int main() {
                      ? validatedCwt.payload.core.aud->size()
                      : 0);
     CAT_LOG_INFO("Decoded CAT version: {}",
-                 validatedCwt.payload.cat.catv.value_or("none"));
-    CAT_LOG_INFO("Decoded CAT usage: {}",
-                 validatedCwt.payload.cat.catu.value_or(0));
+                 validatedCwt.payload.cat.catv.has_value()
+                     ? std::to_string(*validatedCwt.payload.cat.catv)
+                     : std::string{"none"});
+    CAT_LOG_INFO("Decoded CAT usage components: {}",
+                 validatedCwt.payload.cat.catu.has_value()
+                     ? validatedCwt.payload.cat.catu->components.size()
+                     : 0);
 
     // Display validated signatures with their algorithm IDs
     CAT_LOG_INFO("Validated signatures:");

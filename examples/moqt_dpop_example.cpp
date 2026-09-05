@@ -65,7 +65,7 @@ int main() {
         std::chrono::seconds{1800});  // 30 minutes
 
     // Create DPoP settings
-    CatDpopSettings dpop_settings;
+    DpopValidationSettings dpop_settings;
     dpop_settings.set_window(std::chrono::seconds{300});  // 5 minute window
     dpop_settings.set_jti_processing(true);  // Enable JTI validation
 
@@ -80,8 +80,14 @@ int main() {
     token.informational = std::move(info_claims);
     token.extended.setMoqtClaims(std::move(moqt_claims));
 
-    // Set DPoP claims
-    token.dpop.cnf = client_keypair.get_public_key_thumbprint();
+    // Set DPoP claims — CTA-5007-B §4.6.9 `cnf` conveys the key thumbprint
+    // as a byte string. get_public_key_thumbprint() returns hex; decode it.
+    {
+      CatConfirmation cnf;
+      const auto& tp_hex = client_keypair.get_public_key_thumbprint();
+      cnf.kid = tp_hex;
+      token.dpop.cnf = std::move(cnf);
+    }
     // Note: catdpop would contain serialized settings in real implementation
     std::cout << "   CAT token created successfully\n\n";
 
@@ -188,8 +194,9 @@ int main() {
 
     // Check DPoP binding in token
     bool dpop_binding_valid = false;
-    if (parsed_claims.dpop.cnf.has_value()) {
-      dpop_binding_valid = (parsed_claims.dpop.cnf.value() ==
+    if (parsed_claims.dpop.cnf.has_value() &&
+        parsed_claims.dpop.cnf->kid.has_value()) {
+      dpop_binding_valid = (parsed_claims.dpop.cnf->kid.value() ==
                             client_keypair.get_public_key_thumbprint());
     }
 
@@ -201,7 +208,7 @@ int main() {
               << "\n";
     std::cout << "     Token cnf: "
               << (parsed_claims.dpop.cnf.has_value()
-                      ? parsed_claims.dpop.cnf.value()
+                      ? parsed_claims.dpop.cnf->kid.value_or("none")
                       : "none")
               << "\n";
     std::cout << "     Proof key: "

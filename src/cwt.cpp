@@ -170,30 +170,312 @@ class CborMapBuilder {
     addPair(std::move(key), std::move(val));
   }
 
+  // CTA-5007-B `catgeocoord`: array `[lat, lon, radius?]`. A missing radius
+  // is represented as the two-element form; producers MUST NOT emit a
+  // separate `accuracy` map key (that was the pre-1.3 shape).
   void addClaimImpl(int64_t claim_id, const GeoCoordinate& coord) {
     auto key = CborItemPtr(cbor_build_uint64(claim_id));
-    auto coord_map = CborItemPtr(cbor_new_definite_map(coord.accuracy ? 3 : 2));
-
-    // Add latitude
-    auto lat_key = CborItemPtr(cbor_build_string("lat"));
+    const size_t len = coord.radius.has_value() ? 3 : 2;
+    auto arr = cbor_new_definite_array_owned(len);
     auto lat_val = CborItemPtr(cbor_build_float8(coord.lat));
-    addPairToMap(coord_map.get(), std::move(lat_key), std::move(lat_val));
-
-    // Add longitude
-    auto lon_key = CborItemPtr(cbor_build_string("lon"));
-    auto lon_val = CborItemPtr(cbor_build_float8(coord.lon));
-    addPairToMap(coord_map.get(), std::move(lon_key), std::move(lon_val));
-
-    // Add accuracy if present
-    if (coord.accuracy) {
-      auto acc_key = CborItemPtr(cbor_build_string("accuracy"));
-      auto acc_val = CborItemPtr(cbor_build_float8(*coord.accuracy));
-      addPairToMap(coord_map.get(), std::move(acc_key), std::move(acc_val));
+    if (!cbor_array_push(arr.get(), lat_val.get())) {
+      throw InvalidCborError("Failed to push catgeocoord latitude");
     }
-
-    addPair(std::move(key), std::move(coord_map));
+    auto lon_val = CborItemPtr(cbor_build_float8(coord.lon));
+    if (!cbor_array_push(arr.get(), lon_val.get())) {
+      throw InvalidCborError("Failed to push catgeocoord longitude");
+    }
+    if (coord.radius.has_value()) {
+      auto rad_val = CborItemPtr(cbor_build_float8(*coord.radius));
+      if (!cbor_array_push(arr.get(), rad_val.get())) {
+        throw InvalidCborError("Failed to push catgeocoord radius");
+      }
+    }
+    addPair(std::move(key), std::move(arr));
   }
 
+  // CTA-5007-B `catgeoalt`: array `[altitude, deviation?]`.
+  void addClaimImpl(int64_t claim_id, const GeoAltitude& alt) {
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    const size_t len = alt.deviation.has_value() ? 2 : 1;
+    auto arr = cbor_new_definite_array_owned(len);
+    auto alt_val = CborItemPtr(cbor_build_uint64(
+        static_cast<uint64_t>(alt.altitude < 0 ? -alt.altitude : alt.altitude)));
+    // Negative altitudes encode as negints per RFC 8949; use the alg helper.
+    if (alt.altitude < 0) {
+      alt_val = CborItemPtr(cbor_build_negint64(
+          static_cast<uint64_t>(-(static_cast<int64_t>(alt.altitude) + 1))));
+    }
+    if (!cbor_array_push(arr.get(), alt_val.get())) {
+      throw InvalidCborError("Failed to push catgeoalt altitude");
+    }
+    if (alt.deviation.has_value()) {
+      const int32_t d = *alt.deviation;
+      auto dev_val = d >= 0
+                         ? CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(d)))
+                         : CborItemPtr(cbor_build_negint64(
+                               static_cast<uint64_t>(-(static_cast<int64_t>(d) + 1))));
+      if (!cbor_array_push(arr.get(), dev_val.get())) {
+        throw InvalidCborError("Failed to push catgeoalt deviation");
+      }
+    }
+    addPair(std::move(key), std::move(arr));
+  }
+
+  // CTA-5007-B `geohash`: either a text string or an array of strings.
+  void addClaimImpl(int64_t claim_id, const GeohashClaimValue& gh) {
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    if (gh.isString()) {
+      auto val = CborItemPtr(cbor_build_string(gh.asString().c_str()));
+      addPair(std::move(key), std::move(val));
+      return;
+    }
+    const auto& arr_val = gh.asArray();
+    auto arr = cbor_new_definite_array_owned(arr_val.size());
+    for (const auto& s : arr_val) {
+      auto item = CborItemPtr(cbor_build_string(s.c_str()));
+      if (!cbor_array_push(arr.get(), item.get())) {
+        throw InvalidCborError("Failed to push geohash entry");
+      }
+    }
+    addPair(std::move(key), std::move(arr));
+  }
+
+  // CTA-5007-B `catreplay`: unsigned integer mode (0/1/2/...).
+  void addClaimImpl(int64_t claim_id, CatReplayMode mode) {
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto val = CborItemPtr(
+        cbor_build_uint64(static_cast<uint64_t>(mode)));
+    addPair(std::move(key), std::move(val));
+  }
+
+  // CTA-5007-B `catpor`: [probability, identifier, ?expiry].
+  void addClaimImpl(int64_t claim_id, const CatProofOfPossession& por) {
+    if (!por.is_valid()) {
+      throw InvalidClaimValueError(
+          "'catpor' probability out of [0,1] or empty identifier");
+    }
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    const size_t len = por.expiry.has_value() ? 3 : 2;
+    auto arr = cbor_new_definite_array_owned(len);
+    auto prob = CborItemPtr(cbor_build_float8(por.probability));
+    if (!cbor_array_push(arr.get(), prob.get())) {
+      throw InvalidCborError("Failed to push catpor probability");
+    }
+    auto ident =
+        cbor_build_bytestring_owned(por.identifier.data(), por.identifier.size());
+    if (!cbor_array_push(arr.get(), ident.get())) {
+      throw InvalidCborError("Failed to push catpor identifier");
+    }
+    if (por.expiry.has_value()) {
+      const int64_t e = *por.expiry;
+      auto exp_val = e >= 0
+                         ? CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(e)))
+                         : CborItemPtr(cbor_build_negint64(
+                               static_cast<uint64_t>(-(e + 1))));
+      if (!cbor_array_push(arr.get(), exp_val.get())) {
+        throw InvalidCborError("Failed to push catpor expiry");
+      }
+    }
+    addPair(std::move(key), std::move(arr));
+  }
+
+  // CTA-5007-B `catnip`: array of tagged NIP entries.
+  void addClaimImpl(int64_t claim_id, const std::vector<CatNipEntry>& nips) {
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto arr = cbor_new_definite_array_owned(nips.size());
+    for (const auto& e : nips) {
+      auto val =
+          cbor_build_bytestring_owned(e.value.data(), e.value.size());
+      auto tagged = CborItemPtr(cbor_new_tag(e.tag));
+      cbor_tag_set_item(tagged.get(), val.get());
+      if (!cbor_array_push(arr.get(), tagged.get())) {
+        throw InvalidCborError("Failed to push catnip entry");
+      }
+    }
+    addPair(std::move(key), std::move(arr));
+  }
+
+  // CTA-5007-B `catu`: map from component label (int) to [type, value].
+  void addClaimImpl(int64_t claim_id, const CatUriMatchMap& catu) {
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto m = cbor_new_definite_map_owned(catu.components.size());
+    for (const auto& [label, match] : catu.components) {
+      auto lbl_key = label >= 0
+                         ? CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(label)))
+                         : CborItemPtr(cbor_build_negint64(
+                               static_cast<uint64_t>(-(label + 1))));
+      auto entry = cbor_new_definite_array_owned(2);
+      auto ty = CborItemPtr(
+          cbor_build_uint64(static_cast<uint64_t>(match.type)));
+      if (!cbor_array_push(entry.get(), ty.get())) {
+        throw InvalidCborError("Failed to push catu type");
+      }
+      auto val_bstr =
+          cbor_build_bytestring_owned(match.value.data(), match.value.size());
+      if (!cbor_array_push(entry.get(), val_bstr.get())) {
+        throw InvalidCborError("Failed to push catu value");
+      }
+      addPairToMap(m.get(), std::move(lbl_key), std::move(entry));
+    }
+    addPair(std::move(key), std::move(m));
+  }
+
+  // CTA-5007-B `catalpn`: array of ALPN byte strings (exact byte match).
+  void addClaimImpl(int64_t claim_id,
+                    const std::vector<std::vector<uint8_t>>& alpn) {
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto arr = cbor_new_definite_array_owned(alpn.size());
+    for (const auto& proto : alpn) {
+      auto val = cbor_build_bytestring_owned(proto.data(), proto.size());
+      if (!cbor_array_push(arr.get(), val.get())) {
+        throw InvalidCborError("Failed to push catalpn entry");
+      }
+    }
+    addPair(std::move(key), std::move(arr));
+  }
+
+  // CTA-5007-B `cath`: array of [header_name, [type, value]] pairs.
+  void addClaimImpl(int64_t claim_id, const CatHostHeaderMatchList& cath) {
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto arr = cbor_new_definite_array_owned(cath.entries.size());
+    for (const auto& e : cath.entries) {
+      auto pair = cbor_new_definite_array_owned(2);
+      auto name = CborItemPtr(cbor_build_string(e.name.c_str()));
+      if (!cbor_array_push(pair.get(), name.get())) {
+        throw InvalidCborError("Failed to push cath header name");
+      }
+      auto match = cbor_new_definite_array_owned(2);
+      auto ty = CborItemPtr(
+          cbor_build_uint64(static_cast<uint64_t>(e.match.type)));
+      if (!cbor_array_push(match.get(), ty.get())) {
+        throw InvalidCborError("Failed to push cath match type");
+      }
+      auto val_bstr = cbor_build_bytestring_owned(
+          e.match.value.data(), e.match.value.size());
+      if (!cbor_array_push(match.get(), val_bstr.get())) {
+        throw InvalidCborError("Failed to push cath match value");
+      }
+      if (!cbor_array_push(pair.get(), match.get())) {
+        throw InvalidCborError("Failed to push cath match tuple");
+      }
+      if (!cbor_array_push(arr.get(), pair.get())) {
+        throw InvalidCborError("Failed to push cath entry");
+      }
+    }
+    addPair(std::move(key), std::move(arr));
+  }
+
+  // RFC 8747 `cnf`: map with `jkt` bytes and/or `kid` string.
+  void addClaimImpl(int64_t claim_id, const CatConfirmation& cnf) {
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    size_t entries = 0;
+    if (cnf.jkt.has_value()) ++entries;
+    if (cnf.kid.has_value()) ++entries;
+    // If we have neither typed field but have raw bytes, emit those verbatim
+    // as a bytestring so downstream verifiers see the issuer's original map.
+    if (entries == 0 && cnf.raw.has_value()) {
+      auto val = cbor_build_bytestring_owned(cnf.raw->data(), cnf.raw->size());
+      addPair(std::move(key), std::move(val));
+      return;
+    }
+    auto m = cbor_new_definite_map_owned(entries);
+    if (cnf.jkt.has_value()) {
+      // RFC 8747 §3.1 assigns label 3 to `kid`; §3.2 uses `jkt` under label
+      // "jkt" in the confirmation JWK thumbprint form. We follow RFC 8747
+      // and emit `jkt` as an integer label (3) with the SHA-256 bytes.
+      auto lbl = CborItemPtr(cbor_build_uint64(3));
+      auto val = cbor_build_bytestring_owned(cnf.jkt->data(), cnf.jkt->size());
+      addPairToMap(m.get(), std::move(lbl), std::move(val));
+    }
+    if (cnf.kid.has_value()) {
+      auto lbl = CborItemPtr(cbor_build_string("kid"));
+      auto val = CborItemPtr(cbor_build_string(cnf.kid->c_str()));
+      addPairToMap(m.get(), std::move(lbl), std::move(val));
+    }
+    addPair(std::move(key), std::move(m));
+  }
+
+  // CTA-5007-B `catdpop`: structured settings map (critical, lifetime, jti).
+  void addClaimImpl(int64_t claim_id, const CatDpopSettings& d) {
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    // If we only have raw pass-through bytes, emit them directly as a byte
+    // string (issuer opaque form).
+    const bool has_typed = d.critical.has_value() ||
+                           d.proof_lifetime_seconds.has_value() ||
+                           d.jti_challenge.has_value();
+    if (!has_typed && d.raw.has_value()) {
+      auto val = cbor_build_bytestring_owned(d.raw->data(), d.raw->size());
+      addPair(std::move(key), std::move(val));
+      return;
+    }
+    size_t entries = 0;
+    if (d.critical.has_value()) ++entries;
+    if (d.proof_lifetime_seconds.has_value()) ++entries;
+    if (d.jti_challenge.has_value()) ++entries;
+    auto m = cbor_new_definite_map_owned(entries);
+    // Labels are integer-keyed per the draft; use a small stable mapping
+    // until the draft assigns final numbers: 1=critical, 2=lifetime, 3=jti.
+    if (d.critical.has_value()) {
+      auto lbl = CborItemPtr(cbor_build_uint64(1));
+      auto arr = cbor_new_definite_array_owned(d.critical->size());
+      for (int64_t v : *d.critical) {
+        auto item = v >= 0 ? CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(v)))
+                           : CborItemPtr(cbor_build_negint64(
+                                 static_cast<uint64_t>(-(v + 1))));
+        if (!cbor_array_push(arr.get(), item.get())) {
+          throw InvalidCborError("Failed to push catdpop critical entry");
+        }
+      }
+      addPairToMap(m.get(), std::move(lbl), std::move(arr));
+    }
+    if (d.proof_lifetime_seconds.has_value()) {
+      auto lbl = CborItemPtr(cbor_build_uint64(2));
+      const int64_t v = *d.proof_lifetime_seconds;
+      auto val = v >= 0 ? CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(v)))
+                        : CborItemPtr(cbor_build_negint64(
+                              static_cast<uint64_t>(-(v + 1))));
+      addPairToMap(m.get(), std::move(lbl), std::move(val));
+    }
+    if (d.jti_challenge.has_value()) {
+      auto lbl = CborItemPtr(cbor_build_uint64(3));
+      auto val = cbor_build_bytestring_owned(
+          d.jti_challenge->data(), d.jti_challenge->size());
+      addPairToMap(m.get(), std::move(lbl), std::move(val));
+    }
+    addPair(std::move(key), std::move(m));
+  }
+
+  // CTA-5007-B `catifdata`: string or array-of-strings.
+  void addClaimImpl(int64_t claim_id, const CatIfData& v) {
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    if (v.isString()) {
+      auto val = CborItemPtr(cbor_build_string(v.asString().c_str()));
+      addPair(std::move(key), std::move(val));
+      return;
+    }
+    const auto& arr_val = v.asArray();
+    auto arr = cbor_new_definite_array_owned(arr_val.size());
+    for (const auto& s : arr_val) {
+      auto item = CborItemPtr(cbor_build_string(s.c_str()));
+      if (!cbor_array_push(arr.get(), item.get())) {
+        throw InvalidCborError("Failed to push catifdata entry");
+      }
+    }
+    addPair(std::move(key), std::move(arr));
+  }
+
+  // `catif` / `catr` — opaque directive bytes today, until the draft
+  // finalises typed accessors (tracked as future work).
+  void addClaimImpl(int64_t claim_id, const CatRequestDirective& dir) {
+    if (dir.empty()) return;
+    auto key = CborItemPtr(cbor_build_uint64(claim_id));
+    auto val = cbor_build_bytestring_owned(dir.raw.data(), dir.raw.size());
+    addPair(std::move(key), std::move(val));
+  }
+
+  // `cti` (RFC 8392 §3.1.7): CBOR byte string. Also used for `cattpk`,
+  // and any other typed byte string claim.
   void addClaimImpl(int64_t claim_id, const std::vector<uint8_t>& data) {
     auto key = CborItemPtr(cbor_build_uint64(claim_id));
     auto val = cbor_build_bytestring_owned(data.data(), data.size());
@@ -245,8 +527,17 @@ class ClaimProcessor {
     builder.addClaim<CatProofClaim>(token.cat.catpor);
     builder.addClaim<CatVersionClaim>(token.cat.catv);
     builder.addClaim<CatUsageClaim>(token.cat.catu);
+    builder.addClaim<CatNetworkInterfacesClaim>(token.cat.catnip);
+    builder.addClaim<CatMethodsClaim>(token.cat.catm);
+    builder.addClaim<CatAlpnClaim>(token.cat.catalpn);
+    builder.addClaim<CatHostsClaim>(token.cat.cath);
+    builder.addClaim<CatGeoIsoClaim>(token.cat.catgeoiso3166);
     builder.addClaim<CatGeoCoordClaim>(token.cat.catgeocoord);
     builder.addClaim<GeohashClaim>(token.cat.geohash);
+    builder.addClaim<CatGeoAltitudeClaim>(token.cat.catgeoalt);
+    builder.addClaim<CatTokenPublicKeyClaim>(token.cat.cattpk);
+    builder.addClaim<CatInterfaceClaim>(token.request.catif);
+    builder.addClaim<CatRequestClaim>(token.request.catr);
 
     // Process extended claims (MOQT)
     processExtendedClaims(builder, token.extended);
@@ -648,103 +939,450 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
         break;
 
       case CLAIM_CTI:
-        if (cbor_isa_bytestring(value_item)) {
-          token.core.cti = extract_bytestring(value_item);
-        } else if (cbor_isa_string(value_item)) {
-          token.core.cti = extract_string(value_item);
-        } else {
-          throw InvalidClaimValueError(
-              "'cti' must be a byte string or text string");
+        // RFC 8392 §3.1.7: `cti` is a CBOR byte string. Reject the older
+        // text-string form; that shape was never spec-compliant and only
+        // survived because early producers used std::string internally.
+        if (!cbor_isa_bytestring(value_item)) {
+          throw InvalidClaimValueError("'cti' must be a byte string");
+        }
+        {
+          size_t len = cbor_bytestring_length(value_item);
+          if (len > MAX_STRING_LENGTH) {
+            throw InvalidClaimValueError("'cti' exceeds maximum length");
+          }
+          const unsigned char* data = cbor_bytestring_handle(value_item);
+          if (!data && len > 0) {
+            throw InvalidClaimValueError("Invalid 'cti' data pointer");
+          }
+          token.core.cti = std::vector<uint8_t>(data, data + len);
         }
         break;
 
       case CLAIM_CATREPLAY:
-        if (!cbor_isa_string(value_item)) {
-          throw InvalidClaimValueError("'catreplay' must be a text string");
+        if (!cbor_isa_uint(value_item)) {
+          throw InvalidClaimValueError(
+              "'catreplay' must be an unsigned integer mode");
         }
-        token.cat.catreplay = extract_string(value_item);
+        {
+          uint64_t mode = cbor_get_int(value_item);
+          if (mode > std::numeric_limits<uint32_t>::max()) {
+            throw InvalidClaimValueError("'catreplay' mode exceeds uint32");
+          }
+          // Reject unknown modes explicitly — the CTA-5007-B enum is closed;
+          // any future mode is a new authorization semantics we can't apply.
+          switch (mode) {
+            case 0:
+            case 1:
+            case 2:
+              token.cat.catreplay = static_cast<CatReplayMode>(mode);
+              break;
+            default:
+              throw InvalidClaimValueError("Unknown 'catreplay' mode");
+          }
+        }
         break;
 
       case CLAIM_CATPOR:
-        if (!cbor_is_bool(value_item)) {
-          throw InvalidClaimValueError("'catpor' must be a boolean");
+        // CTA-5007-B `catpor`: array [probability, identifier, ?expiry].
+        if (!cbor_isa_array(value_item)) {
+          throw InvalidClaimValueError("'catpor' must be an array");
         }
-        token.cat.catpor = cbor_get_bool(value_item);
+        {
+          size_t n = cbor_array_size(value_item);
+          if (n < 2 || n > 3) {
+            throw InvalidClaimValueError(
+                "'catpor' array must have 2 or 3 elements");
+          }
+          cbor_item_t** arr = cbor_array_handle(value_item);
+          if (!arr) {
+            throw InvalidCborError("Invalid 'catpor' array handle");
+          }
+          CatProofOfPossession por;
+          if (!cbor_isa_float_ctrl(arr[0]) || cbor_float_ctrl_is_ctrl(arr[0])) {
+            throw InvalidClaimValueError(
+                "'catpor' probability must be a float");
+          }
+          por.probability = cbor_float_get_float(arr[0]);
+          if (!cbor_isa_bytestring(arr[1])) {
+            throw InvalidClaimValueError(
+                "'catpor' identifier must be a byte string");
+          }
+          {
+            size_t idlen = cbor_bytestring_length(arr[1]);
+            const unsigned char* iddata = cbor_bytestring_handle(arr[1]);
+            por.identifier.assign(iddata, iddata + idlen);
+          }
+          if (n == 3) {
+            if (!cbor_isa_uint(arr[2])) {
+              throw InvalidClaimValueError(
+                  "'catpor' expiry must be an unsigned integer");
+            }
+            uint64_t e = cbor_get_int(arr[2]);
+            if (e > static_cast<uint64_t>(
+                       std::numeric_limits<int64_t>::max())) {
+              throw InvalidClaimValueError("'catpor' expiry exceeds int64");
+            }
+            por.expiry = static_cast<int64_t>(e);
+          }
+          if (!por.is_valid()) {
+            throw InvalidClaimValueError(
+                "'catpor' probability out of [0,1] or empty identifier");
+          }
+          token.cat.catpor = std::move(por);
+        }
         break;
 
       case CLAIM_CATV:
-        if (!cbor_isa_string(value_item)) {
-          throw InvalidClaimValueError("'catv' must be a text string");
+        if (!cbor_isa_uint(value_item)) {
+          throw InvalidClaimValueError("'catv' must be an unsigned integer");
         }
-        token.cat.catv = extract_string(value_item);
+        {
+          uint64_t v = cbor_get_int(value_item);
+          if (v > std::numeric_limits<uint32_t>::max()) {
+            throw InvalidClaimValueError("'catv' exceeds uint32 range");
+          }
+          token.cat.catv = static_cast<uint32_t>(v);
+        }
         break;
 
       case CLAIM_CATU:
-        if (!cbor_isa_uint(value_item)) {
-          throw InvalidClaimValueError("'catu' must be an unsigned integer");
+        // CTA-5007-B `catu`: map from component label (int) to [type, value].
+        if (!cbor_isa_map(value_item)) {
+          throw InvalidClaimValueError("'catu' must be a CBOR map");
         }
         {
-          uint64_t catu_val = cbor_get_int(value_item);
-          if (catu_val > std::numeric_limits<uint32_t>::max()) {
-            throw InvalidClaimValueError("'catu' exceeds uint32 range");
+          CatUriMatchMap catu;
+          struct cbor_pair* u_pairs = cbor_map_handle(value_item);
+          size_t u_size = cbor_map_size(value_item);
+          if (!u_pairs && u_size > 0) {
+            throw InvalidCborError("Invalid 'catu' map handle");
           }
-          token.cat.catu = static_cast<uint32_t>(catu_val);
+          for (size_t k = 0; k < u_size; ++k) {
+            cbor_item_t* lbl = u_pairs[k].key;
+            cbor_item_t* entry = u_pairs[k].value;
+            int64_t label = 0;
+            if (cbor_isa_uint(lbl)) {
+              uint64_t raw = cbor_get_int(lbl);
+              if (raw > static_cast<uint64_t>(
+                            std::numeric_limits<int64_t>::max())) {
+                throw InvalidClaimValueError(
+                    "'catu' component label exceeds int64 range");
+              }
+              label = static_cast<int64_t>(raw);
+            } else if (cbor_isa_negint(lbl)) {
+              uint64_t mag = cbor_get_int(lbl);
+              if (mag > static_cast<uint64_t>(
+                            std::numeric_limits<int64_t>::max())) {
+                throw InvalidClaimValueError(
+                    "'catu' negative label exceeds int64 range");
+              }
+              label = -static_cast<int64_t>(mag) - 1;
+            } else {
+              throw InvalidClaimValueError(
+                  "'catu' component label must be an integer");
+            }
+            if (!cbor_isa_array(entry) || cbor_array_size(entry) != 2) {
+              throw InvalidClaimValueError(
+                  "'catu' entry must be a 2-tuple [type, value]");
+            }
+            cbor_item_t** tup = cbor_array_handle(entry);
+            if (!cbor_isa_uint(tup[0])) {
+              throw InvalidClaimValueError(
+                  "'catu' entry type must be an unsigned integer");
+            }
+            uint64_t type_u = cbor_get_int(tup[0]);
+            if (type_u > 6) {
+              throw InvalidClaimValueError("'catu' unknown match type");
+            }
+            if (!cbor_isa_bytestring(tup[1])) {
+              throw InvalidClaimValueError(
+                  "'catu' entry value must be a byte string");
+            }
+            UriComponentMatch match;
+            match.type = static_cast<UriMatchType>(type_u);
+            size_t vlen = cbor_bytestring_length(tup[1]);
+            const unsigned char* vdata = cbor_bytestring_handle(tup[1]);
+            match.value.assign(vdata, vdata + vlen);
+            catu.components.emplace(label, std::move(match));
+          }
+          token.cat.catu = std::move(catu);
+        }
+        break;
+
+      case CLAIM_CATM:
+        if (!cbor_isa_array(value_item)) {
+          throw InvalidClaimValueError("'catm' must be an array");
+        }
+        {
+          size_t n = cbor_array_size(value_item);
+          constexpr size_t MAX_METHODS = 32;
+          if (n > MAX_METHODS) {
+            throw InvalidClaimValueError("Too many 'catm' entries");
+          }
+          cbor_item_t** arr = cbor_array_handle(value_item);
+          std::vector<std::string> methods;
+          methods.reserve(n);
+          for (size_t j = 0; j < n; ++j) {
+            if (!cbor_isa_string(arr[j])) {
+              throw InvalidClaimValueError(
+                  "'catm' entries must be text strings");
+            }
+            methods.emplace_back(extract_string(arr[j]));
+          }
+          token.cat.catm = std::move(methods);
+        }
+        break;
+
+      case CLAIM_CATALPN:
+        if (!cbor_isa_array(value_item)) {
+          throw InvalidClaimValueError("'catalpn' must be an array");
+        }
+        {
+          size_t n = cbor_array_size(value_item);
+          constexpr size_t MAX_ALPN = 32;
+          if (n > MAX_ALPN) {
+            throw InvalidClaimValueError("Too many 'catalpn' entries");
+          }
+          cbor_item_t** arr = cbor_array_handle(value_item);
+          std::vector<std::vector<uint8_t>> alpn;
+          alpn.reserve(n);
+          for (size_t j = 0; j < n; ++j) {
+            if (!cbor_isa_bytestring(arr[j])) {
+              throw InvalidClaimValueError(
+                  "'catalpn' entries must be byte strings");
+            }
+            size_t alen = cbor_bytestring_length(arr[j]);
+            const unsigned char* adata = cbor_bytestring_handle(arr[j]);
+            alpn.emplace_back(adata, adata + alen);
+          }
+          token.cat.catalpn = std::move(alpn);
+        }
+        break;
+
+      case CLAIM_CATH:
+        if (!cbor_isa_array(value_item)) {
+          throw InvalidClaimValueError("'cath' must be an array");
+        }
+        {
+          size_t n = cbor_array_size(value_item);
+          constexpr size_t MAX_HDRS = 32;
+          if (n > MAX_HDRS) {
+            throw InvalidClaimValueError("Too many 'cath' entries");
+          }
+          cbor_item_t** arr = cbor_array_handle(value_item);
+          CatHostHeaderMatchList cath;
+          cath.entries.reserve(n);
+          for (size_t j = 0; j < n; ++j) {
+            if (!cbor_isa_array(arr[j]) || cbor_array_size(arr[j]) != 2) {
+              throw InvalidClaimValueError(
+                  "'cath' entry must be [name, [type, value]]");
+            }
+            cbor_item_t** pair = cbor_array_handle(arr[j]);
+            if (!cbor_isa_string(pair[0])) {
+              throw InvalidClaimValueError(
+                  "'cath' header name must be a text string");
+            }
+            if (!cbor_isa_array(pair[1]) || cbor_array_size(pair[1]) != 2) {
+              throw InvalidClaimValueError(
+                  "'cath' match must be [type, value]");
+            }
+            cbor_item_t** m = cbor_array_handle(pair[1]);
+            if (!cbor_isa_uint(m[0])) {
+              throw InvalidClaimValueError(
+                  "'cath' match type must be uint");
+            }
+            uint64_t type_u = cbor_get_int(m[0]);
+            if (type_u > 6) {
+              throw InvalidClaimValueError("'cath' unknown match type");
+            }
+            if (!cbor_isa_bytestring(m[1])) {
+              throw InvalidClaimValueError(
+                  "'cath' match value must be a byte string");
+            }
+            CatHeaderMatch hm;
+            hm.name = extract_string(pair[0]);
+            hm.match.type = static_cast<UriMatchType>(type_u);
+            size_t mvlen = cbor_bytestring_length(m[1]);
+            const unsigned char* mvdata = cbor_bytestring_handle(m[1]);
+            hm.match.value.assign(mvdata, mvdata + mvlen);
+            cath.entries.push_back(std::move(hm));
+          }
+          token.cat.cath = std::move(cath);
+        }
+        break;
+
+      case CLAIM_CATNIP:
+        if (!cbor_isa_array(value_item)) {
+          throw InvalidClaimValueError("'catnip' must be an array");
+        }
+        {
+          size_t n = cbor_array_size(value_item);
+          constexpr size_t MAX_NIPS = 32;
+          if (n > MAX_NIPS) {
+            throw InvalidClaimValueError("Too many 'catnip' entries");
+          }
+          cbor_item_t** arr = cbor_array_handle(value_item);
+          std::vector<CatNipEntry> nips;
+          nips.reserve(n);
+          for (size_t j = 0; j < n; ++j) {
+            if (!cbor_isa_tag(arr[j])) {
+              throw InvalidClaimValueError(
+                  "'catnip' entry must be a tagged byte string");
+            }
+            CatNipEntry e;
+            e.tag = cbor_tag_value(arr[j]);
+            cbor_item_t* tagged = cbor_tag_item(arr[j]);
+            if (!tagged || !cbor_isa_bytestring(tagged)) {
+              cbor_decref(&tagged);
+              throw InvalidClaimValueError(
+                  "'catnip' tagged item must be a byte string");
+            }
+            size_t elen = cbor_bytestring_length(tagged);
+            const unsigned char* edata = cbor_bytestring_handle(tagged);
+            e.value.assign(edata, edata + elen);
+            cbor_decref(&tagged);
+            nips.push_back(std::move(e));
+          }
+          token.cat.catnip = std::move(nips);
+        }
+        break;
+
+      case CLAIM_CATGEOISO3166:
+        if (!cbor_isa_array(value_item)) {
+          throw InvalidClaimValueError("'catgeoiso3166' must be an array");
+        }
+        {
+          size_t n = cbor_array_size(value_item);
+          constexpr size_t MAX_ISO = 250;
+          if (n > MAX_ISO) {
+            throw InvalidClaimValueError("Too many 'catgeoiso3166' entries");
+          }
+          cbor_item_t** arr = cbor_array_handle(value_item);
+          std::vector<std::string> codes;
+          codes.reserve(n);
+          for (size_t j = 0; j < n; ++j) {
+            if (!cbor_isa_string(arr[j])) {
+              throw InvalidClaimValueError(
+                  "'catgeoiso3166' entries must be text strings");
+            }
+            codes.emplace_back(extract_string(arr[j]));
+          }
+          token.cat.catgeoiso3166 = std::move(codes);
         }
         break;
 
       case CLAIM_CATGEOCOORD:
-        if (!cbor_isa_map(value_item)) {
-          throw InvalidClaimValueError("'catgeocoord' must be a map");
+        // CTA-5007-B §4.6.x: CBOR array `[latitude, longitude, radius?]`.
+        if (!cbor_isa_array(value_item)) {
+          throw InvalidClaimValueError("'catgeocoord' must be an array");
         }
         {
-          GeoCoordinate coord;
-          struct cbor_pair* coord_pairs = cbor_map_handle(value_item);
-          size_t coord_map_size = cbor_map_size(value_item);
-          if (!coord_pairs && coord_map_size > 0) {
-            throw InvalidCborError("Invalid 'catgeocoord' map handle");
+          size_t n = cbor_array_size(value_item);
+          if (n < 2 || n > 3) {
+            throw InvalidClaimValueError(
+                "'catgeocoord' must have 2 or 3 elements");
           }
-
-          for (size_t k = 0; k < coord_map_size; k++) {
-            cbor_item_t* coord_key = coord_pairs[k].key;
-            cbor_item_t* coord_value = coord_pairs[k].value;
-
-            if (!cbor_isa_string(coord_key) ||
-                !cbor_isa_float_ctrl(coord_value)) {
+          cbor_item_t** arr = cbor_array_handle(value_item);
+          auto read_float = [](cbor_item_t* it) -> double {
+            if (!cbor_isa_float_ctrl(it) || cbor_float_ctrl_is_ctrl(it)) {
               throw InvalidClaimValueError(
-                  "'catgeocoord' entries must be (string, float) pairs");
+                  "'catgeocoord' element must be a float");
             }
-
-            const char* key_data =
-                reinterpret_cast<const char*>(cbor_string_handle(coord_key));
-            size_t key_len = cbor_string_length(coord_key);
-            std::string_view key_view(key_data, key_len);
-
-            double value = cbor_float_get_float8(coord_value);
-
-            if (key_view == "lat") {
-              coord.lat = value;
-            } else if (key_view == "lon") {
-              coord.lon = value;
-            } else if (key_view == "accuracy") {
-              if (value < 0.0 || value > 1e9) {
-                throw InvalidClaimValueError(
-                    "'catgeocoord.accuracy' out of range");
-              }
-              coord.accuracy = value;
-            } else {
-              throw InvalidClaimValueError(
-                  "Unknown 'catgeocoord' key");
-            }
+            return cbor_float_get_float(it);
+          };
+          double lat = read_float(arr[0]);
+          double lon = read_float(arr[1]);
+          std::optional<double> radius;
+          if (n == 3) radius = read_float(arr[2]);
+          auto coord = GeoCoordinate::createSafe(lat, lon, radius);
+          if (!coord.has_value()) {
+            throw InvalidClaimValueError("'catgeocoord' out of range");
           }
-          token.cat.catgeocoord = coord;
+          token.cat.catgeocoord = *coord;
         }
         break;
 
       case CLAIM_GEOHASH:
-        if (!cbor_isa_string(value_item)) {
-          throw InvalidClaimValueError("'geohash' must be a text string");
+        // CTA-5007-B `geohash`: text string OR CBOR array of strings.
+        if (cbor_isa_string(value_item)) {
+          token.cat.geohash = GeohashClaimValue(extract_string(value_item));
+        } else if (cbor_isa_array(value_item)) {
+          size_t n = cbor_array_size(value_item);
+          constexpr size_t MAX_GEOHASH = 32;
+          if (n > MAX_GEOHASH) {
+            throw InvalidClaimValueError("Too many 'geohash' entries");
+          }
+          cbor_item_t** arr = cbor_array_handle(value_item);
+          std::vector<std::string> hashes;
+          hashes.reserve(n);
+          for (size_t j = 0; j < n; ++j) {
+            if (!cbor_isa_string(arr[j])) {
+              throw InvalidClaimValueError(
+                  "'geohash' array entries must be text strings");
+            }
+            hashes.emplace_back(extract_string(arr[j]));
+          }
+          token.cat.geohash = GeohashClaimValue(std::move(hashes));
+        } else {
+          throw InvalidClaimValueError(
+              "'geohash' must be a text string or array of strings");
         }
-        token.cat.geohash = extract_string(value_item);
+        break;
+
+      case CLAIM_CATGEOALT:
+        if (!cbor_isa_array(value_item)) {
+          throw InvalidClaimValueError("'catgeoalt' must be an array");
+        }
+        {
+          size_t n = cbor_array_size(value_item);
+          if (n < 1 || n > 2) {
+            throw InvalidClaimValueError(
+                "'catgeoalt' must have 1 or 2 elements");
+          }
+          cbor_item_t** arr = cbor_array_handle(value_item);
+          auto read_int32 = [](cbor_item_t* it) -> int32_t {
+            if (cbor_isa_uint(it)) {
+              uint64_t v = cbor_get_int(it);
+              if (v > static_cast<uint64_t>(
+                          std::numeric_limits<int32_t>::max())) {
+                throw InvalidClaimValueError(
+                    "'catgeoalt' int exceeds int32 range");
+              }
+              return static_cast<int32_t>(v);
+            }
+            if (cbor_isa_negint(it)) {
+              uint64_t mag = cbor_get_int(it);
+              if (mag > static_cast<uint64_t>(
+                            std::numeric_limits<int32_t>::max())) {
+                throw InvalidClaimValueError(
+                    "'catgeoalt' negint exceeds int32 range");
+              }
+              return -static_cast<int32_t>(mag) - 1;
+            }
+            throw InvalidClaimValueError(
+                "'catgeoalt' element must be an integer");
+          };
+          GeoAltitude alt;
+          alt.altitude = read_int32(arr[0]);
+          if (n == 2) {
+            alt.deviation = read_int32(arr[1]);
+          }
+          token.cat.catgeoalt = alt;
+        }
+        break;
+
+      case CLAIM_CATTPK:
+        if (!cbor_isa_bytestring(value_item)) {
+          throw InvalidClaimValueError("'cattpk' must be a byte string");
+        }
+        {
+          size_t len = cbor_bytestring_length(value_item);
+          if (len > MAX_STRING_LENGTH) {
+            throw InvalidClaimValueError("'cattpk' exceeds maximum length");
+          }
+          const unsigned char* data = cbor_bytestring_handle(value_item);
+          token.cat.cattpk = std::vector<uint8_t>(data, data + len);
+        }
         break;
 
       case CLAIM_SUB:
@@ -762,35 +1400,153 @@ CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
         break;
 
       case CLAIM_CATIFDATA:
-        if (!cbor_isa_string(value_item)) {
-          throw InvalidClaimValueError("'catifdata' must be a text string");
+        if (cbor_isa_string(value_item)) {
+          token.informational.catifdata =
+              CatIfData(extract_string(value_item));
+        } else if (cbor_isa_array(value_item)) {
+          size_t n = cbor_array_size(value_item);
+          constexpr size_t MAX_IFDATA = 32;
+          if (n > MAX_IFDATA) {
+            throw InvalidClaimValueError("Too many 'catifdata' entries");
+          }
+          cbor_item_t** arr = cbor_array_handle(value_item);
+          std::vector<std::string> vals;
+          vals.reserve(n);
+          for (size_t j = 0; j < n; ++j) {
+            if (!cbor_isa_string(arr[j])) {
+              throw InvalidClaimValueError(
+                  "'catifdata' array entries must be text strings");
+            }
+            vals.emplace_back(extract_string(arr[j]));
+          }
+          token.informational.catifdata = CatIfData(std::move(vals));
+        } else {
+          throw InvalidClaimValueError(
+              "'catifdata' must be a text string or array of strings");
         }
-        token.informational.catifdata = extract_string(value_item);
         break;
 
       case CLAIM_CNF:
-        // RFC 8747 §3.1: the confirmation claim may be a text string (jkt
-        // thumbprint) or a CBOR map containing a jwk/kid/etc. We currently
-        // only store the string form; the map form is accepted but treated
-        // as opaque until [[cnf-jwk-decoding]] lands.
-        if (cbor_isa_string(value_item)) {
-          token.dpop.cnf = extract_string(value_item);
-        } else if (!cbor_isa_map(value_item)) {
-          throw InvalidClaimValueError(
-              "'cnf' must be a text string or CBOR map");
+        // RFC 8747 §3.1: `cnf` is a CBOR map. Legacy producers that emitted
+        // a bare text string (JWK thumbprint) are rejected here — the
+        // typed model no longer conflates the two, and silently accepting
+        // the string form would let a malformed issuer bypass jkt binding.
+        if (!cbor_isa_map(value_item)) {
+          throw InvalidClaimValueError("'cnf' must be a CBOR map");
+        }
+        {
+          CatConfirmation cnf;
+          struct cbor_pair* cnf_pairs = cbor_map_handle(value_item);
+          size_t cnf_size = cbor_map_size(value_item);
+          for (size_t k = 0; k < cnf_size; ++k) {
+            cbor_item_t* lbl = cnf_pairs[k].key;
+            cbor_item_t* val = cnf_pairs[k].value;
+            // Integer label 3 is `jkt` (RFC 8747 §3.2).
+            if (cbor_isa_uint(lbl) && cbor_get_int(lbl) == 3) {
+              if (!cbor_isa_bytestring(val)) {
+                throw InvalidClaimValueError(
+                    "'cnf' jkt must be a byte string");
+              }
+              size_t l = cbor_bytestring_length(val);
+              const unsigned char* d = cbor_bytestring_handle(val);
+              cnf.jkt = std::vector<uint8_t>(d, d + l);
+            } else if (cbor_isa_string(lbl)) {
+              std::string key = extract_string(lbl);
+              if (key == "kid" && cbor_isa_string(val)) {
+                cnf.kid = extract_string(val);
+              }
+              // Unknown text labels: ignore — the typed model preserves
+              // strict handling for jkt/kid; other forms round-trip via
+              // future [[cnf-jwk-decoding]].
+            }
+          }
+          token.dpop.cnf = std::move(cnf);
         }
         break;
 
       case CLAIM_CATDPOP:
-        // catdpop is either a text string (opaque settings blob) or a CBOR
-        // map (structured DPoP settings). We only extract the string form
-        // today; the map form is accepted but treated as opaque until
-        // [[catdpop-structured-decoding]] lands.
-        if (cbor_isa_string(value_item)) {
-          token.dpop.catdpop = extract_string(value_item);
-        } else if (!cbor_isa_map(value_item)) {
+        // CTA-5007-B `catdpop`: CBOR map with labeled fields.
+        if (!cbor_isa_map(value_item)) {
+          throw InvalidClaimValueError("'catdpop' must be a CBOR map");
+        }
+        {
+          CatDpopSettings settings;
+          struct cbor_pair* dp_pairs = cbor_map_handle(value_item);
+          size_t dp_size = cbor_map_size(value_item);
+          for (size_t k = 0; k < dp_size; ++k) {
+            cbor_item_t* lbl = dp_pairs[k].key;
+            cbor_item_t* val = dp_pairs[k].value;
+            if (!cbor_isa_uint(lbl)) continue;
+            uint64_t label = cbor_get_int(lbl);
+            switch (label) {
+              case 1:  // critical
+                if (cbor_isa_array(val)) {
+                  size_t cn = cbor_array_size(val);
+                  cbor_item_t** carr = cbor_array_handle(val);
+                  std::vector<int64_t> crit;
+                  crit.reserve(cn);
+                  for (size_t j = 0; j < cn; ++j) {
+                    if (cbor_isa_uint(carr[j])) {
+                      crit.push_back(
+                          static_cast<int64_t>(cbor_get_int(carr[j])));
+                    } else if (cbor_isa_negint(carr[j])) {
+                      uint64_t mag = cbor_get_int(carr[j]);
+                      crit.push_back(-static_cast<int64_t>(mag) - 1);
+                    } else {
+                      throw InvalidClaimValueError(
+                          "'catdpop' critical entries must be integers");
+                    }
+                  }
+                  settings.critical = std::move(crit);
+                }
+                break;
+              case 2:  // proof_lifetime_seconds
+                if (cbor_isa_uint(val)) {
+                  settings.proof_lifetime_seconds =
+                      static_cast<int64_t>(cbor_get_int(val));
+                }
+                break;
+              case 3:  // jti_challenge (byte string)
+                if (cbor_isa_bytestring(val)) {
+                  size_t l = cbor_bytestring_length(val);
+                  const unsigned char* d = cbor_bytestring_handle(val);
+                  settings.jti_challenge =
+                      std::vector<uint8_t>(d, d + l);
+                }
+                break;
+              default:
+                // Ignore unknown labels — they carry no authorization value.
+                break;
+            }
+          }
+          token.dpop.catdpop = std::move(settings);
+        }
+        break;
+
+      case CLAIM_CATIF:
+      case CLAIM_CATR:
+        // `catif`/`catr` — until the draft finalises typed fields, preserve
+        // the wire bytes so downstream inspectors can look at them.
+        if (!cbor_isa_map(value_item) && !cbor_isa_bytestring(value_item)) {
           throw InvalidClaimValueError(
-              "'catdpop' must be a text string or CBOR map");
+              "'catif'/'catr' must be a CBOR map or byte string");
+        }
+        {
+          unsigned char* buf = nullptr;
+          size_t buf_size = 0;
+          size_t len = cbor_serialize_alloc(value_item, &buf, &buf_size);
+          if (len == 0) {
+            if (buf) free(buf);
+            throw InvalidCborError("Failed to serialize catif/catr");
+          }
+          CatRequestDirective dir;
+          dir.raw.assign(buf, buf + len);
+          free(buf);
+          if (claim_id == CLAIM_CATIF) {
+            token.request.catif = std::move(dir);
+          } else {
+            token.request.catr = std::move(dir);
+          }
         }
         break;
 

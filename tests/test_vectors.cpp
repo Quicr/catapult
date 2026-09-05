@@ -245,44 +245,39 @@ TEST_CASE("CBOR Decoding - Payload decoding from reference CBOR") {
     CHECK((*token.core.aud)[0] == "https://relay.example.com");
     CHECK(token.core.exp == 1700086400);
     CHECK(token.core.nbf == 1700000000);
-    CHECK(token.core.cti == "test-token-001");
+    REQUIRE(token.core.cti.has_value());
+    CHECK(std::string(token.core.cti->begin(), token.core.cti->end()) ==
+          "test-token-001");
   }
 
-  SUBCASE("cbor_cat_version_usage - Decode CAT version and usage") {
+  SUBCASE("cbor_cat_version_usage - legacy vector rejected") {
+    // The legacy JSON test vector encodes catv as a text string and catu as
+    // a uint. CTA-5007-B §4.6.4/§4.6.10 require catv to be a uint and catu
+    // to be a component-index map; the strict decoder now rejects both.
+    // TODO(phase-2): regenerate this vector with the typed schema.
     auto &v = cbor_vectors[2];
     REQUIRE(v["id"] == "cbor_cat_version_usage");
     auto cborData = hexToBytes(v["payload_cbor_hex"].get<std::string>());
-
-    auto token = Cwt::decodePayload(cborData);
-    CHECK(token.cat.catv == "CAT-v1");
-    CHECK(token.cat.catu == 5);
+    CHECK_THROWS(Cwt::decodePayload(cborData));
   }
 
-  SUBCASE("cbor_geographic_claims - Decode geographic claims") {
+  SUBCASE("cbor_geographic_claims - legacy vector rejected") {
+    // Legacy vector encodes catgeocoord as a map with lat/lon/accuracy keys.
+    // CTA-5007-B §4.6.7 requires an array [lat, lon, radius?] — strict
+    // decoder rejects the map form. TODO(phase-2): regenerate vector.
     auto &v = cbor_vectors[4];
     REQUIRE(v["id"] == "cbor_geographic_claims");
     auto cborData = hexToBytes(v["payload_cbor_hex"].get<std::string>());
-
-    auto token = Cwt::decodePayload(cborData);
-    CHECK(token.cat.geohash == "9q8yyk");
-    REQUIRE(token.cat.catgeocoord.has_value());
-    CHECK(token.cat.catgeocoord->lat == doctest::Approx(37.7749));
-    CHECK(token.cat.catgeocoord->lon == doctest::Approx(-122.4194));
-    // Note: accuracy uses half-precision float (f9 5640) in the test vector.
-    // The library reads it with cbor_float_get_float8 which may not handle
-    // half-precision correctly - this is a known interop gap.
+    CHECK_THROWS(Cwt::decodePayload(cborData));
   }
 
-  SUBCASE("cbor_alpn - CBOR is valid and parseable") {
+  SUBCASE("cbor_alpn - legacy vector rejected") {
+    // Legacy vector encodes catalpn entries as text strings; CTA-5007-B
+    // §4.6.6 requires byte-string entries. TODO(phase-2): regenerate.
     auto &v = cbor_vectors[6];
     REQUIRE(v["id"] == "cbor_alpn");
     auto cborData = hexToBytes(v["payload_cbor_hex"].get<std::string>());
-
-    // The library can parse the CBOR without error.
-    // Note: CLAIM_CATALPN (314) decode is not yet implemented in
-    // Cwt::decodePayload - the claim is skipped. This test validates
-    // that the CBOR structure is accepted without errors.
-    REQUIRE_NOTHROW(Cwt::decodePayload(cborData));
+    CHECK_THROWS(Cwt::decodePayload(cborData));
   }
 }
 
@@ -326,17 +321,10 @@ TEST_CASE("Token Structure - HMAC-SHA256 signature verification") {
     auto signingInput = createJwtSigningInput(headerBytes, payloadBytes);
     CHECK(hmac.verify(signingInput, expectedSig));
 
-    auto token = Cwt::decodePayload(payloadBytes);
-    CHECK(token.core.iss == "https://issuer.moq.example");
-    REQUIRE(token.core.aud.has_value());
-    CHECK(token.core.aud->size() == 2);
-    CHECK((*token.core.aud)[0] == "https://relay1.example.com");
-    CHECK((*token.core.aud)[1] == "https://relay2.example.com");
-    CHECK(token.core.exp == 1700086400);
-    CHECK(token.core.nbf == 1700000000);
-    CHECK(token.core.cti == "vector-002");
-    CHECK(token.cat.catv == "CAT-v1");
-    CHECK(token.cat.catu == 10);
+    // The legacy vector encodes catv/catu with pre-CTA-5007-B types; the
+    // strict decoder now rejects it. Signature verification remains valid.
+    // TODO(phase-2): regenerate this vector with the typed schema.
+    CHECK_THROWS(Cwt::decodePayload(payloadBytes));
   }
 
   SUBCASE("token_hmac_minimal - decodeToken round-trip") {
@@ -358,17 +346,10 @@ TEST_CASE("Token Structure - HMAC-SHA256 signature verification") {
     auto keyBytes = hexToBytes(v["key_hex"].get<std::string>());
     HmacSha256Algorithm hmac(keyBytes);
 
+    // Legacy vector encodes catv/catu with pre-CTA-5007-B types; the strict
+    // decoder now rejects it. TODO(phase-2): regenerate with typed schema.
     std::string tokenStr = v["token"].get<std::string>();
-    auto token = decodeToken(tokenStr, hmac);
-
-    CHECK(token.core.iss == "https://issuer.moq.example");
-    REQUIRE(token.core.aud.has_value());
-    CHECK(token.core.aud->size() == 2);
-    CHECK(token.core.exp == 1700086400);
-    CHECK(token.core.nbf == 1700000000);
-    CHECK(token.core.cti == "vector-002");
-    CHECK(token.cat.catv == "CAT-v1");
-    CHECK(token.cat.catu == 10);
+    CHECK_THROWS(decodeToken(tokenStr, hmac));
   }
 }
 

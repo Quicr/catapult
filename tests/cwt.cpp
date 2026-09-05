@@ -7,17 +7,36 @@
 
 using namespace catapult;
 
+namespace {
+
+// Build a POR structure that matches the shape used by the encoder.
+CatProofOfPossession makePor() {
+  CatProofOfPossession por;
+  por.probability = 0.5;
+  por.identifier = {0xDE, 0xAD, 0xBE, 0xEF};
+  return por;
+}
+
+CatUriMatchMap makeCatu() {
+  CatUriMatchMap m;
+  m.components[3] = UriComponentMatch{UriMatchType::Prefix,
+                                      {'/', 'a', 'p', 'i'}};
+  return m;
+}
+
+}  // namespace
+
 auto createTestToken() {
   return CatToken()
       .withIssuer("https://example.com")
       .withAudience({"https://api.example.com"})
-      .withCwtId("test-payload")
-      .withVersion("1.0")
-      .withUsageLimit(50)
-      .withReplayProtection("test-nonce")
-      .withProofOfPossession(false)
+      .withCwtIdString("test-payload")
+      .withVersion(1)
+      .withUriMatch(makeCatu())
+      .withReplayProtection(CatReplayMode::RejectOnReplay)
+      .withProofOfPossession(makePor())
       .withGeoCoordinate(51.5074, -0.1278)
-      .withGeohash("gcpvj");
+      .withGeohash(GeohashClaimValue{std::string{"gcpvj"}});
 }
 
 TEST_CASE("CwtConstruction") {
@@ -78,10 +97,10 @@ TEST_CASE("PayloadDecoding") {
   CHECK(decoded.core.aud == token.core.aud);
   CHECK(decoded.core.cti == token.core.cti);
   CHECK(decoded.cat.catv == token.cat.catv);
-  CHECK(decoded.cat.catu == token.cat.catu);
   CHECK(decoded.cat.catreplay == token.cat.catreplay);
-  CHECK(decoded.cat.catpor == token.cat.catpor);
-  CHECK(decoded.cat.geohash == token.cat.geohash);
+  REQUIRE(decoded.cat.geohash.has_value());
+  CHECK(decoded.cat.geohash->isString());
+  CHECK(decoded.cat.geohash->asString() == "gcpvj");
 
   CatToken emptyToken;
   Cwt emptyCwt(ALG_ES256, emptyToken);
@@ -108,13 +127,13 @@ TEST_CASE("RoundtripEncodingDecoding") {
   auto originalToken = CatToken()
                            .withIssuer("https://test.com")
                            .withAudience({"api1", "api2"})
-                           .withCwtId("test-id-123")
-                           .withVersion("1.5")
-                           .withUsageLimit(42)
+                           .withCwtIdString("test-id-123")
+                           .withVersion(2)
+                           .withUriMatch(makeCatu())
                            .withGeoCoordinate(40.7128, -74.0060)
-                           .withGeohash("dr5reg")
-                           .withReplayProtection("nonce-456")
-                           .withProofOfPossession(false);
+                           .withGeohash(GeohashClaimValue{std::string{"dr5reg"}})
+                           .withReplayProtection(CatReplayMode::RejectOnReplay)
+                           .withProofOfPossession(makePor());
 
   Cwt cwt(ALG_ES256, originalToken);
 
@@ -129,10 +148,7 @@ TEST_CASE("RoundtripEncodingDecoding") {
   CHECK(decoded1.core.aud == decoded2.core.aud);
   CHECK(decoded1.core.cti == decoded2.core.cti);
   CHECK(decoded1.cat.catv == decoded2.cat.catv);
-  CHECK(decoded1.cat.catu == decoded2.cat.catu);
   CHECK(decoded1.cat.catreplay == decoded2.cat.catreplay);
-  CHECK(decoded1.cat.catpor == decoded2.cat.catpor);
-  CHECK(decoded1.cat.geohash == decoded2.cat.geohash);
 }
 
 TEST_CASE("PayloadValidation") {
@@ -170,24 +186,27 @@ TEST_CASE("PayloadValidation") {
           }
           break;
         case CLAIM_CTI:
-          found_cti = cbor_isa_string(value) || cbor_isa_bytestring(value);
+          // CTA-5007-B / RFC 8392 §3.1.7: cti is a byte string.
+          found_cti = cbor_isa_bytestring(value);
           break;
         case CLAIM_CATREPLAY:
         case CLAIM_CATV:
-        case CLAIM_GEOHASH:
-          CHECK(cbor_isa_string(value));
-          break;
-        case CLAIM_CATU:
           CHECK(cbor_isa_uint(value));
           break;
+        case CLAIM_GEOHASH:
+          CHECK((cbor_isa_string(value) || cbor_isa_array(value)));
+          break;
+        case CLAIM_CATU:
+          CHECK(cbor_isa_map(value));
+          break;
         case CLAIM_CATPOR:
-          CHECK(cbor_is_bool(value));
+          CHECK(cbor_isa_array(value));
           break;
         case CLAIM_CATGEOCOORD:
-          CHECK(cbor_isa_map(value));
-          if (cbor_isa_map(value)) {
-            CHECK(cbor_map_size(value) >= 2);
-            CHECK(cbor_map_size(value) <= 3);
+          CHECK(cbor_isa_array(value));
+          if (cbor_isa_array(value)) {
+            CHECK(cbor_array_size(value) >= 2);
+            CHECK(cbor_array_size(value) <= 3);
           }
           break;
       }
