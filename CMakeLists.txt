@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(ENABLE_LOGGING "Enable logging with spdlog" ON)
 option(CATAPULT_ENABLE_JSON "Enable JSON serialization support (requires nlohmann_json)" ON)
 option(CATAPULT_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(CATAPULT_ENABLE_TSAN "Enable ThreadSanitizer (mutually exclusive with ASan/UBSan)" OFF)
 # WARNING: The legacy JWT-shaped token API (catapult::legacy::legacyJwtEncodeToken /
 # legacyJwtDecodeToken) emits and accepts a JWT-style three-part format that is NOT
 # a CTA-5007-B compliant CWT. It is retained solely for backwards compatibility with
@@ -45,7 +46,6 @@ set(CATAPULT_SOURCES
     src/token.cpp
     src/trie.cpp
     src/uri.cpp
-    src/validator.cpp
 )
 
 # Add JSON-dependent sources only when JSON is enabled
@@ -111,6 +111,11 @@ target_compile_options(catapult PRIVATE
 )
 
 
+if(CATAPULT_ENABLE_SANITIZERS AND CATAPULT_ENABLE_TSAN)
+    message(FATAL_ERROR
+        "CATAPULT_ENABLE_SANITIZERS and CATAPULT_ENABLE_TSAN are mutually exclusive.")
+endif()
+
 if(CATAPULT_ENABLE_SANITIZERS)
     set(CATAPULT_SANITIZER_FLAGS
         -fsanitize=address,undefined
@@ -120,6 +125,15 @@ if(CATAPULT_ENABLE_SANITIZERS)
     )
     target_compile_options(catapult PUBLIC ${CATAPULT_SANITIZER_FLAGS})
     target_link_options(catapult PUBLIC ${CATAPULT_SANITIZER_FLAGS})
+endif()
+
+if(CATAPULT_ENABLE_TSAN)
+    set(CATAPULT_TSAN_FLAGS
+        -fsanitize=thread
+        -fno-omit-frame-pointer
+    )
+    target_compile_options(catapult PUBLIC ${CATAPULT_TSAN_FLAGS})
+    target_link_options(catapult PUBLIC ${CATAPULT_TSAN_FLAGS})
 endif()
 
 if(ENABLE_LOGGING)
