@@ -19,32 +19,43 @@
 
 using namespace catapult;
 
+// Once the CWT signature check passes AND CatTokenValidator has run every
+// semantic check, the relay should carry the token as an immutable
+// ValidatedCatToken rather than a mutable CatToken. This stops downstream
+// authorization code from silently mutating a field the validator already
+// examined.
 struct AuthorizationResult {
   bool authorized = false;
   std::string reason;
-  std::optional<CatToken> token;
+  std::optional<ValidatedCatToken> token;
 };
 
 /**
  * @brief Validate CWT bytes received from the network
  *
  * In a typical MOQT flow, the relay receives the CAT token as CWT bytes
- * over the network. This function validates the cryptographic signature
- * and deserializes the token.
+ * over the network. This function validates the cryptographic signature,
+ * deserializes the token, and runs the semantic validator, returning an
+ * immutable ValidatedCatToken on success.
  *
  * @param cwt_bytes Raw CWT bytes from the network
  * @param verifier Algorithm with issuer's public key for signature verification
- * @return AuthorizationResult with deserialized token on success
+ * @param validator Configured CatTokenValidator (expected issuers, audiences,
+ *                  clock-skew tolerance)
+ * @return AuthorizationResult with an immutable ValidatedCatToken on success
  */
 AuthorizationResult validate_cwt_from_network(
     std::span<const uint8_t> cwt_bytes,
-    const CryptographicAlgorithm& verifier) {
+    const CryptographicAlgorithm& verifier,
+    const CatTokenValidator& validator) {
   AuthorizationResult result;
 
   try {
     // Validate signature and deserialize directly from raw CBOR bytes
     Cwt cwt = Cwt::validateCwt(cwt_bytes, verifier);
-    result.token = std::move(cwt.payload);
+    // Consume the parsed CatToken into a ValidatedCatToken; on failure
+    // intoValidated throws and no ValidatedCatToken is produced.
+    result.token.emplace(validator.intoValidated(std::move(cwt.payload)));
     result.authorized = true;
     result.reason = "CWT signature valid";
   } catch (const SignatureVerificationError& e) {
@@ -53,6 +64,8 @@ AuthorizationResult validate_cwt_from_network(
     result.reason = std::string("Invalid CWT format: ") + e.what();
   } catch (const CryptoError& e) {
     result.reason = std::string("CWT validation failed: ") + e.what();
+  } catch (const CatError& e) {
+    result.reason = std::string("Token validation failed: ") + e.what();
   } catch (const std::exception& e) {
     result.reason = std::string("Unexpected error: ") + e.what();
   }
@@ -63,56 +76,48 @@ AuthorizationResult validate_cwt_from_network(
 /**
  * @brief Validate MOQT authorization after CWT validation
  */
-AuthorizationResult validate_moqt_authorization(
-    const CatToken& token, const std::vector<uint8_t>& dpop_proof_bytes,
-    int requested_action, const std::string& requested_namespace,
-    const std::string& requested_track, const std::string& relay_endpoint) {
-  AuthorizationResult result;
-
-  // Step 1: Check token expiration
-  if (token.core.exp.has_value()) {
-    auto now =
-        std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    if (now > token.core.exp.value()) {
-      result.reason = "Token expired";
-      return result;
-    }
-  }
-
-  // Step 2: Verify audience matches this relay
-  if (token.core.aud.has_value()) {
+bool authorize_moqt(const ValidatedCatToken& token,
+                    const std::vector<uint8_t>& dpop_proof_bytes,
+                    int requested_action,
+                    const std::string& requested_namespace,
+                    const std::string& requested_track,
+                    const std::string& relay_endpoint, std::string& reason) {
+  // Step 1: exp/nbf/moqt-reval have already been checked by
+  // CatTokenValidator::intoValidated. Audience match is issuer/relay-policy
+  // specific, so re-check it here against the relay's own identifier.
+  if (token.core().aud.has_value()) {
     bool aud_match = false;
-    for (const auto& aud : *token.core.aud) {
+    for (const auto& aud : *token.core().aud) {
       if (aud.find("relay") != std::string::npos) {
         aud_match = true;
         break;
       }
     }
     if (!aud_match) {
-      result.reason = "Token not intended for this relay";
-      return result;
+      reason = "Token not intended for this relay";
+      return false;
     }
   }
 
-  // Step 3: Check MOQT authorization
-  if (!token.extended.hasMoqtClaims()) {
-    result.reason = "No MOQT claims in token";
-    return result;
+  // Step 2: Check MOQT authorization
+  if (!token.extended().hasMoqtClaims()) {
+    reason = "No MOQT claims in token";
+    return false;
   }
 
-  const auto* moqt = token.extended.getMoqtClaimsReadOnly();
+  const auto* moqt = token.extended().getMoqtClaimsReadOnly();
   if (!moqt->isAuthorized(requested_action, requested_namespace,
                           requested_track)) {
-    result.reason = "MOQT action not authorized";
-    return result;
+    reason = "MOQT action not authorized";
+    return false;
   }
 
-  // Step 4: Validate DPoP proof (also received as bytes from network).
+  // Step 3: Validate DPoP proof (also received as bytes from network).
   // CTA-5007-B §4.6.9 binds the token to the client key via `cnf`; the hex
   // thumbprint is carried in the `kid` field.
-  if (!token.dpop.cnf.has_value() || !token.dpop.cnf->kid.has_value()) {
-    result.reason = "Token missing DPoP confirmation";
-    return result;
+  if (!token.dpop().cnf.has_value() || !token.dpop().cnf->kid.has_value()) {
+    reason = "Token missing DPoP confirmation";
+    return false;
   }
 
   // Convert DPoP proof bytes to string for deserialization
@@ -127,14 +132,13 @@ AuthorizationResult validate_moqt_authorization(
       relay_endpoint, requested_namespace, requested_track);
 
   if (!validator.validate_proof(proof, requested_action, expected_uri,
-                                token.dpop.cnf->kid.value())) {
-    result.reason = "DPoP proof validation failed";
-    return result;
+                                token.dpop().cnf->kid.value())) {
+    reason = "DPoP proof validation failed";
+    return false;
   }
 
-  result.authorized = true;
-  result.reason = "All validations passed";
-  return result;
+  reason = "All validations passed";
+  return true;
 }
 
 int main() {
@@ -194,16 +198,24 @@ int main() {
   std::cout << "  (simulating network receive of " << cwt_bytes.size()
             << " bytes)\n\n";
 
+  // Configure the semantic validator. The example uses the issuer and
+  // audience the auth server just embedded.
+  CatTokenValidator cat_validator;
+  cat_validator
+      .withExpectedIssuers({"auth.moqt-cdn.example.com"})
+      .withExpectedAudiences({"relay.moqt-cdn.example.com"});
+
   // Validate CWT signature and deserialize
-  std::cout << "Step 3: Validate CWT signature\n";
-  auto cwt_result = validate_cwt_from_network(cwt_bytes, issuer_verifier);
+  std::cout << "Step 3: Validate CWT signature and semantics\n";
+  auto cwt_result =
+      validate_cwt_from_network(cwt_bytes, issuer_verifier, cat_validator);
   if (!cwt_result.authorized || !cwt_result.token.has_value()) {
     std::cout << "  FAILED: " << cwt_result.reason << "\n";
     return 1;
   }
   std::cout << "  " << cwt_result.reason << "\n";
   std::cout << "  Token issuer: "
-            << cwt_result.token->core.iss.value_or("unknown") << "\n\n";
+            << cwt_result.token->core().iss.value_or("unknown") << "\n\n";
 
   // ========================================
   // TEST SCENARIOS
@@ -216,13 +228,15 @@ int main() {
   std::string proof_str = proof.serialize();
   std::vector<uint8_t> proof_bytes(proof_str.begin(), proof_str.end());
 
+  const ValidatedCatToken& validated = *cwt_result.token;
+
   // Test 1: Valid request
   std::cout << "Test 1: Valid PUBLISH to live/video\n";
-  auto result1 = validate_moqt_authorization(*cwt_result.token, proof_bytes,
-                                             moqt_actions::PUBLISH, "live",
-                                             "video", relay_endpoint);
-  std::cout << "  Result: " << (result1.authorized ? "AUTHORIZED" : "DENIED")
-            << " - " << result1.reason << "\n\n";
+  std::string reason1;
+  bool ok1 = authorize_moqt(validated, proof_bytes, moqt_actions::PUBLISH,
+                            "live", "video", relay_endpoint, reason1);
+  std::cout << "  Result: " << (ok1 ? "AUTHORIZED" : "DENIED") << " - "
+            << reason1 << "\n\n";
 
   // Test 2: Unauthorized action
   std::cout << "Test 2: SUBSCRIBE (not permitted)\n";
@@ -231,11 +245,11 @@ int main() {
                                  relay_endpoint, moqt_dpop::generate_jti());
   std::string proof2_str = proof2.serialize();
   std::vector<uint8_t> proof2_bytes(proof2_str.begin(), proof2_str.end());
-  auto result2 = validate_moqt_authorization(*cwt_result.token, proof2_bytes,
-                                             moqt_actions::SUBSCRIBE, "live",
-                                             "video", relay_endpoint);
-  std::cout << "  Result: " << (result2.authorized ? "AUTHORIZED" : "DENIED")
-            << " - " << result2.reason << "\n\n";
+  std::string reason2;
+  bool ok2 = authorize_moqt(validated, proof2_bytes, moqt_actions::SUBSCRIBE,
+                            "live", "video", relay_endpoint, reason2);
+  std::cout << "  Result: " << (ok2 ? "AUTHORIZED" : "DENIED") << " - "
+            << reason2 << "\n\n";
 
   // Test 3: Wrong namespace
   std::cout << "Test 3: PUBLISH to wrong namespace\n";
@@ -244,11 +258,11 @@ int main() {
                                  relay_endpoint, moqt_dpop::generate_jti());
   std::string proof3_str = proof3.serialize();
   std::vector<uint8_t> proof3_bytes(proof3_str.begin(), proof3_str.end());
-  auto result3 = validate_moqt_authorization(*cwt_result.token, proof3_bytes,
-                                             moqt_actions::PUBLISH, "other",
-                                             "video", relay_endpoint);
-  std::cout << "  Result: " << (result3.authorized ? "AUTHORIZED" : "DENIED")
-            << " - " << result3.reason << "\n\n";
+  std::string reason3;
+  bool ok3 = authorize_moqt(validated, proof3_bytes, moqt_actions::PUBLISH,
+                            "other", "video", relay_endpoint, reason3);
+  std::cout << "  Result: " << (ok3 ? "AUTHORIZED" : "DENIED") << " - "
+            << reason3 << "\n\n";
 
   // Test 4: Invalid CWT signature
   std::cout << "Test 4: Invalid CWT signature (tampered bytes)\n";
@@ -256,7 +270,8 @@ int main() {
   if (!tampered_bytes.empty()) {
     tampered_bytes.back() ^= 0xFF;  // Flip bits in last byte
   }
-  auto result4 = validate_cwt_from_network(tampered_bytes, issuer_verifier);
+  auto result4 =
+      validate_cwt_from_network(tampered_bytes, issuer_verifier, cat_validator);
   std::cout << "  Result: " << (result4.authorized ? "AUTHORIZED" : "DENIED")
             << " - " << result4.reason << "\n";
 
