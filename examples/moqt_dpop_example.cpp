@@ -159,6 +159,10 @@ int main() {
 
     // Validate DPoP proof
     DpopProofValidator dpop_validator(dpop_settings);
+    // Signature verification is mandatory (CTA-5007-B §4.6.9): bind the
+    // validator to the client's public key algorithm before calling
+    // validate_proof, otherwise validation fails closed.
+    dpop_validator.set_cwt_verifier(&client_keypair.get_algorithm());
     auto expected_uri =
         moqt_dpop::construct_moqt_uri(endpoint, namespace_name, track_name);
 

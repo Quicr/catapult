@@ -519,21 +519,21 @@ TEST_CASE("ValidatorNegativeTests - Time-based Validation") {
     }
     
     SUBCASE("Token with inverted time claims") {
-        // Token where not-before is after expiration - validator checks NBF first
+        // A token where nbf > exp is uninhabitable at any instant. The
+        // validator now rejects the relationship explicitly, before any
+        // individual boundary check runs.
         auto invalidTimeToken = CatToken()
             .withIssuer("https://trusted-issuer.com")
             .withAudience({"https://trusted-service.com"})
             .withExpiration(now + std::chrono::minutes(30))
             .withNotBefore(now + std::chrono::hours(1)) // NBF after EXP
             .withCwtId("invalid-time-token");
-            
-            
+
         CatTokenValidator validator;
         validator.withExpectedIssuers({"https://trusted-issuer.com"})
                 .withExpectedAudiences({"https://trusted-service.com"});
-        
-        // The validator checks NBF before EXP, so this throws TokenNotYetValidError
-        REQUIRE_THROWS_AS(validator.validate(invalidTimeToken), TokenNotYetValidError);
+
+        REQUIRE_THROWS_AS(validator.validate(invalidTimeToken), InvalidClaimValueError);
     }
 }
 

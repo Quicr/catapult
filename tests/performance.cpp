@@ -190,6 +190,9 @@ TEST_CASE("DPoP proof validation throughput", "[performance][dpop]") {
     settings.set_window(std::chrono::seconds{300});
     settings.set_jti_processing(false);  // Disable JTI replay check for throughput test
     DpopProofValidator validator(settings);
+    // Mandatory signature verification: configure the verifier bound to the
+    // key pair used to sign proofs below.
+    validator.set_cwt_verifier(&keys.get_algorithm());
 
     auto jti = moqt_dpop::generate_jti();
     auto proof = keys.generate_proof(moqt_actions::PUBLISH, "ns", "track", "relay:4433", jti);
@@ -284,6 +287,7 @@ TEST_CASE("End-to-end relay validation throughput", "[performance][e2e]") {
     CatDpopSettings dpop_settings;
     dpop_settings.set_window(std::chrono::seconds{300});
     DpopProofValidator dpop_validator(dpop_settings);
+    dpop_validator.set_cwt_verifier(&client_keys.get_algorithm());
 
     // Pre-generate proofs (client does this, not relay)
     constexpr size_t iterations = 100000;
@@ -355,6 +359,7 @@ TEST_CASE("End-to-end relay validation with token cache", "[performance][e2e][ca
     CatDpopSettings dpop_settings;
     dpop_settings.set_window(std::chrono::seconds{300});
     DpopProofValidator dpop_validator(dpop_settings);
+    dpop_validator.set_cwt_verifier(&client_keys.get_algorithm());
 
     // Pre-generate proofs
     constexpr size_t iterations = 100000;
@@ -394,5 +399,10 @@ TEST_CASE("End-to-end relay validation with token cache", "[performance][e2e][ca
     INFO("Throughput: " << ops_per_sec << " ops/sec");
 
     REQUIRE(authorized == iterations);
-    REQUIRE(ops_per_sec > 50000);  // Expect >50k with caching
+    // CWT-cache eliminates issuer signature checks, but each DPoP proof still
+    // requires a full ECDSA verification per CTA-5007-B §4.6.9. Target reflects
+    // real per-proof crypto work — do not raise this without also weakening
+    // DPoP proof-of-possession guarantees. Additionally, stricter CBOR claim
+    // parsing (C-05 fix) adds per-token overhead.
+    REQUIRE(ops_per_sec > 10000);
 }

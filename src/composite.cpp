@@ -8,6 +8,7 @@
 
 #include "catapult/composite_impl.hpp"
 #include "catapult/error.hpp"
+#include "catapult/logging.hpp"
 #include "catapult/token.hpp"
 
 namespace catapult {
@@ -86,21 +87,27 @@ bool CompositeClaims::hasComposites() const {
 // Composite utility functions
 namespace composite_utils {
 
+// CTA-5007-B remediation (C-06): the pool-backed paths returned pooled storage
+// inside a default-deleter std::unique_ptr, which is undefined behavior on
+// destruction (the pool owns the memory, not the global allocator). Until the
+// pool ownership model is rewritten in Phase 3 (task #24 / [[composite-pool-
+// rewrite]]), the `usePool` argument is intentionally ignored — every factory
+// unconditionally uses standard allocation. Log a warning so callers requesting
+// the pool path notice the downgrade instead of silently paying no perf cost.
+namespace {
+inline void warn_if_pool_requested(bool usePool, const char* which) {
+  if (usePool) {
+    CAT_LOG_WARN(
+        "{}: pool-backed allocation requested but is disabled (C-06 fix); "
+        "using standard allocation. See docs/security/SECURITY.md.",
+        which);
+  }
+}
+}  // namespace
+
 std::unique_ptr<OrClaim> createOrComposite(
     const std::vector<ClaimSet>& claimSets, bool usePool) {
-  if (usePool) {
-    // Use memory pool for composite allocation
-    auto pooledComposite =
-        getCompositeClaimPool<CompositeOperator::OR>().make();
-    if (pooledComposite) {
-      for (const auto& claimSet : claimSets) {
-        pooledComposite->addClaimSet(claimSet);
-      }
-      return std::unique_ptr<OrClaim>(pooledComposite.release());
-    }
-  }
-
-  // Fallback to standard allocation
+  warn_if_pool_requested(usePool, "createOrComposite");
   auto composite = std::make_unique<OrClaim>();
   for (const auto& claimSet : claimSets) {
     composite->addClaimSet(claimSet);
@@ -110,19 +117,7 @@ std::unique_ptr<OrClaim> createOrComposite(
 
 std::unique_ptr<NorClaim> createNorComposite(
     const std::vector<ClaimSet>& claimSets, bool usePool) {
-  if (usePool) {
-    // Use memory pool for composite allocation
-    auto pooledComposite =
-        getCompositeClaimPool<CompositeOperator::NOR>().make();
-    if (pooledComposite) {
-      for (const auto& claimSet : claimSets) {
-        pooledComposite->addClaimSet(claimSet);
-      }
-      return std::unique_ptr<NorClaim>(pooledComposite.release());
-    }
-  }
-
-  // Fallback to standard allocation
+  warn_if_pool_requested(usePool, "createNorComposite");
   auto composite = std::make_unique<NorClaim>();
   for (const auto& claimSet : claimSets) {
     composite->addClaimSet(claimSet);
@@ -132,19 +127,7 @@ std::unique_ptr<NorClaim> createNorComposite(
 
 std::unique_ptr<AndClaim> createAndComposite(
     const std::vector<ClaimSet>& claimSets, bool usePool) {
-  if (usePool) {
-    // Use memory pool for composite allocation
-    auto pooledComposite =
-        getCompositeClaimPool<CompositeOperator::AND>().make();
-    if (pooledComposite) {
-      for (const auto& claimSet : claimSets) {
-        pooledComposite->addClaimSet(claimSet);
-      }
-      return std::unique_ptr<AndClaim>(pooledComposite.release());
-    }
-  }
-
-  // Fallback to standard allocation
+  warn_if_pool_requested(usePool, "createAndComposite");
   auto composite = std::make_unique<AndClaim>();
   for (const auto& claimSet : claimSets) {
     composite->addClaimSet(claimSet);
@@ -154,19 +137,7 @@ std::unique_ptr<AndClaim> createAndComposite(
 
 std::unique_ptr<OrClaim> createOrFromTokens(const std::vector<CatToken>& tokens,
                                             bool usePool) {
-  if (usePool) {
-    // Use memory pool for composite allocation
-    auto pooledComposite =
-        getCompositeClaimPool<CompositeOperator::OR>().make();
-    if (pooledComposite) {
-      for (const auto& token : tokens) {
-        pooledComposite->addToken(token);
-      }
-      return std::unique_ptr<OrClaim>(pooledComposite.release());
-    }
-  }
-
-  // Fallback to standard allocation
+  warn_if_pool_requested(usePool, "createOrFromTokens");
   auto composite = std::make_unique<OrClaim>();
   for (const auto& token : tokens) {
     composite->addToken(token);
@@ -176,19 +147,7 @@ std::unique_ptr<OrClaim> createOrFromTokens(const std::vector<CatToken>& tokens,
 
 std::unique_ptr<NorClaim> createNorFromTokens(
     const std::vector<CatToken>& tokens, bool usePool) {
-  if (usePool) {
-    // Use memory pool for composite allocation
-    auto pooledComposite =
-        getCompositeClaimPool<CompositeOperator::NOR>().make();
-    if (pooledComposite) {
-      for (const auto& token : tokens) {
-        pooledComposite->addToken(token);
-      }
-      return std::unique_ptr<NorClaim>(pooledComposite.release());
-    }
-  }
-
-  // Fallback to standard allocation
+  warn_if_pool_requested(usePool, "createNorFromTokens");
   auto composite = std::make_unique<NorClaim>();
   for (const auto& token : tokens) {
     composite->addToken(token);
@@ -198,19 +157,7 @@ std::unique_ptr<NorClaim> createNorFromTokens(
 
 std::unique_ptr<AndClaim> createAndFromTokens(
     const std::vector<CatToken>& tokens, bool usePool) {
-  if (usePool) {
-    // Use memory pool for composite allocation
-    auto pooledComposite =
-        getCompositeClaimPool<CompositeOperator::AND>().make();
-    if (pooledComposite) {
-      for (const auto& token : tokens) {
-        pooledComposite->addToken(token);
-      }
-      return std::unique_ptr<AndClaim>(pooledComposite.release());
-    }
-  }
-
-  // Fallback to standard allocation
+  warn_if_pool_requested(usePool, "createAndFromTokens");
   auto composite = std::make_unique<AndClaim>();
   for (const auto& token : tokens) {
     composite->addToken(token);
