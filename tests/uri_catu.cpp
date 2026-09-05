@@ -132,4 +132,23 @@ TEST_SUITE("matchesCatu") {
         match(UriMatchType::Exact, "https");
     CHECK_FALSE(matchesCatu(m, "not-a-uri"));
   }
+
+  TEST_CASE("Regex ReDoS shapes fail closed instead of running the matcher") {
+    // Classic evil-regex patterns: quantifier over an alternation, quantifier
+    // over a quantified inner group, deep nesting. std::regex has unbounded
+    // worst-case backtracking, so we reject these outright rather than let a
+    // malicious issuer choose the relay's CPU budget.
+    for (const std::string& evil : {
+             std::string("(a|a)*"),
+             std::string("(a+)+"),
+             std::string("(a*)*"),
+             std::string("(.*)*"),
+             std::string("((((((x)))))))"),  // exceeds group-depth cap
+         }) {
+      CatUriMatchMap m;
+      m.components[static_cast<int64_t>(UriComponentLabel::Path)] =
+          match(UriMatchType::Regex, evil);
+      CHECK_FALSE(matchesCatu(m, "https://h/aaaaaaaaaaaaaaaaaaaaaaaa!"));
+    }
+  }
 }

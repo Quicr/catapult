@@ -242,9 +242,12 @@ const std::string* componentValue(const ParsedUri& parsed,
 
 namespace {
 
-// std::regex has unbounded worst-case backtracking. Callers pre-screen with
-// isRegexPatternSafe, but we also refuse to spend more than one regex compile
-// per evaluation attempt to keep validation deterministic.
+bool isRegexPatternSafe(const std::string& pattern);
+
+// std::regex has unbounded worst-case backtracking. Every regex-typed match
+// point must screen the pattern with isRegexPatternSafe before compiling;
+// otherwise a malicious issuer can turn a policy check into an unbounded CPU
+// consumption vector on the relay hot path.
 bool matchComponent(UriMatchType type, const std::vector<uint8_t>& value_bytes,
                     const std::string& component) {
   std::string value(value_bytes.begin(), value_bytes.end());
@@ -261,7 +264,7 @@ bool matchComponent(UriMatchType type, const std::vector<uint8_t>& value_bytes,
     case UriMatchType::Contains:
       return component.find(value) != std::string::npos;
     case UriMatchType::Regex: {
-      if (value.size() > kMaxRegexPatternLength) {
+      if (!isRegexPatternSafe(value)) {
         return false;
       }
       try {
@@ -317,13 +320,25 @@ bool matchesCatu(const CatUriMatchMap& catu, std::string_view uri) {
 
 namespace {
 
-// Reject constructs whose worst-case std::regex evaluation is unbounded.
+// std::regex evaluation is unbounded in the worst case (the standard permits
+// backtracking implementations). The safest posture for a relay validator is
+// to reject any pattern that combines quantifiers with either nested
+// quantified groups or top-level alternation inside a quantified group —
+// classic evil-regex ReDoS shapes such as (a|a)*, (a+)+, (a*)*, (.*)*. We
+// also cap group nesting: even without a backtracking blow-up, deep nesting
+// enlarges the DFA/NFA construction cost.
+constexpr int kMaxRegexGroupDepth = 4;
+
 bool isRegexPatternSafe(const std::string& pattern) {
   if (pattern.length() > kMaxRegexPatternLength) {
     return false;
   }
 
-  std::vector<bool> group_has_quantifier;
+  struct GroupState {
+    bool has_quantifier = false;
+    bool has_alternation = false;
+  };
+  std::vector<GroupState> group_stack;
   int depth = 0;
 
   for (size_t i = 0; i < pattern.length(); ++i) {
@@ -357,41 +372,49 @@ bool isRegexPatternSafe(const std::string& pattern) {
         }
       }
       if (is_group) {
-        group_has_quantifier.push_back(false);
-        ++depth;
+        if (++depth > kMaxRegexGroupDepth) {
+          return false;
+        }
+        group_stack.push_back({});
       }
     } else if (c == ')') {
-      if (depth > 0 && !group_has_quantifier.empty()) {
-        bool inner_quantified = group_has_quantifier.back();
-        group_has_quantifier.pop_back();
+      if (depth > 0 && !group_stack.empty()) {
+        GroupState finished = group_stack.back();
+        group_stack.pop_back();
         --depth;
         if (i + 1 < pattern.length()) {
           char next = pattern[i + 1];
           if (next == '+' || next == '*' || next == '?' || next == '{') {
-            if (inner_quantified) {
+            // Quantifier applied to a group that itself contains
+            // quantifiers or alternation is the ReDoS shape.
+            if (finished.has_quantifier || finished.has_alternation) {
               return false;
             }
-            if (!group_has_quantifier.empty()) {
-              group_has_quantifier.back() = true;
+            if (!group_stack.empty()) {
+              group_stack.back().has_quantifier = true;
             }
           }
         }
       }
+    } else if (c == '|') {
+      if (!group_stack.empty()) {
+        group_stack.back().has_alternation = true;
+      }
     } else if (c == '+' || c == '*' || c == '?') {
-      if (!group_has_quantifier.empty()) {
-        group_has_quantifier.back() = true;
+      if (!group_stack.empty()) {
+        group_stack.back().has_quantifier = true;
       }
     } else if (c == '{') {
       while (i + 1 < pattern.length() && pattern[i + 1] != '}') {
         ++i;
       }
-      if (!group_has_quantifier.empty()) {
-        group_has_quantifier.back() = true;
+      if (!group_stack.empty()) {
+        group_stack.back().has_quantifier = true;
       }
     }
   }
 
-  return true;
+  return depth == 0;
 }
 
 }  // namespace
