@@ -10,6 +10,7 @@
 #include "catapult/dpop.hpp"
 #include "catapult/internal/cbor_owned.hpp"
 #include "catapult/internal/parse_limits.hpp"
+#include "catapult/internal/strict_cbor.hpp"
 #include "catapult/logging.hpp"
 
 namespace catapult {
@@ -515,27 +516,12 @@ std::vector<uint8_t> Cwt::encodePayload() const {
 }
 
 CatToken Cwt::decodePayload(const std::vector<uint8_t>& cborData) {
-  // Early validation
-  if (cborData.empty()) {
-    throw InvalidCborError("Empty CBOR data");
-  }
-
-  // Maximum CBOR payload size to prevent memory exhaustion
-  constexpr size_t MAX_CBOR_SIZE = 1024 * 1024;  // 1MB
-  if (cborData.size() > MAX_CBOR_SIZE) {
-    throw InvalidCborError("CBOR data exceeds maximum size");
-  }
-
-  struct cbor_load_result result;
-  auto item = cbor_load_owned(cborData.data(), cborData.size(), result);
-
-  if (result.error.code != CBOR_ERR_NONE) {
-    if (result.error.code == CBOR_ERR_MEMERROR) {
-      throwOsError("cbor_load memory allocation");
-    } else {
-      throw InvalidCborError("Failed to parse CBOR data");
-    }
-  }
+  // Strict load enforces empty/oversize rejection, definite-length forms,
+  // no duplicate keys, no unrecognized tags, no trailing bytes, and the
+  // per-token size cap. This is the primary CAT payload parse entry
+  // point so all downstream extraction runs on a canonical DOM.
+  auto item = catapult::internal::loadStrict(
+      std::span<const uint8_t>(cborData.data(), cborData.size()));
 
   if (!cbor_isa_map(item.get())) {
     throw InvalidTokenFormatError();
