@@ -14,6 +14,49 @@
 
 namespace catapult {
 
+namespace {
+
+// COSE alg IDs are drawn from the IANA COSE Algorithms registry, which uses
+// small positive/negative integers. Reject anything outside a conservative
+// range so an attacker cannot smuggle a value whose CBOR round-trip would
+// overflow int64_t (see RFC 8152 §8, RFC 9053 §2.1). The range easily covers
+// every currently-registered algorithm identifier.
+constexpr int64_t kMinCoseAlgId = -65536;
+constexpr int64_t kMaxCoseAlgId = 65535;
+
+// Build the CBOR alg header value with an overflow-safe negint conversion.
+CborItemPtr buildAlgCborValue(int64_t alg) {
+  if (alg < kMinCoseAlgId || alg > kMaxCoseAlgId) {
+    throw InvalidCborError("COSE algorithm id out of accepted range");
+  }
+  if (alg >= 0) {
+    return CborItemPtr(cbor_build_uint64(static_cast<uint64_t>(alg)));
+  }
+  // Encode -1 - alg without overflowing when alg == INT64_MIN.
+  uint64_t magnitude = static_cast<uint64_t>(-(alg + 1));
+  return CborItemPtr(cbor_build_negint64(magnitude));
+}
+
+// Decode a COSE alg header value, enforcing the same range and rejecting
+// negints whose (-1 - n) representation would exceed int64_t.
+bool decodeAlgCborValue(cbor_item_t* value, int64_t& out) {
+  if (cbor_isa_uint(value)) {
+    uint64_t raw = cbor_get_int(value);
+    if (raw > static_cast<uint64_t>(kMaxCoseAlgId)) return false;
+    out = static_cast<int64_t>(raw);
+    return true;
+  }
+  if (cbor_isa_negint(value)) {
+    uint64_t magnitude = cbor_get_int(value);  // encodes -1 - value
+    if (magnitude > static_cast<uint64_t>(-(kMinCoseAlgId + 1))) return false;
+    out = -static_cast<int64_t>(magnitude) - 1;
+    return true;
+  }
+  return false;
+}
+
+}  // namespace
+
 // RAII deleter implementations
 void CborItemDeleter::operator()(cbor_item_t* item) const noexcept {
   if (item) {
@@ -398,13 +441,7 @@ Cwt& Cwt::addSignature(const CryptographicAlgorithm& algorithm,
       // Create minimal signature header with just algorithm
       auto headerMap = CborItemPtr(cbor_new_definite_map(1));
       auto alg_key = CborItemPtr(cbor_build_uint8(1));
-      CborItemPtr alg_val;
-      if (algorithm.algorithmId() > 0) {
-        alg_val = CborItemPtr(cbor_build_uint64(algorithm.algorithmId()));
-      } else {
-        alg_val =
-            CborItemPtr(cbor_build_negint64(-algorithm.algorithmId() - 1));
-      }
+      auto alg_val = buildAlgCborValue(algorithm.algorithmId());
 
       struct cbor_pair alg_pair = {alg_key.get(), alg_val.get()};
       if (!cbor_map_add(headerMap.get(), alg_pair)) {
@@ -972,12 +1009,7 @@ std::vector<uint8_t> Cwt::createCoseHeader() const {
 
     // Add algorithm (label 1, required)
     auto alg_key = CborItemPtr(cbor_build_uint8(1));
-    CborItemPtr alg_val;
-    if (header.alg > 0) {
-      alg_val = CborItemPtr(cbor_build_uint64(header.alg));
-    } else {
-      alg_val = CborItemPtr(cbor_build_negint64(-header.alg - 1));
-    }
+    auto alg_val = buildAlgCborValue(header.alg);
 
     struct cbor_pair alg_pair = {alg_key.get(), alg_val.get()};
     if (!cbor_map_add(headerMap.get(), alg_pair)) {
@@ -1043,11 +1075,18 @@ std::vector<uint8_t> Cwt::createCwt(
     std::vector<uint8_t> iv;
 
     switch (mode) {
-      case CwtMode::Signed:
-      case CwtMode::MACed: {
-        // Use COSE_Sign1 Sig_structure for single signatures
+      case CwtMode::Signed: {
+        // Use COSE_Sign1 Sig_structure (RFC 8152 §4.4).
         auto signingInput = createCoseSign1Input(coseHeader, payload);
         signature = algorithm.sign(signingInput);
+        break;
+      }
+      case CwtMode::MACed: {
+        // Use COSE_Mac0 MAC_structure (RFC 8152 §6.3). Previously this path
+        // reused the "Signature1" context, which is non-conformant and
+        // opens the door to cross-context tag confusion.
+        auto macInput = createCoseMac0Input(coseHeader, payload);
+        signature = algorithm.sign(macInput);
         break;
       }
       case CwtMode::MultiSigned:
@@ -1074,9 +1113,13 @@ std::vector<uint8_t> Cwt::createCwt(
           throw CryptoError("Unsupported encryption algorithm");
         }
 
-        // Encrypt the payload directly (COSE_Encrypt0 doesn't use signing
-        // input)
-        encryptedPayload = algorithm.encrypt(payload, iv);
+        {
+          // Bind the protected header to the ciphertext via the Enc_structure
+          // AAD (RFC 8152 §5.3). Without this, an attacker can substitute the
+          // alg/kid in the protected header without invalidating the tag.
+          auto encAad = createCoseEncrypt0Aad(coseHeader);
+          encryptedPayload = algorithm.encrypt(payload, iv, encAad);
+        }
         break;
     }
 
@@ -1297,10 +1340,8 @@ CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
     uint64_t label = cbor_get_int(pairs[i].key);
 
     if (label == 1) {  // alg
-      if (cbor_isa_uint(pairs[i].value)) {
-        algId = static_cast<int64_t>(cbor_get_int(pairs[i].value));
-      } else if (cbor_isa_negint(pairs[i].value)) {
-        algId = -static_cast<int64_t>(cbor_get_int(pairs[i].value)) - 1;
+      if (!decodeAlgCborValue(pairs[i].value, algId)) {
+        throw InvalidTokenFormatError();
       }
     } else if (label == 4) {  // kid
       if (cbor_isa_string(pairs[i].value)) {
@@ -1406,8 +1447,13 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
                                cbor_bytestring_handle(coseArray[2]) +
                                    cbor_bytestring_length(coseArray[2]));
 
-      // Decrypt the payload
-      payloadBytes = algorithm.decrypt(ciphertext, iv);
+      // Decrypt with Enc_structure as AAD to authenticate the protected
+      // header (RFC 8152 §5.3). Producers built after this change will
+      // include the AAD; producers that did not will fail this tag check,
+      // which is the intended outcome — accepting them would silently
+      // drop protected-header authentication.
+      auto encAad = createCoseEncrypt0Aad(protectedHeaderBytes);
+      payloadBytes = algorithm.decrypt(ciphertext, iv, encAad);
 
     } else if (arraySize == 4) {
       cbor_item_t** coseArray = cbor_array_handle(coseItem.get());
@@ -1445,13 +1491,20 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
                                  cbor_bytestring_handle(coseArray[3]) +
                                      cbor_bytestring_length(coseArray[3]));
 
-        // Verify signature using COSE_Sign1 Sig_structure
-        auto signingInput =
-            createCoseSign1Input(protectedHeaderBytes, payloadBytes);
-        bool isValid = algorithm.verify(signingInput, signatureBytes);
+        // Route to the correct RFC 8152 structure for the supplied
+        // algorithm: MAC0 for symmetric MAC algs, Sign1 for signatures.
+        // Using the wrong context lets a token authenticated in one mode
+        // pass verification in the other, so this dispatch must match the
+        // encoder's choice exactly.
+        const bool isMac = algorithm.algorithmId() == ALG_HMAC256_256;
+        auto verifyInput =
+            isMac ? createCoseMac0Input(protectedHeaderBytes, payloadBytes)
+                  : createCoseSign1Input(protectedHeaderBytes, payloadBytes);
+        bool isValid = algorithm.verify(verifyInput, signatureBytes);
 
         if (!isValid) {
-          throw CryptoError("COSE_Sign1 signature verification failed");
+          throw CryptoError(isMac ? "COSE_Mac0 tag verification failed"
+                                  : "COSE_Sign1 signature verification failed");
         }
       } else {
         throw InvalidTokenFormatError();
@@ -1484,12 +1537,8 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       for (size_t i = 0; i < headerMapSize; i++) {
         if (cbor_isa_uint(headerPairs[i].key) &&
             cbor_get_int(headerPairs[i].key) == 1) {  // algorithm label
-          if (cbor_isa_uint(headerPairs[i].value)) {
-            headerAlgId =
-                static_cast<int64_t>(cbor_get_int(headerPairs[i].value));
-          } else if (cbor_isa_negint(headerPairs[i].value)) {
-            headerAlgId =
-                -static_cast<int64_t>(cbor_get_int(headerPairs[i].value)) - 1;
+          if (!decodeAlgCborValue(headerPairs[i].value, headerAlgId)) {
+            throw InvalidTokenFormatError();
           }
           break;
         }
@@ -1667,14 +1716,10 @@ Cwt Cwt::validateMultiSignedCwt(
           for (size_t j = 0; j < mapSize; j++) {
             if (cbor_isa_uint(pairs[j].key) &&
                 cbor_get_int(pairs[j].key) == 1) {
-              if (cbor_isa_uint(pairs[j].value)) {
-                sigAlgId = cbor_get_int(pairs[j].value);
-                algFound = true;
-              } else if (cbor_isa_negint(pairs[j].value)) {
-                sigAlgId =
-                    -static_cast<int64_t>(cbor_get_int(pairs[j].value)) - 1;
-                algFound = true;
+              if (!decodeAlgCborValue(pairs[j].value, sigAlgId)) {
+                throw InvalidTokenFormatError();
               }
+              algFound = true;
               break;
             }
           }

@@ -166,6 +166,69 @@ class SingleSignatureStructureBuilder : public SigStructureBuilder {
   }
 };
 
+// COSE_Mac0 MAC_structure implementation (RFC 8152 §6.3):
+//   MAC_structure = [ context: "MAC0", protected, external_aad, payload ]
+class Mac0StructureBuilder : public SigStructureBuilder {
+ private:
+  std::vector<uint8_t> protectedHeader_;
+  std::vector<uint8_t> externalAAD_;
+  std::vector<uint8_t> payload_;
+
+ public:
+  Mac0StructureBuilder(const std::vector<uint8_t>& protectedHeader,
+                       const std::vector<uint8_t>& externalAAD,
+                       const std::vector<uint8_t>& payload)
+      : protectedHeader_(protectedHeader),
+        externalAAD_(externalAAD),
+        payload_(payload) {}
+
+  std::vector<uint8_t> build() override {
+    try {
+      auto macStructure = createArray(4);
+      addString(macStructure, "MAC0");
+      addByteString(macStructure, protectedHeader_);
+      addByteString(macStructure, externalAAD_);
+      addByteString(macStructure, payload_);
+      return serialize(macStructure);
+    } catch (const std::exception& e) {
+      CAT_LOG_ERROR("Failed to create COSE_Mac0 MAC_structure: {}", e.what());
+      throw InvalidCborError(
+          std::string("COSE_Mac0 MAC_structure creation failed: ") + e.what());
+    }
+  }
+};
+
+// COSE_Encrypt0 Enc_structure implementation (RFC 8152 §5.3):
+//   Enc_structure = [ context: "Encrypt0", protected, external_aad ]
+// The serialized Enc_structure is used as the AAD input to the AEAD; it does
+// not include the plaintext.
+class Enc0StructureBuilder : public SigStructureBuilder {
+ private:
+  std::vector<uint8_t> protectedHeader_;
+  std::vector<uint8_t> externalAAD_;
+
+ public:
+  Enc0StructureBuilder(const std::vector<uint8_t>& protectedHeader,
+                       const std::vector<uint8_t>& externalAAD)
+      : protectedHeader_(protectedHeader), externalAAD_(externalAAD) {}
+
+  std::vector<uint8_t> build() override {
+    try {
+      auto encStructure = createArray(3);
+      addString(encStructure, "Encrypt0");
+      addByteString(encStructure, protectedHeader_);
+      addByteString(encStructure, externalAAD_);
+      return serialize(encStructure);
+    } catch (const std::exception& e) {
+      CAT_LOG_ERROR("Failed to create COSE_Encrypt0 Enc_structure: {}",
+                    e.what());
+      throw InvalidCborError(
+          std::string("COSE_Encrypt0 Enc_structure creation failed: ") +
+          e.what());
+    }
+  }
+};
+
 // Multi-signature implementation
 class MultiSignatureStructureBuilder : public SigStructureBuilder {
  private:
@@ -231,6 +294,21 @@ std::vector<uint8_t> createCoseSignInput(
     const std::vector<uint8_t>& payload) {
   MultiSignatureStructureBuilder builder(
       bodyProtectedHeader, signatureProtectedHeader, externalAAD, payload);
+  return builder.build();
+}
+
+std::vector<uint8_t> createCoseMac0Input(
+    const std::vector<uint8_t>& protectedHeader,
+    const std::vector<uint8_t>& payload,
+    const std::vector<uint8_t>& externalAAD) {
+  Mac0StructureBuilder builder(protectedHeader, externalAAD, payload);
+  return builder.build();
+}
+
+std::vector<uint8_t> createCoseEncrypt0Aad(
+    const std::vector<uint8_t>& protectedHeader,
+    const std::vector<uint8_t>& externalAAD) {
+  Enc0StructureBuilder builder(protectedHeader, externalAAD);
   return builder.build();
 }
 
@@ -313,12 +391,14 @@ int64_t HmacSha256Algorithm::algorithmId() const { return ALG_HMAC256_256; }
 // Default implementation for base class - throws error for non-encryption
 // algorithms
 std::vector<uint8_t> CryptographicAlgorithm::encryptImpl(
-    std::span<const uint8_t>, std::span<const uint8_t>) const {
+    std::span<const uint8_t>, std::span<const uint8_t>,
+    std::span<const uint8_t>) const {
   throw CryptoError("Algorithm does not support encryption");
 }
 
 std::vector<uint8_t> CryptographicAlgorithm::decryptImpl(
-    std::span<const uint8_t>, std::span<const uint8_t>) const {
+    std::span<const uint8_t>, std::span<const uint8_t>,
+    std::span<const uint8_t>) const {
   throw CryptoError("Algorithm does not support decryption");
 }
 
@@ -528,6 +608,81 @@ std::vector<uint8_t> Es256Algorithm::getPublicKey() const {
   return result;
 }
 
+namespace {
+// COSE ES256 signatures are the raw fixed-width concatenation r || s of the
+// two ECDSA components, each 32 bytes for P-256 (RFC 8152 §8.1, RFC 8422
+// §5.4). OpenSSL's EVP_DigestSign path emits/expects DER-encoded ECDSA_SIG,
+// so we transcode at the boundary.
+constexpr size_t kEs256ComponentBytes = 32;
+constexpr size_t kEs256RawSignatureBytes = 2 * kEs256ComponentBytes;
+
+std::vector<uint8_t> es256DerToRaw(std::span<const uint8_t> der) {
+  const uint8_t* p = der.data();
+  ECDSA_SIG* sig = d2i_ECDSA_SIG(nullptr, &p, static_cast<long>(der.size()));
+  if (!sig) {
+    throw CryptoError("Failed to parse DER ECDSA signature");
+  }
+  const BIGNUM* r = nullptr;
+  const BIGNUM* s = nullptr;
+  ECDSA_SIG_get0(sig, &r, &s);
+
+  std::vector<uint8_t> raw(kEs256RawSignatureBytes, 0);
+  int rBytes = BN_num_bytes(r);
+  int sBytes = BN_num_bytes(s);
+  if (rBytes > static_cast<int>(kEs256ComponentBytes) ||
+      sBytes > static_cast<int>(kEs256ComponentBytes)) {
+    ECDSA_SIG_free(sig);
+    throw CryptoError("ECDSA signature component exceeds 32 bytes");
+  }
+  // Left-pad each component to exactly 32 bytes (big-endian).
+  BN_bn2bin(r, raw.data() + (kEs256ComponentBytes - rBytes));
+  BN_bn2bin(s, raw.data() + kEs256ComponentBytes +
+                   (kEs256ComponentBytes - sBytes));
+  ECDSA_SIG_free(sig);
+  return raw;
+}
+
+std::vector<uint8_t> es256RawToDer(std::span<const uint8_t> raw) {
+  if (raw.size() != kEs256RawSignatureBytes) {
+    throw CryptoError("ES256 raw signature must be exactly 64 bytes");
+  }
+  BIGNUM* r = BN_bin2bn(raw.data(), kEs256ComponentBytes, nullptr);
+  BIGNUM* s = BN_bin2bn(raw.data() + kEs256ComponentBytes,
+                        kEs256ComponentBytes, nullptr);
+  if (!r || !s) {
+    if (r) BN_free(r);
+    if (s) BN_free(s);
+    throw CryptoError("Failed to allocate BIGNUM for ES256 signature");
+  }
+  ECDSA_SIG* sig = ECDSA_SIG_new();
+  if (!sig) {
+    BN_free(r);
+    BN_free(s);
+    throw CryptoError("Failed to allocate ECDSA_SIG");
+  }
+  // ECDSA_SIG_set0 takes ownership of r and s.
+  if (ECDSA_SIG_set0(sig, r, s) != 1) {
+    BN_free(r);
+    BN_free(s);
+    ECDSA_SIG_free(sig);
+    throw CryptoError("Failed to populate ECDSA_SIG");
+  }
+  int derLen = i2d_ECDSA_SIG(sig, nullptr);
+  if (derLen <= 0) {
+    ECDSA_SIG_free(sig);
+    throw CryptoError("Failed to determine DER ECDSA size");
+  }
+  std::vector<uint8_t> der(static_cast<size_t>(derLen));
+  uint8_t* out = der.data();
+  int written = i2d_ECDSA_SIG(sig, &out);
+  ECDSA_SIG_free(sig);
+  if (written != derLen) {
+    throw CryptoError("Failed to serialize DER ECDSA signature");
+  }
+  return der;
+}
+}  // namespace
+
 std::vector<uint8_t> Es256Algorithm::signImpl(
     std::span<const uint8_t> data) const {
   if (!pImpl_->privateKey) {
@@ -551,13 +706,13 @@ std::vector<uint8_t> Es256Algorithm::signImpl(
     throw CryptoError("Failed to determine signature length");
   }
 
-  std::vector<uint8_t> signature(sigLen);
-  if (EVP_DigestSignFinal(mdctx.get(), signature.data(), &sigLen) <= 0) {
+  std::vector<uint8_t> derSignature(sigLen);
+  if (EVP_DigestSignFinal(mdctx.get(), derSignature.data(), &sigLen) <= 0) {
     throw CryptoError("Failed to sign data");
   }
 
-  signature.resize(sigLen);
-  return signature;
+  derSignature.resize(sigLen);
+  return es256DerToRaw(derSignature);
 }
 
 bool Es256Algorithm::verifyImpl(std::span<const uint8_t> data,
@@ -566,13 +721,19 @@ bool Es256Algorithm::verifyImpl(std::span<const uint8_t> data,
     return false;
   }
 
-  // Validate signature length for ES256 (DER-encoded ECDSA, typically 64-72
-  // bytes)
-  if (signature.size() < 64 || signature.size() > 72) {
+  // COSE ES256: signature MUST be exactly 64 bytes of raw r || s. Reject
+  // any other length before touching the crypto path.
+  if (signature.size() != kEs256RawSignatureBytes) {
     return false;
   }
 
-  // Use RAII wrapper for automatic cleanup
+  std::vector<uint8_t> derSignature;
+  try {
+    derSignature = es256RawToDer(signature);
+  } catch (const CryptoError&) {
+    return false;
+  }
+
   auto mdctx = EvpMdCtxWrapper(EVP_MD_CTX_new());
   if (!mdctx.get()) return false;
 
@@ -585,8 +746,8 @@ bool Es256Algorithm::verifyImpl(std::span<const uint8_t> data,
     return false;
   }
 
-  int result =
-      EVP_DigestVerifyFinal(mdctx.get(), signature.data(), signature.size());
+  int result = EVP_DigestVerifyFinal(mdctx.get(), derSignature.data(),
+                                     derSignature.size());
   return result == 1;
 }
 
@@ -820,6 +981,16 @@ std::vector<uint8_t> Ps256Algorithm::signImpl(
     throw CryptoError("Failed to set signature hash");
   }
 
+  // RFC 8230 §2: PS256 requires MGF1 with SHA-256 and salt length equal to
+  // the hash length (32 bytes). Pin both explicitly so OpenSSL defaults do
+  // not silently produce interoperability-incompatible signatures.
+  if (EVP_PKEY_CTX_set_rsa_mgf1_md(pctx.get(), EVP_sha256()) <= 0) {
+    throw CryptoError("Failed to set PSS MGF1 hash");
+  }
+  if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx.get(), 32) <= 0) {
+    throw CryptoError("Failed to set PSS salt length");
+  }
+
   std::vector<uint8_t> dataVec(data.begin(), data.end());
   auto hash = hashSha256(dataVec);
   size_t sigLen;
@@ -863,6 +1034,16 @@ bool Ps256Algorithm::verifyImpl(std::span<const uint8_t> data,
   }
 
   if (EVP_PKEY_CTX_set_signature_md(pctx.get(), EVP_sha256()) <= 0) {
+    return false;
+  }
+
+  // RFC 8230 §2: PS256 mandates MGF1-SHA-256 and salt length == hash length.
+  // Enforce on the verify path so signatures produced with divergent
+  // parameters are rejected rather than silently accepted.
+  if (EVP_PKEY_CTX_set_rsa_mgf1_md(pctx.get(), EVP_sha256()) <= 0) {
+    return false;
+  }
+  if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx.get(), 32) <= 0) {
     return false;
   }
 
@@ -966,7 +1147,8 @@ bool AesGcmAlgorithm::verifyImpl(std::span<const uint8_t>,
 }
 
 std::vector<uint8_t> AesGcmAlgorithm::encryptImpl(
-    std::span<const uint8_t> data, std::span<const uint8_t> iv) const {
+    std::span<const uint8_t> data, std::span<const uint8_t> iv,
+    std::span<const uint8_t> aad) const {
   if (iv.size() != crypto_constants::GCM_IV_SIZE) {
     throw CryptoError("Invalid IV size for AES-GCM (must be 12 bytes)");
   }
@@ -999,6 +1181,17 @@ std::vector<uint8_t> AesGcmAlgorithm::encryptImpl(
     throw CryptoError("Failed to initialize AES-GCM encryption");
   }
 
+  // Feed AAD (Enc_structure for COSE_Encrypt0) before plaintext so the tag
+  // covers the associated data. Skipped when empty to preserve behavior for
+  // callers not using COSE.
+  if (!aad.empty()) {
+    int aad_out = 0;
+    if (EVP_EncryptUpdate(ctx.get(), nullptr, &aad_out, aad.data(),
+                          static_cast<int>(aad.size())) != 1) {
+      throw CryptoError("Failed to feed AES-GCM AAD");
+    }
+  }
+
   // Encrypt data
   std::vector<uint8_t> ciphertext(data.size() + crypto_constants::GCM_TAG_SIZE);
   int len;
@@ -1026,7 +1219,8 @@ std::vector<uint8_t> AesGcmAlgorithm::encryptImpl(
 }
 
 std::vector<uint8_t> AesGcmAlgorithm::decryptImpl(
-    std::span<const uint8_t> encryptedData, std::span<const uint8_t> iv) const {
+    std::span<const uint8_t> encryptedData, std::span<const uint8_t> iv,
+    std::span<const uint8_t> aad) const {
   if (iv.size() != crypto_constants::GCM_IV_SIZE) {
     throw CryptoError("Invalid IV size for AES-GCM (must be 12 bytes)");
   }
@@ -1074,6 +1268,15 @@ std::vector<uint8_t> AesGcmAlgorithm::decryptImpl(
                           crypto_constants::GCM_TAG_SIZE,
                           const_cast<uint8_t*>(tag)) != 1) {
     throw CryptoError("Failed to set AES-GCM authentication tag");
+  }
+
+  // Feed AAD before ciphertext so the tag check covers it.
+  if (!aad.empty()) {
+    int aad_out = 0;
+    if (EVP_DecryptUpdate(ctx.get(), nullptr, &aad_out, aad.data(),
+                          static_cast<int>(aad.size())) != 1) {
+      throw CryptoError("Failed to feed AES-GCM AAD");
+    }
   }
 
   // Decrypt data
@@ -1162,7 +1365,8 @@ bool ChaCha20Poly1305Algorithm::verifyImpl(std::span<const uint8_t>,
 }
 
 std::vector<uint8_t> ChaCha20Poly1305Algorithm::encryptImpl(
-    std::span<const uint8_t> data, std::span<const uint8_t> nonce) const {
+    std::span<const uint8_t> data, std::span<const uint8_t> nonce,
+    std::span<const uint8_t> aad) const {
   if (nonce.size() != crypto_constants::ChaCha20_NONCE_SIZE) {
     throw CryptoError(
         "Invalid nonce size for ChaCha20-Poly1305 (must be 12 bytes)");
@@ -1177,6 +1381,15 @@ std::vector<uint8_t> ChaCha20Poly1305Algorithm::encryptImpl(
   if (EVP_EncryptInit_ex(ctx.get(), EVP_chacha20_poly1305(), nullptr,
                          key_.data(), nonce.data()) != 1) {
     throw CryptoError("Failed to initialize ChaCha20-Poly1305 encryption");
+  }
+
+  // Feed AAD (COSE Enc_structure) before plaintext.
+  if (!aad.empty()) {
+    int aad_out = 0;
+    if (EVP_EncryptUpdate(ctx.get(), nullptr, &aad_out, aad.data(),
+                          static_cast<int>(aad.size())) != 1) {
+      throw CryptoError("Failed to feed ChaCha20-Poly1305 AAD");
+    }
   }
 
   // Encrypt data
@@ -1207,8 +1420,8 @@ std::vector<uint8_t> ChaCha20Poly1305Algorithm::encryptImpl(
 }
 
 std::vector<uint8_t> ChaCha20Poly1305Algorithm::decryptImpl(
-    std::span<const uint8_t> encryptedData,
-    std::span<const uint8_t> nonce) const {
+    std::span<const uint8_t> encryptedData, std::span<const uint8_t> nonce,
+    std::span<const uint8_t> aad) const {
   if (nonce.size() != crypto_constants::ChaCha20_NONCE_SIZE) {
     throw CryptoError(
         "Invalid nonce size for ChaCha20-Poly1305 (must be 12 bytes)");
@@ -1243,6 +1456,15 @@ std::vector<uint8_t> ChaCha20Poly1305Algorithm::decryptImpl(
                           crypto_constants::ChaCha20_TAG_SIZE,
                           const_cast<uint8_t*>(tag)) != 1) {
     throw CryptoError("Failed to set ChaCha20-Poly1305 authentication tag");
+  }
+
+  // Feed AAD before ciphertext so tag check covers it.
+  if (!aad.empty()) {
+    int aad_out = 0;
+    if (EVP_DecryptUpdate(ctx.get(), nullptr, &aad_out, aad.data(),
+                          static_cast<int>(aad.size())) != 1) {
+      throw CryptoError("Failed to feed ChaCha20-Poly1305 AAD");
+    }
   }
 
   // Decrypt data

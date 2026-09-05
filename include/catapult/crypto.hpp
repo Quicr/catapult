@@ -151,7 +151,23 @@ class CryptographicAlgorithm {
   template <CryptoData T1, CryptoData T2>
   std::vector<uint8_t> encrypt(const T1& data, const T2& iv) const {
     return encryptImpl({std::data(data), std::size(data)},
-                       {std::data(iv), std::size(iv)});
+                       {std::data(iv), std::size(iv)}, {});
+  }
+
+  /**
+   * @brief AEAD encrypt with associated data.
+   *
+   * The AAD is authenticated but not encrypted. For CTA-5007-B / RFC 8152
+   * COSE_Encrypt0 tokens the AAD MUST be the serialized Enc_structure
+   * (see createCoseEncrypt0Aad); otherwise the protected header is not
+   * cryptographically bound to the ciphertext.
+   */
+  template <CryptoData T1, CryptoData T2, CryptoData T3>
+  std::vector<uint8_t> encrypt(const T1& data, const T2& iv,
+                               const T3& aad) const {
+    return encryptImpl({std::data(data), std::size(data)},
+                       {std::data(iv), std::size(iv)},
+                       {std::data(aad), std::size(aad)});
   }
 
   /**
@@ -165,7 +181,22 @@ class CryptographicAlgorithm {
   template <CryptoData T1, CryptoData T2>
   std::vector<uint8_t> decrypt(const T1& encryptedData, const T2& iv) const {
     return decryptImpl({std::data(encryptedData), std::size(encryptedData)},
-                       {std::data(iv), std::size(iv)});
+                       {std::data(iv), std::size(iv)}, {});
+  }
+
+  /**
+   * @brief AEAD decrypt with associated data.
+   *
+   * The AAD MUST be identical to the value passed at encrypt time or the
+   * authentication tag will fail to verify. For COSE_Encrypt0 tokens use
+   * createCoseEncrypt0Aad(protectedHeader) to derive the AAD.
+   */
+  template <CryptoData T1, CryptoData T2, CryptoData T3>
+  std::vector<uint8_t> decrypt(const T1& encryptedData, const T2& iv,
+                               const T3& aad) const {
+    return decryptImpl({std::data(encryptedData), std::size(encryptedData)},
+                       {std::data(iv), std::size(iv)},
+                       {std::data(aad), std::size(aad)});
   }
 
   /**
@@ -187,10 +218,11 @@ class CryptographicAlgorithm {
   virtual bool verifyImpl(std::span<const uint8_t> data,
                           std::span<const uint8_t> signature) const = 0;
   virtual std::vector<uint8_t> encryptImpl(std::span<const uint8_t> data,
-                                           std::span<const uint8_t> iv) const;
+                                           std::span<const uint8_t> iv,
+                                           std::span<const uint8_t> aad) const;
   virtual std::vector<uint8_t> decryptImpl(
-      std::span<const uint8_t> encryptedData,
-      std::span<const uint8_t> iv) const;
+      std::span<const uint8_t> encryptedData, std::span<const uint8_t> iv,
+      std::span<const uint8_t> aad) const;
 };
 
 /**
@@ -439,6 +471,39 @@ std::vector<uint8_t> createCoseSign1Input(
     const std::vector<uint8_t>& externalAAD = {});
 
 /**
+ * @brief Create COSE_Mac0 MAC_structure per RFC 8152 §6.3
+ *
+ * MAC_structure = [ context: "MAC0", protected, external_aad, payload ]
+ *
+ * @param protectedHeader COSE_Mac0 body protected header bytes
+ * @param payload Plaintext claim set bytes
+ * @param externalAAD Application-supplied AAD (defaults to empty)
+ * @return Serialized MAC_structure to be MACed
+ */
+std::vector<uint8_t> createCoseMac0Input(
+    const std::vector<uint8_t>& protectedHeader,
+    const std::vector<uint8_t>& payload,
+    const std::vector<uint8_t>& externalAAD = {});
+
+/**
+ * @brief Create COSE_Encrypt0 Enc_structure per RFC 8152 §5.3
+ *
+ * Enc_structure = [ context: "Encrypt0", protected, external_aad ]
+ *
+ * The serialized Enc_structure is the AAD input to the AEAD; it does not
+ * carry the plaintext. Passing this value to the AEAD binds the protected
+ * header cryptographically to the ciphertext, so an attacker cannot swap
+ * the alg header without invalidating the tag.
+ *
+ * @param protectedHeader COSE_Encrypt0 protected header bytes
+ * @param externalAAD Application-supplied AAD (defaults to empty)
+ * @return Serialized Enc_structure to use as AEAD associated data
+ */
+std::vector<uint8_t> createCoseEncrypt0Aad(
+    const std::vector<uint8_t>& protectedHeader,
+    const std::vector<uint8_t>& externalAAD = {});
+
+/**
  * @brief Create JWT-style signing input (legacy, for backward compatibility)
  * @param header Header bytes (will be base64url encoded)
  * @param payload Payload bytes (will be base64url encoded)
@@ -498,9 +563,11 @@ class AesGcmAlgorithm : public CryptographicAlgorithm {
 
   // Encryption/decryption support
   std::vector<uint8_t> encryptImpl(std::span<const uint8_t> data,
-                                   std::span<const uint8_t> iv) const override;
+                                   std::span<const uint8_t> iv,
+                                   std::span<const uint8_t> aad) const override;
   std::vector<uint8_t> decryptImpl(std::span<const uint8_t> encryptedData,
-                                   std::span<const uint8_t> iv) const override;
+                                   std::span<const uint8_t> iv,
+                                   std::span<const uint8_t> aad) const override;
 
   int64_t algorithmId() const override;
   bool supportsEncryption() const override { return true; }
@@ -544,9 +611,11 @@ class ChaCha20Poly1305Algorithm : public CryptographicAlgorithm {
 
   // Encryption/decryption support
   std::vector<uint8_t> encryptImpl(std::span<const uint8_t> data,
-                                   std::span<const uint8_t> iv) const override;
+                                   std::span<const uint8_t> iv,
+                                   std::span<const uint8_t> aad) const override;
   std::vector<uint8_t> decryptImpl(std::span<const uint8_t> encryptedData,
-                                   std::span<const uint8_t> iv) const override;
+                                   std::span<const uint8_t> iv,
+                                   std::span<const uint8_t> aad) const override;
 
   int64_t algorithmId() const override;
   bool supportsEncryption() const override { return true; }
