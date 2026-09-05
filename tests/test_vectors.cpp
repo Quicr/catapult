@@ -393,8 +393,7 @@ TEST_CASE("Token Structure - ES256 signature verification") {
   CHECK(bytesToHex(payloadBytes) == v["payload_cbor_hex"].get<std::string>());
 
   auto signingInput = createJwtSigningInput(headerBytes, payloadBytes);
-  auto derSig = rawEcdsaToDer(expectedSig);
-  CHECK(es256.verify(signingInput, derSig));
+  CHECK(es256.verify(signingInput, expectedSig));
 
   auto token = Cwt::decodePayload(payloadBytes);
   CHECK(token.core.iss == "https://auth.example.com");
@@ -761,8 +760,7 @@ TEST_CASE("DPoP Binding - ES256 token signature verification") {
   auto signature = base64UrlDecode(parts[2]);
 
   auto signingInput = createJwtSigningInput(headerBytes, payloadBytes);
-  auto derSig = rawEcdsaToDer(signature);
-  CHECK(es256.verify(signingInput, derSig));
+  CHECK(es256.verify(signingInput, signature));
 }
 
 } // TEST_SUITE
