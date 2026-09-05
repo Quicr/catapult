@@ -16,10 +16,10 @@ static CatToken createValidToken() {
         .withAudience({"https://my-service.com"})
         .withExpiration(exp)
         .withNotBefore(nbf)
-        .withCwtId("valid-token")
-        .withVersion("1.0")
+        .withCwtIdString("valid-token")
+        .withVersion(1)
         .withGeoCoordinate(40.7128, -74.0060, 50.0)
-        .withGeohash("dr5reg");
+        .withGeohash(GeohashClaimValue{std::string{"dr5reg"}});
 }
 
 TEST_CASE("ValidatorSuccess") {
@@ -40,7 +40,7 @@ TEST_CASE("ValidatorExpiredToken") {
         .withIssuer("https://trusted-issuer.com")
         .withAudience({"https://my-service.com"})
         .withExpiration(expiredTime)
-        .withCwtId("expired-token");
+        .withCwtIdString("expired-token");
     
     CatTokenValidator validator;
     validator.withExpectedIssuers({"https://trusted-issuer.com"})
@@ -58,7 +58,7 @@ TEST_CASE("ValidatorNotYetValid") {
         .withAudience({"https://my-service.com"})
         .withExpiration(expTime)
         .withNotBefore(futureTime)
-        .withCwtId("future-token");
+        .withCwtIdString("future-token");
     
     CatTokenValidator validator;
     validator.withExpectedIssuers({"https://trusted-issuer.com"})
@@ -74,7 +74,7 @@ TEST_CASE("ValidatorInvalidIssuer") {
         .withIssuer("https://untrusted-issuer.com")
         .withAudience({"https://my-service.com"})
         .withExpiration(exp)
-        .withCwtId("invalid-issuer-token");
+        .withCwtIdString("invalid-issuer-token");
     
     CatTokenValidator validator;
     validator.withExpectedIssuers({"https://trusted-issuer.com"})
@@ -90,7 +90,7 @@ TEST_CASE("ValidatorInvalidAudience") {
         .withIssuer("https://trusted-issuer.com")
         .withAudience({"https://other-service.com"})
         .withExpiration(exp)
-        .withCwtId("invalid-audience-token");
+        .withCwtIdString("invalid-audience-token");
     
     CatTokenValidator validator;
     validator.withExpectedIssuers({"https://trusted-issuer.com"})
@@ -105,7 +105,7 @@ TEST_CASE("ValidatorMissingIssuer") {
     auto token = CatToken()
         .withAudience({"https://my-service.com"})
         .withExpiration(exp)
-        .withCwtId("no-issuer-token");
+        .withCwtIdString("no-issuer-token");
         
     
     CatTokenValidator validator;
@@ -121,7 +121,7 @@ TEST_CASE("ValidatorMissingAudience") {
     auto token = CatToken()
         .withIssuer("https://trusted-issuer.com")
         .withExpiration(exp)
-        .withCwtId("no-audience-token");
+        .withCwtIdString("no-audience-token");
         
     
     CatTokenValidator validator;
@@ -143,7 +143,7 @@ TEST_CASE("ValidatorGeographicValidation") {
     REQUIRE_THROWS_AS(validator.validate(token2), GeographicValidationError);
     
     // Test invalid geohash
-    auto token3 = CatToken().withGeohash(""); // Empty geohash
+    auto token3 = CatToken().withGeohash(GeohashClaimValue{std::string{""}}); // Empty geohash
     REQUIRE_THROWS_AS(validator.validate(token3), GeographicValidationError);
     
     // Test valid coordinates
@@ -151,7 +151,7 @@ TEST_CASE("ValidatorGeographicValidation") {
     REQUIRE_NOTHROW(validator.validate(token4));
     
     // Test valid geohash
-    auto token5 = CatToken().withGeohash("dr5reg");
+    auto token5 = CatToken().withGeohash(GeohashClaimValue{std::string{"dr5reg"}});
     REQUIRE_NOTHROW(validator.validate(token5));
 }
 
@@ -163,7 +163,7 @@ TEST_CASE("ValidatorClockSkewTolerance") {
         .withIssuer("https://trusted-issuer.com")
         .withAudience({"https://my-service.com"})
         .withExpiration(recentlyExpired)
-        .withCwtId("recently-expired-token");
+        .withCwtIdString("recently-expired-token");
         
     
     // CTA-5007-B §4.6.3–4.6.4: default is zero tolerance, so a recently
@@ -189,7 +189,7 @@ TEST_CASE("ValidatorMultipleAudiences") {
         .withIssuer("https://trusted-issuer.com")
         .withAudience({"https://service1.com", "https://service2.com", "https://my-service.com"})
         .withExpiration(exp)
-        .withCwtId("multi-audience-token");
+        .withCwtIdString("multi-audience-token");
         
     
     CatTokenValidator validator;

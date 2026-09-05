@@ -156,7 +156,7 @@ TEST_SUITE("CWT Single Signature (COSE_Sign1) Tests") {
     token.core.iss = "single-sig-issuer";
     token.core.aud = {"test-audience"};
     token.core.exp = 1234567890;
-    token.cat.catv = "1.0";
+    token.cat.catv = 1u;
 
     auto algorithm = std::make_unique<Es256Algorithm>();
 
@@ -169,7 +169,7 @@ TEST_SUITE("CWT Single Signature (COSE_Sign1) Tests") {
     Cwt validatedCwt = Cwt::validateCwtBase64(singleSigCwt, *algorithm);
     CHECK(validatedCwt.payload.core.iss == "single-sig-issuer");
     CHECK(validatedCwt.payload.core.exp == 1234567890);
-    CHECK(validatedCwt.payload.cat.catv == "1.0");
+    CHECK(validatedCwt.payload.cat.catv == 1u);
   }
 
   TEST_CASE("COSE_Sign1 with Key ID") {
@@ -216,7 +216,7 @@ TEST_SUITE("CWT Multi-Signature (COSE_Sign) Tests") {
     token.core.iss = "multi-sig-issuer";
     token.core.aud = {"audience1", "audience2"};
     token.core.exp = 1234567890;
-    token.cat.catv = "1.0";
+    token.cat.catv = 1u;
 
     // Create algorithm - use same key for all signatures in this test
     std::vector<uint8_t> testKey(
@@ -407,8 +407,13 @@ TEST_SUITE("CWT Signing Integration Tests") {
     token.core.aud = {"service1", "service2"};
     token.core.exp = 1234567890;
     token.core.nbf = 1234500000;
-    token.cat.catv = "2.0";
-    token.cat.catu = 100;
+    token.cat.catv = 2u;
+    {
+      CatUriMatchMap catu;
+      catu.components[3] =
+          UriComponentMatch{UriMatchType::Exact, {'/', 'a', 'p', 'i'}};
+      token.cat.catu = catu;
+    }
 
     // Use same HMAC key for consistent validation in integration test
     std::vector<uint8_t> sharedKey(
@@ -444,8 +449,9 @@ TEST_SUITE("CWT Signing Integration Tests") {
     CHECK(caValidated.payload.core.aud->size() == 2);
     CHECK(caValidated.payload.core.exp == 1234567890);
     CHECK(caValidated.payload.core.nbf == 1234500000);
-    CHECK(caValidated.payload.cat.catv == "2.0");
-    CHECK(caValidated.payload.cat.catu == 100);
+    CHECK(caValidated.payload.cat.catv == 2u);
+    REQUIRE(caValidated.payload.cat.catu.has_value());
+    CHECK(caValidated.payload.cat.catu->components.size() == 1);
     CHECK(caValidated.signatures.size() == 3);
 
     CAT_LOG_INFO("End-to-end multi-signature workflow completed successfully");

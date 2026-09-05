@@ -25,14 +25,19 @@ int main() {
   std::string client_thumbprint = client_dpop.get_public_key_thumbprint();
   std::cout << "Client key thumbprint: " << client_thumbprint << "\n\n";
 
-  // Build token for authenticated client
+  // Build token for authenticated client. The thumbprint is a hex string; bind
+  // it via `kid` on the confirmation (CTA-5007-B §4.6.9 / RFC 8747 §3.4).
   auto token = CatToken::builder()
                    .issuer("auth.moqt-cdn.example.com")
                    .audience("relay.moqt-cdn.example.com")
                    .subject("user-12345")
                    .expiresIn(std::chrono::hours{1})
-                   .dpopThumbprint(client_thumbprint)
                    .build();
+  {
+    CatConfirmation cnf;
+    cnf.kid = client_thumbprint;
+    token.dpop.cnf = std::move(cnf);
+  }
 
   // Add MOQT-specific permissions
   MoqtClaims moqt;
