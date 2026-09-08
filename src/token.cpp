@@ -84,6 +84,11 @@ consteval void validate_claims() {
 }
 
 void CatTokenValidator::validate(const CatToken& token) const {
+  validate(token, PolicyContext{});
+}
+
+void CatTokenValidator::validate(const CatToken& token,
+                                 const PolicyContext& context) const {
   CAT_LOG_DEBUG("Starting token validation");
 
   // Compile-time validation of all claim types used in validation
@@ -169,7 +174,7 @@ void CatTokenValidator::validate(const CatToken& token) const {
   validateGeographicRestrictions(token);
   validateUsageLimits(token);
   validateCompositeClaims(token);
-  validateAuthorizationPolicy(token);
+  validateAuthorizationPolicy(token, context);
   validateMoqtRevalidation(token, now);
 }
 
@@ -409,7 +414,7 @@ void CatTokenValidator::validateUsageLimits(const CatToken& token) const {
 // current request context satisfies a token that has already parsed as
 // well-formed.
 void CatTokenValidator::validateAuthorizationPolicy(
-    const CatToken& token) const {
+    const CatToken& token, const PolicyContext& context) const {
   const bool has_por = token.cat.catpor.has_value();
   const bool has_catdpop = token.dpop.catdpop.has_value();
   const bool has_catif = token.request.catif.has_value();
@@ -436,32 +441,33 @@ void CatTokenValidator::validateAuthorizationPolicy(
   }
 
   if (has_por &&
-      !authz_policy_->acceptProofOfPossession(*token.cat.catpor)) {
+      !authz_policy_->acceptProofOfPossession(*token.cat.catpor, context)) {
     throw InvalidClaimValueError("catpor rejected by authorization policy");
   }
   if (has_catdpop &&
-      !authz_policy_->acceptDpopBinding(*token.dpop.catdpop)) {
+      !authz_policy_->acceptDpopBinding(*token.dpop.catdpop, context)) {
     throw InvalidClaimValueError("catdpop rejected by authorization policy");
   }
-  if (has_catif &&
-      !authz_policy_->acceptRequestDirective("catif", *token.request.catif)) {
+  if (has_catif && !authz_policy_->acceptRequestDirective(
+                       "catif", *token.request.catif, context)) {
     throw InvalidClaimValueError("catif rejected by authorization policy");
   }
-  if (has_catr &&
-      !authz_policy_->acceptRequestDirective("catr", *token.request.catr)) {
+  if (has_catr && !authz_policy_->acceptRequestDirective(
+                      "catr", *token.request.catr, context)) {
     throw InvalidClaimValueError("catr rejected by authorization policy");
   }
   if (has_geoiso &&
-      !authz_policy_->acceptGeoIso3166(*token.cat.catgeoiso3166)) {
+      !authz_policy_->acceptGeoIso3166(*token.cat.catgeoiso3166, context)) {
     throw GeographicValidationError(
         "catgeoiso3166 rejected by authorization policy");
   }
-  if (has_geohash && !authz_policy_->acceptGeohash(*token.cat.geohash)) {
+  if (has_geohash &&
+      !authz_policy_->acceptGeohash(*token.cat.geohash, context)) {
     throw GeographicValidationError(
         "geohash rejected by authorization policy");
   }
   if (has_geoalt &&
-      !authz_policy_->acceptGeoAltitude(*token.cat.catgeoalt)) {
+      !authz_policy_->acceptGeoAltitude(*token.cat.catgeoalt, context)) {
     throw GeographicValidationError(
         "catgeoalt rejected by authorization policy");
   }
@@ -544,8 +550,13 @@ ValidatedCatToken CatTokenValidator::intoValidated(CatToken token) const {
 }
 
 CatErrorCode CatTokenValidator::tryValidate(const CatToken& token) const noexcept {
+  return tryValidate(token, PolicyContext{});
+}
+
+CatErrorCode CatTokenValidator::tryValidate(
+    const CatToken& token, const PolicyContext& context) const noexcept {
   try {
-    validate(token);
+    validate(token, context);
     return CatErrorCode::SUCCESS;
   } catch (const CatError& e) {
     return e.errorCode();

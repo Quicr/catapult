@@ -55,16 +55,28 @@ class RecordingPolicy final : public AuthorizationPolicyHook {
   bool accept_geohash = true;
   bool accept_geoalt = true;
 
-  bool acceptProofOfPossession(const CatProofOfPossession&) override {
+  // Populated by acceptProofOfPossession so tests can verify that the
+  // request-side PolicyContext reached the hook untouched.
+  std::optional<std::string> last_client_id;
+  std::optional<std::string> last_client_ip;
+  std::optional<int> last_moqt_action;
+
+  bool acceptProofOfPossession(const CatProofOfPossession&,
+                               const PolicyContext& ctx) override {
     por_seen = true;
+    if (ctx.client_id) last_client_id = std::string{*ctx.client_id};
+    if (ctx.client_ip) last_client_ip = std::string{*ctx.client_ip};
+    last_moqt_action = ctx.moqt_action;
     return accept_por;
   }
-  bool acceptDpopBinding(const CatDpopSettings&) override {
+  bool acceptDpopBinding(const CatDpopSettings&,
+                         const PolicyContext&) override {
     dpop_seen = true;
     return accept_dpop;
   }
   bool acceptRequestDirective(std::string_view claim,
-                              const CatRequestDirective&) override {
+                              const CatRequestDirective&,
+                              const PolicyContext&) override {
     if (claim == "catif") {
       if_seen = true;
       return accept_if;
@@ -72,15 +84,17 @@ class RecordingPolicy final : public AuthorizationPolicyHook {
     r_seen = true;
     return accept_r;
   }
-  bool acceptGeoIso3166(const std::vector<std::string>&) override {
+  bool acceptGeoIso3166(const std::vector<std::string>&,
+                        const PolicyContext&) override {
     iso_seen = true;
     return accept_iso;
   }
-  bool acceptGeohash(const GeohashClaimValue&) override {
+  bool acceptGeohash(const GeohashClaimValue&,
+                     const PolicyContext&) override {
     geohash_seen = true;
     return accept_geohash;
   }
-  bool acceptGeoAltitude(const GeoAltitude&) override {
+  bool acceptGeoAltitude(const GeoAltitude&, const PolicyContext&) override {
     geoalt_seen = true;
     return accept_geoalt;
   }
@@ -308,6 +322,57 @@ TEST_SUITE("AuthorizationPolicyHook — validator wiring") {
     CHECK_FALSE(policy.r_seen);
     CHECK_FALSE(policy.geohash_seen);
     CHECK_FALSE(policy.geoalt_seen);
+  }
+
+  TEST_CASE("PolicyContext is forwarded to accept*() unmodified") {
+    // A shared validator behind a high-concurrency relay must be able to
+    // hand per-request facts (client identity, MOQT action) to the hook
+    // without the library reshaping or hiding them. Prove the caller's
+    // PolicyContext reaches the callback byte-for-byte.
+    auto token = baseToken();
+    CatProofOfPossession por;
+    por.probability = 1.0;
+    por.identifier = {0x01};
+    token.cat.catpor = por;
+
+    RecordingPolicy policy;
+    CatTokenValidator validator;
+    validator.withAuthorizationPolicy(&policy);
+
+    PolicyContext ctx;
+    std::string client_id = "session-42";
+    std::string client_ip = "203.0.113.9";
+    ctx.client_id = client_id;
+    ctx.client_ip = client_ip;
+    ctx.moqt_action = 7;
+
+    CHECK_NOTHROW(validator.validate(token, ctx));
+    CHECK(policy.por_seen);
+    REQUIRE(policy.last_client_id.has_value());
+    CHECK(*policy.last_client_id == client_id);
+    REQUIRE(policy.last_client_ip.has_value());
+    CHECK(*policy.last_client_ip == client_ip);
+    REQUIRE(policy.last_moqt_action.has_value());
+    CHECK(*policy.last_moqt_action == 7);
+  }
+
+  TEST_CASE("Single-arg validate supplies an empty PolicyContext") {
+    // The token-only overload must still work for callers that have no
+    // request context yet, delegating with a default-constructed context.
+    auto token = baseToken();
+    CatProofOfPossession por;
+    por.probability = 1.0;
+    por.identifier = {0x01};
+    token.cat.catpor = por;
+
+    RecordingPolicy policy;
+    CatTokenValidator validator;
+    validator.withAuthorizationPolicy(&policy);
+    CHECK_NOTHROW(validator.validate(token));
+    CHECK(policy.por_seen);
+    CHECK_FALSE(policy.last_client_id.has_value());
+    CHECK_FALSE(policy.last_client_ip.has_value());
+    CHECK_FALSE(policy.last_moqt_action.has_value());
   }
 
   TEST_CASE("tryValidate surfaces the policy failure via error code") {

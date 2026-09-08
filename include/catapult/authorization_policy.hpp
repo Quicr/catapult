@@ -34,21 +34,91 @@
 
 #pragma once
 
+#include <chrono>
+#include <cstdint>
+#include <optional>
 #include <string_view>
 
 #include "claims.hpp"
 
 namespace catapult {
 
+// Forward declarations kept lightweight so `authorization_policy.hpp` does
+// not pull in `dpop.hpp` transitively — a policy implementation only needs
+// the DPoP payload structure if it consumes the presented proof.
+struct DpopPayload;
+
+/**
+ * @brief Request-side context handed to every `AuthorizationPolicyHook`
+ *        callback.
+ *
+ * `AuthorizationPolicyHook` decides whether a token's semantic claim is
+ * satisfied by the *current request*, not by the token alone. The library
+ * has no privileged view of that request, so it forwards whatever the
+ * caller supplies here. Every field is optional: a caller that does not
+ * yet know a value passes `std::nullopt`, and a hook must be prepared for
+ * that case (a strict hook should reject when a needed field is missing;
+ * a permissive hook may ignore it).
+ *
+ * All string_view / pointer fields must reference storage that outlives
+ * the `validate()` call; the context is never copied and never retained
+ * past the callback.
+ */
+struct PolicyContext {
+  /**
+   * @brief Human-readable client identifier — subject, session id, or
+   *        similar. Not necessarily authenticated on its own; treat as a
+   *        hint unless the caller documents otherwise.
+   */
+  std::optional<std::string_view> client_id;
+
+  /**
+   * @brief Client network origin (typically the peer IP address as a
+   *        printable string; IPv4 dotted-quad or IPv6 textual form).
+   */
+  std::optional<std::string_view> client_ip;
+
+  /**
+   * @brief Presented DPoP proof payload, already parsed and structurally
+   *        validated by `DpopProofValidator`. Non-owning; the hook must
+   *        not retain the pointer past its callback.
+   */
+  const DpopPayload* dpop_proof = nullptr;
+
+  /**
+   * @brief MOQT action being authorized on this request (see
+   *        `moqt_actions::*`), if the caller is in a MOQT context.
+   */
+  std::optional<int> moqt_action;
+
+  /**
+   * @brief MOQT track namespace being addressed, byte-exact.
+   */
+  std::optional<std::string_view> moqt_namespace;
+
+  /**
+   * @brief MOQT track name being addressed, byte-exact.
+   */
+  std::optional<std::string_view> moqt_track;
+
+  /**
+   * @brief Wall-clock time of the request. Callers that want to align
+   *        policy decisions with the same `now` used for `exp` / `nbf`
+   *        pass the shared timestamp here; hooks that consult external
+   *        state may prefer their own clock.
+   */
+  std::optional<std::chrono::system_clock::time_point> request_time;
+};
+
 /**
  * @brief Operator-supplied semantic enforcement for CAT claims that the
  *        library cannot enforce from token state alone.
  *
  * Each accept*() method reports whether the corresponding claim's
- * requirement has been satisfied by the current request context. A `false`
- * return causes `CatTokenValidator` to reject the token with the
- * appropriate CatError subclass. Implementations MUST be safe to call
- * concurrently from multiple threads.
+ * requirement has been satisfied by the current request context, passed
+ * in as a `PolicyContext`. A `false` return causes `CatTokenValidator`
+ * to reject the token with the appropriate CatError subclass.
+ * Implementations MUST be safe to call concurrently from multiple threads.
  *
  * All accept*() methods are called only when the token actually carries
  * the corresponding claim; a policy authoring a strict-only deployment
@@ -69,7 +139,8 @@ class AuthorizationPolicyHook {
    * failure, not a replay/expiry error — the token is intact, its PoP
    * commitment was simply not honoured.
    */
-  virtual bool acceptProofOfPossession(const CatProofOfPossession& por) = 0;
+  virtual bool acceptProofOfPossession(const CatProofOfPossession& por,
+                                       const PolicyContext& ctx) = 0;
 
   /**
    * @brief Decide whether the requesting client has presented a DPoP
@@ -80,7 +151,8 @@ class AuthorizationPolicyHook {
    * DPoP proof with these parameters" and "the current request came with
    * a matching proof" is deployment-specific and lives here.
    */
-  virtual bool acceptDpopBinding(const CatDpopSettings& settings) = 0;
+  virtual bool acceptDpopBinding(const CatDpopSettings& settings,
+                                 const PolicyContext& ctx) = 0;
 
   /**
    * @brief Decide whether the request satisfies a request-context
@@ -92,26 +164,29 @@ class AuthorizationPolicyHook {
    * to attempt structural decoding.
    */
   virtual bool acceptRequestDirective(std::string_view claim_name,
-                                      const CatRequestDirective& directive) = 0;
+                                      const CatRequestDirective& directive,
+                                      const PolicyContext& ctx) = 0;
 
   /**
    * @brief Decide whether the request originates from one of the
    *        permitted ISO 3166 regions.
    */
-  virtual bool acceptGeoIso3166(
-      const std::vector<std::string>& allowed_codes) = 0;
+  virtual bool acceptGeoIso3166(const std::vector<std::string>& allowed_codes,
+                                const PolicyContext& ctx) = 0;
 
   /**
    * @brief Decide whether the request's location falls under an allowed
    *        geohash prefix (or array of prefixes).
    */
-  virtual bool acceptGeohash(const GeohashClaimValue& allowed) = 0;
+  virtual bool acceptGeohash(const GeohashClaimValue& allowed,
+                             const PolicyContext& ctx) = 0;
 
   /**
    * @brief Decide whether the request's altitude satisfies the token's
    *        `catgeoalt` restriction.
    */
-  virtual bool acceptGeoAltitude(const GeoAltitude& allowed) = 0;
+  virtual bool acceptGeoAltitude(const GeoAltitude& allowed,
+                                 const PolicyContext& ctx) = 0;
 };
 
 /**
@@ -125,19 +200,29 @@ class AuthorizationPolicyHook {
  */
 class PermissivePolicy final : public AuthorizationPolicyHook {
  public:
-  bool acceptProofOfPossession(const CatProofOfPossession&) override {
+  bool acceptProofOfPossession(const CatProofOfPossession&,
+                               const PolicyContext&) override {
     return true;
   }
-  bool acceptDpopBinding(const CatDpopSettings&) override { return true; }
-  bool acceptRequestDirective(std::string_view,
-                              const CatRequestDirective&) override {
+  bool acceptDpopBinding(const CatDpopSettings&,
+                         const PolicyContext&) override {
     return true;
   }
-  bool acceptGeoIso3166(const std::vector<std::string>&) override {
+  bool acceptRequestDirective(std::string_view, const CatRequestDirective&,
+                              const PolicyContext&) override {
     return true;
   }
-  bool acceptGeohash(const GeohashClaimValue&) override { return true; }
-  bool acceptGeoAltitude(const GeoAltitude&) override { return true; }
+  bool acceptGeoIso3166(const std::vector<std::string>&,
+                        const PolicyContext&) override {
+    return true;
+  }
+  bool acceptGeohash(const GeohashClaimValue&,
+                     const PolicyContext&) override {
+    return true;
+  }
+  bool acceptGeoAltitude(const GeoAltitude&, const PolicyContext&) override {
+    return true;
+  }
 };
 
 /**
@@ -153,19 +238,29 @@ class PermissivePolicy final : public AuthorizationPolicyHook {
  */
 class RejectingPolicy final : public AuthorizationPolicyHook {
  public:
-  bool acceptProofOfPossession(const CatProofOfPossession&) override {
+  bool acceptProofOfPossession(const CatProofOfPossession&,
+                               const PolicyContext&) override {
     return false;
   }
-  bool acceptDpopBinding(const CatDpopSettings&) override { return false; }
-  bool acceptRequestDirective(std::string_view,
-                              const CatRequestDirective&) override {
+  bool acceptDpopBinding(const CatDpopSettings&,
+                         const PolicyContext&) override {
     return false;
   }
-  bool acceptGeoIso3166(const std::vector<std::string>&) override {
+  bool acceptRequestDirective(std::string_view, const CatRequestDirective&,
+                              const PolicyContext&) override {
     return false;
   }
-  bool acceptGeohash(const GeohashClaimValue&) override { return false; }
-  bool acceptGeoAltitude(const GeoAltitude&) override { return false; }
+  bool acceptGeoIso3166(const std::vector<std::string>&,
+                        const PolicyContext&) override {
+    return false;
+  }
+  bool acceptGeohash(const GeohashClaimValue&,
+                     const PolicyContext&) override {
+    return false;
+  }
+  bool acceptGeoAltitude(const GeoAltitude&, const PolicyContext&) override {
+    return false;
+  }
 };
 
 }  // namespace catapult

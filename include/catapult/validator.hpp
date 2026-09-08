@@ -199,6 +199,27 @@ class CatTokenValidator {
   void validate(const CatToken& token) const;
 
   /**
+   * @brief Validate a CAT token with request-side context supplied to the
+   *        authorization-policy hook.
+   *
+   * Callers with a live request (client IP, DPoP proof, MOQT
+   * action/namespace/track, session identity) should prefer this overload
+   * so a shared validator can distinguish requests. The context is
+   * forwarded to every `AuthorizationPolicyHook::accept*` callback; the
+   * library itself does not inspect it. Every field of `PolicyContext` is
+   * optional — a hook must be prepared for `std::nullopt` when the caller
+   * cannot supply a value.
+   *
+   * The single-argument `validate(token)` overload is equivalent to
+   * passing a default-constructed (empty) context. Prefer this overload
+   * on the relay hot path so a policy that requires a context does not
+   * silently accept token-only calls.
+   *
+   * @throws Various CatError subclasses on validation failure
+   */
+  void validate(const CatToken& token, const PolicyContext& context) const;
+
+  /**
    * @brief Non-throwing validation for the relay hot path.
    *
    * Runs the same checks as `validate()` but reports failure through a
@@ -216,6 +237,17 @@ class CatTokenValidator {
    *   that verifier will export.
    */
   [[nodiscard]] CatErrorCode tryValidate(const CatToken& token) const noexcept;
+
+  /**
+   * @brief Non-throwing validation with a `PolicyContext`.
+   *
+   * Companion to `validate(token, context)`; same semantics as
+   * `tryValidate(token)` except the request context is forwarded to the
+   * authorization-policy hook.
+   */
+  [[nodiscard]] CatErrorCode tryValidate(const CatToken& token,
+                                         const PolicyContext& context)
+      const noexcept;
 
   /**
    * @brief Validate a token and consume it into an immutable
@@ -279,7 +311,11 @@ class CatTokenValidator {
   // Enforce every semantic claim that requires operator-supplied context
   // via `authz_policy_`. Called from `validate()` after structural /
   // temporal / issuer / audience / geographic-range checks have passed.
-  void validateAuthorizationPolicy(const CatToken& token) const;
+  // The `context` is forwarded verbatim to every hook callback; the
+  // single-argument `validate(token)` path supplies a default-constructed
+  // (empty) context.
+  void validateAuthorizationPolicy(const CatToken& token,
+                                   const PolicyContext& context) const;
 
   // CAT-4-MOQT (draft-ietf-moq-c4m-01) §`moqt-reval`: enforce that
   // `iat + moqt-reval` has not elapsed. `now_epoch_seconds` is passed in
