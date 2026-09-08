@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include "catapult/authorization_policy.hpp"
 #include "catapult/claims.hpp"
 #include "catapult/validator.hpp"
 #include "catapult/crypto.hpp"
@@ -8,11 +9,28 @@
 
 using namespace catapult;
 
+namespace {
+// These tests predate the authorization-policy hook. They construct
+// tokens that carry semantic claims (geohash, coordinates) purely to
+// exercise structural / temporal checks. Install a permissive policy
+// so those tokens continue to reach the code paths under test; the
+// enforcement contract itself is covered by dedicated tests in
+// authorization_policy.cpp.
+PermissivePolicy& sharedPermissivePolicy() {
+  static PermissivePolicy policy;
+  return policy;
+}
+}  // namespace
+
+// Baseline "valid" token used by structural / temporal / audience tests.
+// Deliberately carries no semantic claims (catgeoiso/geohash/catpor/etc.)
+// so it can be validated without an authorization-policy hook — those
+// claims are covered by their own dedicated tests.
 static CatToken createValidToken() {
     auto now = std::chrono::system_clock::now();
     auto exp = now + std::chrono::hours(1);
     auto nbf = now - std::chrono::minutes(5);
-    
+
     return CatToken()
         .withIssuer("https://trusted-issuer.com")
         .withAudience({"https://my-service.com"})
@@ -20,18 +38,18 @@ static CatToken createValidToken() {
         .withNotBefore(nbf)
         .withCwtIdString("valid-token")
         .withVersion(1)
-        .withGeoCoordinate(40.7128, -74.0060, 50.0)
-        .withGeohash(GeohashClaimValue{std::string{"dr5reg"}});
+        .withGeoCoordinate(40.7128, -74.0060, 50.0);
 }
 
 TEST_CASE("ValidatorSuccess") {
     auto token = createValidToken();
-    
+
     CatTokenValidator validator;
     validator.withExpectedIssuers({"https://trusted-issuer.com"})
             .withExpectedAudiences({"https://my-service.com"})
-            .withClockSkewTolerance(60);
-    
+            .withClockSkewTolerance(60)
+            .withAuthorizationPolicy(&sharedPermissivePolicy());
+
     REQUIRE_NOTHROW(validator.validate(token));
 }
 
@@ -135,23 +153,24 @@ TEST_CASE("ValidatorMissingAudience") {
 
 TEST_CASE("ValidatorGeographicValidation") {
     CatTokenValidator validator;
-    
+    validator.withAuthorizationPolicy(&sharedPermissivePolicy());
+
     // Test invalid latitude
     auto token1 = CatToken().withGeoCoordinate(91.0, 0.0); // Invalid latitude
     REQUIRE_THROWS_AS(validator.validate(token1), GeographicValidationError);
-    
+
     // Test invalid longitude
     auto token2 = CatToken().withGeoCoordinate(0.0, 181.0); // Invalid longitude
     REQUIRE_THROWS_AS(validator.validate(token2), GeographicValidationError);
-    
+
     // Test invalid geohash
     auto token3 = CatToken().withGeohash(GeohashClaimValue{std::string{""}}); // Empty geohash
     REQUIRE_THROWS_AS(validator.validate(token3), GeographicValidationError);
-    
+
     // Test valid coordinates
     auto token4 = CatToken().withGeoCoordinate(40.7128, -74.0060);
     REQUIRE_NOTHROW(validator.validate(token4));
-    
+
     // Test valid geohash
     auto token5 = CatToken().withGeohash(GeohashClaimValue{std::string{"dr5reg"}});
     REQUIRE_NOTHROW(validator.validate(token5));
@@ -204,9 +223,10 @@ TEST_CASE("ValidatorMultipleAudiences") {
 
 TEST_CASE("ValidatorNoExpectedIssuerOrAudience") {
     auto token = createValidToken();
-    
+
     // Validator without expected issuers or audiences should not validate them
     CatTokenValidator validator;
+    validator.withAuthorizationPolicy(&sharedPermissivePolicy());
     REQUIRE_NOTHROW(validator.validate(token));
 }
 

@@ -60,6 +60,12 @@ CatTokenValidator& CatTokenValidator::withUsageStateHook(
   return *this;
 }
 
+CatTokenValidator& CatTokenValidator::withAuthorizationPolicy(
+    AuthorizationPolicyHook* hook) {
+  authz_policy_ = hook;
+  return *this;
+}
+
 /**
  * @brief Template-based claim validation helper
  */
@@ -163,6 +169,7 @@ void CatTokenValidator::validate(const CatToken& token) const {
   validateGeographicRestrictions(token);
   validateUsageLimits(token);
   validateCompositeClaims(token);
+  validateAuthorizationPolicy(token);
   validateMoqtRevalidation(token, now);
 }
 
@@ -385,6 +392,79 @@ void CatTokenValidator::validateUsageLimits(const CatToken& token) const {
   }
   // Exhaustive switch above; keep the compiler happy on -Werror builds.
   throw ReplayAttackError();
+}
+
+// CTA-5007-B / draft-ietf-moq-c4m-01: claims whose semantics require
+// request context (block-list feed, DPoP presentation, geo policy) are
+// enforced through an operator-supplied `AuthorizationPolicyHook`.
+//
+// Fail-closed contract mirrors `validateUsageLimits`: any of these claims
+// present + no hook installed => reject. Silently admitting would let a
+// misconfigured relay believe it was enforcing the claim when it was
+// not, defeating the purpose of the claim.
+//
+// Structural sanity for these claims (probability range, non-empty
+// identifier, valid geohash characters, geo range bounds) is already
+// enforced upstream at decode time; the hook is asked only whether the
+// current request context satisfies a token that has already parsed as
+// well-formed.
+void CatTokenValidator::validateAuthorizationPolicy(
+    const CatToken& token) const {
+  const bool has_por = token.cat.catpor.has_value();
+  const bool has_catdpop = token.dpop.catdpop.has_value();
+  const bool has_catif = token.request.catif.has_value();
+  const bool has_catr = token.request.catr.has_value();
+  const bool has_geoiso = token.cat.catgeoiso3166.has_value() &&
+                          !token.cat.catgeoiso3166->empty();
+  const bool has_geohash = token.cat.geohash.has_value();
+  const bool has_geoalt = token.cat.catgeoalt.has_value();
+
+  const bool needs_policy = has_por || has_catdpop || has_catif || has_catr ||
+                            has_geoiso || has_geohash || has_geoalt;
+  if (!needs_policy) {
+    return;
+  }
+
+  if (authz_policy_ == nullptr) {
+    // No policy installed but the token carries a claim that requires
+    // one. Fail closed rather than admit unenforced. Callers who want to
+    // admit such tokens without semantic checks MUST install
+    // `PermissivePolicy` explicitly.
+    throw MissingRequiredClaimError(
+        "authorization policy hook (token carries semantic claims requiring "
+        "operator-supplied enforcement)");
+  }
+
+  if (has_por &&
+      !authz_policy_->acceptProofOfPossession(*token.cat.catpor)) {
+    throw InvalidClaimValueError("catpor rejected by authorization policy");
+  }
+  if (has_catdpop &&
+      !authz_policy_->acceptDpopBinding(*token.dpop.catdpop)) {
+    throw InvalidClaimValueError("catdpop rejected by authorization policy");
+  }
+  if (has_catif &&
+      !authz_policy_->acceptRequestDirective("catif", *token.request.catif)) {
+    throw InvalidClaimValueError("catif rejected by authorization policy");
+  }
+  if (has_catr &&
+      !authz_policy_->acceptRequestDirective("catr", *token.request.catr)) {
+    throw InvalidClaimValueError("catr rejected by authorization policy");
+  }
+  if (has_geoiso &&
+      !authz_policy_->acceptGeoIso3166(*token.cat.catgeoiso3166)) {
+    throw GeographicValidationError(
+        "catgeoiso3166 rejected by authorization policy");
+  }
+  if (has_geohash && !authz_policy_->acceptGeohash(*token.cat.geohash)) {
+    throw GeographicValidationError(
+        "geohash rejected by authorization policy");
+  }
+  if (has_geoalt &&
+      !authz_policy_->acceptGeoAltitude(*token.cat.catgeoalt)) {
+    throw GeographicValidationError(
+        "catgeoalt rejected by authorization policy");
+  }
 }
 
 // draft-ietf-moq-c4m-01 §"MOQT Revalidation Claim": `moqt-reval` MUST NOT

@@ -10,6 +10,7 @@
 #include <ranges>
 #include <unordered_set>
 
+#include "authorization_policy.hpp"
 #include "crypto.hpp"
 #include "error.hpp"
 #include "revalidation_callback.hpp"
@@ -97,6 +98,15 @@ class CatTokenValidator {
       ///< or `RevokeOnReplay` is then rejected outright, because
       ///< silently downgrading to `None` would let a misconfigured
       ///< relay believe it was enforcing replay when it was not.
+  AuthorizationPolicyHook* authz_policy_ = nullptr;
+      ///< Enforcement hook for semantic claims the library cannot decide
+      ///< from token state alone: `catpor`, `catdpop`, `catif`, `catr`,
+      ///< `catgeoiso3166`, `geohash`, `catgeoalt`. Non-owning; the caller
+      ///< is responsible for lifetime. A nullptr means "no policy" —
+      ///< when a token carries any of these claims and no hook is
+      ///< installed, validation fails closed with a missing-required-
+      ///< claim error. Test suites and staged rollouts can install
+      ///< `PermissivePolicy` to opt out of enforcement explicitly.
 
  public:
   /**
@@ -161,6 +171,25 @@ class CatTokenValidator {
    * implementation whose state is shared across relays.
    */
   CatTokenValidator& withUsageStateHook(UsageStateHook* hook);
+
+  /**
+   * @brief Install a semantic authorization-policy hook.
+   *
+   * Consulted when a token carries any of `catpor`, `catdpop`, `catif`,
+   * `catr`, `catgeoiso3166`, `geohash`, or `catgeoalt`. Without a hook
+   * installed the validator MUST fail closed on these claims — the
+   * library cannot decide their semantics from token state alone, and
+   * silently accepting would let a misconfigured relay believe it was
+   * enforcing an authorization rule when it was not.
+   *
+   * Ownership is not transferred — the hook must outlive the validator.
+   * Pass `nullptr` to disable (equivalent to the default).
+   *
+   * Test suites and deployments that have consciously opted out of
+   * enforcement can install `PermissivePolicy`; that is an explicit,
+   * auditable choice rather than a silent default.
+   */
+  CatTokenValidator& withAuthorizationPolicy(AuthorizationPolicyHook* hook);
 
   /**
    * @brief Validate a CAT token
@@ -247,6 +276,10 @@ class CatTokenValidator {
   void validateGeographicRestrictions(const CatToken& token) const;
   void validateUsageLimits(const CatToken& token) const;
   void validateCompositeClaims(const CatToken& token) const;
+  // Enforce every semantic claim that requires operator-supplied context
+  // via `authz_policy_`. Called from `validate()` after structural /
+  // temporal / issuer / audience / geographic-range checks have passed.
+  void validateAuthorizationPolicy(const CatToken& token) const;
 
   // CAT-4-MOQT (draft-ietf-moq-c4m-01) §`moqt-reval`: enforce that
   // `iat + moqt-reval` has not elapsed. `now_epoch_seconds` is passed in

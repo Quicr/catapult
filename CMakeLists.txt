@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(catapult VERSION 1.3.0 LANGUAGES C CXX)
+project(catapult VERSION 2.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -395,6 +395,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     # Create test executable
     set(CATAPULT_TEST_SOURCES
         tests/main.cpp
+        tests/authorization_policy.cpp
         tests/base64.cpp
         tests/claims.cpp
         tests/composite_claims.cpp

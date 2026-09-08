@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include "catapult/authorization_policy.hpp"
 #include "catapult/claims.hpp"
 #include "catapult/moqt_claims.hpp"
 #include "catapult/usage_state.hpp"
@@ -7,11 +8,28 @@
 
 using namespace catapult;
 
+namespace {
+// These tests predate the authorization-policy hook. They construct
+// tokens carrying semantic claims (geohash, coordinates) purely to
+// exercise structural / temporal / composite checks. Install a
+// permissive policy so those tokens continue to reach the code paths
+// under test; the enforcement contract itself is covered by dedicated
+// tests in authorization_policy.cpp.
+PermissivePolicy& sharedPermissivePolicy() {
+  static PermissivePolicy policy;
+  return policy;
+}
+}  // namespace
+
+// Baseline "valid" token used by structural / temporal / audience tests.
+// Deliberately carries no semantic claims (catgeoiso/geohash/catpor/etc.)
+// so it can be validated without an authorization-policy hook — those
+// claims are covered by their own dedicated tests.
 static auto createValidToken() {
     auto now = std::chrono::system_clock::now();
     auto exp = now + std::chrono::hours(1);
     auto nbf = now - std::chrono::minutes(5);
-    
+
     return CatToken()
         .withIssuer("https://trusted-issuer.com")
         .withAudience({"https://my-service.com"})
@@ -19,9 +37,7 @@ static auto createValidToken() {
         .withNotBefore(nbf)
         .withCwtIdString("valid-token")
         .withVersion(1)
-        .withGeoCoordinate(40.7128, -74.0060, 50.0)
-        .withGeohash(GeohashClaimValue{std::string{"dr5reg"}});
-        
+        .withGeoCoordinate(40.7128, -74.0060, 50.0);
 }
 
 TEST_CASE("DefaultValidator") {
@@ -169,7 +185,8 @@ TEST_CASE("ValidatorWithPermissiveTolerance") {
 TEST_CASE("GeographicValidationEdgeCases") {
 
     CatTokenValidator validator;
-    
+    validator.withAuthorizationPolicy(&sharedPermissivePolicy());
+
     // Test coordinates at the edge of valid ranges
     auto tokenAtNorthPole = CatToken().withGeoCoordinate(90.0, 0.0);
     REQUIRE_NOTHROW(validator.validate(tokenAtNorthPole));
@@ -198,6 +215,7 @@ TEST_CASE("GeographicValidationEdgeCases") {
 // Additional positive tests for CatTokenValidator
 TEST_CASE("ValidatorPositiveTests - Basic Functionality") {
     CatTokenValidator validator;
+    validator.withAuthorizationPolicy(&sharedPermissivePolicy());
     auto now = std::chrono::system_clock::now();
     auto exp = now + std::chrono::hours(2);
     auto nbf = now - std::chrono::minutes(10);
@@ -256,6 +274,7 @@ TEST_CASE("ValidatorPositiveTests - Basic Functionality") {
 
 TEST_CASE("ValidatorPositiveTests - Geographic Claims") {
     CatTokenValidator validator;
+    validator.withAuthorizationPolicy(&sharedPermissivePolicy());
     auto now = std::chrono::system_clock::now();
     auto exp = now + std::chrono::hours(1);
     
@@ -876,6 +895,7 @@ TEST_CASE("ValidatorNegativeTests - Edge Cases and Error Conditions") {
 
 
         CatTokenValidator validator;
+        validator.withAuthorizationPolicy(&sharedPermissivePolicy());
         // Current implementation doesn't validate geohash/coordinate consistency
         REQUIRE_NOTHROW(validator.validate(conflictingToken));
     }

@@ -1,4 +1,5 @@
 #include <benchmark/benchmark.h>
+#include "catapult/authorization_policy.hpp"
 #include "catapult/claims.hpp"
 #include "catapult/validator.hpp"
 #include "catapult/uri.hpp"
@@ -6,6 +7,18 @@
 #include <chrono>
 
 using namespace catapult;
+
+namespace {
+// The complex-token benchmarks intentionally exercise the validator's
+// full claim path, which now requires an authorization policy for
+// tokens carrying catpor/catdpop/catif/catr/geo claims. Benchmark work
+// is not a policy decision, so install a permissive policy so the
+// benchmark measures validation cost rather than a fail-closed rejection.
+PermissivePolicy& benchPermissivePolicy() {
+  static PermissivePolicy policy;
+  return policy;
+}
+}  // namespace
 
 static CatToken CreateSimpleToken() {
     auto now = std::chrono::system_clock::now();
@@ -130,7 +143,8 @@ static void BM_ValidateComplexToken(benchmark::State& state) {
     auto validator = CatTokenValidator()
         .withExpectedIssuers({"https://auth.example.com"})
         .withExpectedAudiences({"client1", "client2", "mobile-app"})
-        .withClockSkewTolerance(60);
+        .withClockSkewTolerance(60)
+        .withAuthorizationPolicy(&benchPermissivePolicy());
     
     for (auto _ : state) {
         try {
