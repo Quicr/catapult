@@ -1,0 +1,82 @@
+name: Fuzz
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Short soak on every PR: each harness runs for a bounded time against the
+# checked-in seed corpus, so any regression that crashes on the seeds is
+# caught before merge. Longer soaks (hours-to-days) belong to the embedder's
+# dedicated fuzzing infra — this job only guarantees the corpus stays clean
+# and the harnesses build clean under ASan/UBSan + libFuzzer.
+
+jobs:
+  libfuzzer:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        harness:
+          - fuzz_strict_cbor
+          - fuzz_cwt_decode_payload
+          - fuzz_cwt_header
+          - fuzz_base64url
+          - fuzz_dpop_deserialize
+
+    env:
+      CC: clang
+      CXX: clang++
+      # Fail fast on any sanitizer trap during the fuzz run.
+      ASAN_OPTIONS: halt_on_error=1:strict_string_checks=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        submodules: recursive
+
+    - name: Set up dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libssl-dev clang
+
+    - name: Configure with fuzzers + ASan + UBSan
+      run: |
+        cmake -S . -B build-fuzz \
+          -DCATAPULT_ENABLE_FUZZERS=ON \
+          -DCATAPULT_ENABLE_SANITIZERS=ON \
+          -DENABLE_LOGGING=OFF \
+          -DCATAPULT_ENABLE_JSON=OFF \
+          -DCMAKE_C_COMPILER=clang \
+          -DCMAKE_CXX_COMPILER=clang++ \
+          -DCMAKE_BUILD_TYPE=Debug
+
+    - name: Build ${{ matrix.harness }}
+      run: cmake --build build-fuzz --target ${{ matrix.harness }} -j$(nproc)
+
+    - name: Run ${{ matrix.harness }} against seed corpus
+      # 60-second soak per harness. libFuzzer treats an empty corpus dir as
+      # "start from nothing"; we always create the dir so the run never
+      # fails on a missing path when no seeds are checked in yet.
+      run: |
+        mkdir -p fuzz/corpus/${{ matrix.harness }}
+        ./build-fuzz/fuzz/${{ matrix.harness }} \
+          -max_total_time=60 \
+          -print_final_stats=1 \
+          fuzz/corpus/${{ matrix.harness }}
+
+    - name: Upload crash artefacts
+      if: failure()
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      with:
+        name: fuzz-crash-${{ matrix.harness }}
+        # libFuzzer writes crash-*, oom-*, timeout-* files to the working dir.
+        path: |
+          crash-*
+          oom-*
+          timeout-*
+          leak-*

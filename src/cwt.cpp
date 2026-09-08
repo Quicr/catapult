@@ -3,6 +3,7 @@
 #include <cbor.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include "catapult/base64.hpp"
@@ -37,6 +38,65 @@ CborItemPtr buildAlgCborValue(int64_t alg) {
   // Encode -1 - alg without overflowing when alg == INT64_MIN.
   uint64_t magnitude = static_cast<uint64_t>(-(alg + 1));
   return cbor_build_negint64_owned(magnitude);
+}
+
+// Decode an RFC 8392 NumericDate value into whole seconds since the Unix
+// epoch. Accepts the three CBOR shapes RFC 8392 §3.1.1–3.1.6 permits:
+//
+//   - unsigned integer: post-1970 whole-second timestamps.
+//   - negative integer: pre-1970 whole-second timestamps. Rare in practice
+//     but spec-permitted; rejecting them would silently coerce a spec-
+//     compliant token into a parse failure.
+//   - floating-point: fractional-second timestamps.
+//
+// `is_expiry_like` controls float rounding to preserve fail-closed semantics
+// on the wire → int64 downcast:
+//   - `true`  (`exp`)     → floor toward -infinity: a fractional expiry
+//     is treated as expiring at the earlier integer second, so tokens
+//     become invalid slightly sooner than the fractional value states.
+//   - `false` (`nbf`)     → ceil toward +infinity: a fractional not-before
+//     is treated as valid only from the later integer second, so tokens
+//     become valid slightly later than the fractional value states.
+//   - `iat` uses floor (informational only; matches historical behaviour).
+//
+// NaN, ±Infinity, and values outside `[INT64_MIN, INT64_MAX]` are rejected.
+bool decodeNumericDate(cbor_item_t* value, bool round_up_on_fraction,
+                       int64_t& out) {
+  if (cbor_isa_uint(value)) {
+    uint64_t raw = cbor_get_int(value);
+    if (raw > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+      return false;
+    }
+    out = static_cast<int64_t>(raw);
+    return true;
+  }
+  if (cbor_isa_negint(value)) {
+    // libcbor stores negative ints as their (-1 - n) magnitude in an
+    // unsigned 64-bit field. The most-negative representable int64_t is
+    // -2^63, which corresponds to magnitude (2^63 - 1) i.e.
+    // static_cast<uint64_t>(INT64_MAX).
+    uint64_t magnitude = cbor_get_int(value);
+    if (magnitude > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+      return false;
+    }
+    out = -static_cast<int64_t>(magnitude) - 1;
+    return true;
+  }
+  if (cbor_isa_float_ctrl(value) && !cbor_float_ctrl_is_ctrl(value)) {
+    double d = cbor_float_get_float(value);
+    if (std::isnan(d) || std::isinf(d)) return false;
+    // Bound BEFORE rounding so we never round-then-cast an out-of-range
+    // double into UB. The int64_t max value is not exactly representable
+    // as a double; use the largest double strictly less than 2^63 as the
+    // upper bound.
+    constexpr double kMax = 9223372036854774784.0;  // largest double < 2^63
+    constexpr double kMin = -9223372036854775808.0;  // exactly -2^63
+    if (d > kMax || d < kMin) return false;
+    double rounded = round_up_on_fraction ? std::ceil(d) : std::floor(d);
+    out = static_cast<int64_t>(rounded);
+    return true;
+  }
+  return false;
 }
 
 // Decode a COSE alg header value, enforcing the same range and rejecting
@@ -154,8 +214,21 @@ class CborMapBuilder {
   }
 
   void addClaimImpl(int64_t claim_id, int64_t value) {
+    // Signed CBOR: negative int64s round-trip through the negint major
+    // type (RFC 8949 §3.1) rather than being blindly cast to uint64.
+    // Without this branch a caller setting `exp = -1` would emit CBOR
+    // 0x1B FF...FF (uint 2^64-1), whose semantics have nothing to do
+    // with the intended NumericDate.
     auto key = cbor_build_uint64_owned(claim_id);
-    auto val = cbor_build_uint64_owned(value);
+    CborItemPtr val;
+    if (value >= 0) {
+      val = cbor_build_uint64_owned(static_cast<uint64_t>(value));
+    } else {
+      // Encode -1 - value as the negint magnitude without overflowing at
+      // INT64_MIN.
+      uint64_t magnitude = static_cast<uint64_t>(-(value + 1));
+      val = cbor_build_negint64_owned(magnitude);
+    }
     addPair(std::move(key), std::move(val));
   }
 
@@ -373,11 +446,19 @@ class CborMapBuilder {
     size_t entries = 0;
     if (cnf.jkt.has_value()) ++entries;
     if (cnf.kid.has_value()) ++entries;
-    // If we have neither typed field but have raw bytes, emit those verbatim
-    // as a bytestring so downstream verifiers see the issuer's original map.
+    // If we have neither typed field but have raw bytes, they must
+    // encode a well-formed CBOR map (RFC 8747 §3.1 requires `cnf` to be
+    // a map on the wire). Parse them under the strict loader and embed
+    // the resulting item; refuse to emit a byte string as the `cnf`
+    // value, since no compliant recipient would accept it.
     if (entries == 0 && cnf.raw.has_value()) {
-      auto val = cbor_build_bytestring_owned(cnf.raw->data(), cnf.raw->size());
-      addPair(std::move(key), std::move(val));
+      auto raw_item = catapult::internal::loadStrict(
+          std::span<const uint8_t>(cnf.raw->data(), cnf.raw->size()));
+      if (!cbor_isa_map(raw_item.get())) {
+        throw InvalidClaimValueError(
+            "'cnf' raw bytes must encode a CBOR map (RFC 8747 §3.1)");
+      }
+      addPair(std::move(key), std::move(raw_item));
       return;
     }
     auto m = cbor_new_definite_map_owned(entries);
@@ -402,13 +483,21 @@ class CborMapBuilder {
   //   1 -> honor_jti (bool)
   void addClaimImpl(int64_t claim_id, const CatDpopSettings& d) {
     auto key = cbor_build_uint64_owned(claim_id);
-    // If only the raw pass-through bytes are present, emit them directly as
-    // a byte string (issuer opaque form for future or unknown map labels).
+    // If only the raw pass-through bytes are present, they must decode
+    // to a CBOR map — draft-ietf-moq-c4m-01 defines `catdpop` as a map
+    // with integer labels. Emitting them as a byte string would produce
+    // a wire form no compliant recipient can consume; reject rather
+    // than round-trip a malformed representation.
     const bool has_typed =
         d.window_seconds.has_value() || d.honor_jti.has_value();
     if (!has_typed && d.raw.has_value()) {
-      auto val = cbor_build_bytestring_owned(d.raw->data(), d.raw->size());
-      addPair(std::move(key), std::move(val));
+      auto raw_item = catapult::internal::loadStrict(
+          std::span<const uint8_t>(d.raw->data(), d.raw->size()));
+      if (!cbor_isa_map(raw_item.get())) {
+        throw InvalidClaimValueError(
+            "'catdpop' raw bytes must encode a CBOR map");
+      }
+      addPair(std::move(key), std::move(raw_item));
       return;
     }
     size_t entries = 0;
@@ -803,7 +892,23 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
   // no duplicate keys, no unrecognized tags, no trailing bytes, and the
   // per-token size cap. This is the primary CAT payload parse entry
   // point so all downstream extraction runs on a canonical DOM.
-  auto item = catapult::internal::loadStrict(cborData);
+  //
+  // CATNIP entries (CLAIM_CATNIP=311) carry CBOR tags on each network-
+  // identifier value, so the payload policy widens the allowlist to
+  // admit those tags. The catnip-typed decoder below is still
+  // responsible for enforcing that only tagged bytestrings appear and
+  // that the tag number/value combination is well-formed.
+  //
+  // RFC 9164 defines the two IP-address CBOR tags CATNIP references:
+  //   52  IPv4 address (RFC 9164 §3.1) — bytestring OR array [prefix, addr]
+  //   54  IPv6 address (RFC 9164 §3.2) — bytestring OR array [prefix, addr]
+  // A CATNIP claim under CTA-5007-B carries either or both. Both are
+  // whitelisted here so a well-formed dual-stack policy round-trips;
+  // per-entry semantic validation of the tag/value combination remains
+  // the CLAIM_CATNIP switch's responsibility below.
+  catapult::internal::StrictCborOptions opts;
+  opts.allowed_tags = {52, 54};
+  auto item = catapult::internal::loadStrict(cborData, opts);
 
   if (!cbor_isa_map(item.get())) {
     throw InvalidTokenFormatError();
@@ -895,33 +1000,37 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         }
         break;
 
-      case CLAIM_EXP:
-        if (!cbor_isa_uint(value_item)) {
-          throw InvalidClaimValueError("'exp' must be an unsigned integer");
+      case CLAIM_EXP: {
+        // RFC 8392 NumericDate: uint, negint, or float. Floor on fractional
+        // seconds so the expiry lands at the earlier integer second — a
+        // token with a fractional exp becomes invalid slightly *sooner*
+        // than the wire value states, which is the fail-closed direction.
+        int64_t exp_val;
+        if (!decodeNumericDate(value_item, /*round_up_on_fraction=*/false,
+                                exp_val)) {
+          throw InvalidClaimValueError(
+              "'exp' must be a NumericDate (uint, negint, or non-NaN float in "
+              "int64 range)");
         }
-        {
-          uint64_t exp_val = cbor_get_int(value_item);
-          if (exp_val >
-              static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
-            throw InvalidClaimValueError("'exp' exceeds int64 range");
-          }
-          token.core.exp = static_cast<int64_t>(exp_val);
-        }
+        token.core.exp = exp_val;
         break;
+      }
 
-      case CLAIM_NBF:
-        if (!cbor_isa_uint(value_item)) {
-          throw InvalidClaimValueError("'nbf' must be an unsigned integer");
+      case CLAIM_NBF: {
+        // Ceil on fractional seconds so the not-before lands at the later
+        // integer second — a token with a fractional nbf becomes valid
+        // slightly *later* than the wire value states, matching exp's
+        // fail-closed rounding direction.
+        int64_t nbf_val;
+        if (!decodeNumericDate(value_item, /*round_up_on_fraction=*/true,
+                                nbf_val)) {
+          throw InvalidClaimValueError(
+              "'nbf' must be a NumericDate (uint, negint, or non-NaN float in "
+              "int64 range)");
         }
-        {
-          uint64_t nbf_val = cbor_get_int(value_item);
-          if (nbf_val >
-              static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
-            throw InvalidClaimValueError("'nbf' exceeds int64 range");
-          }
-          token.core.nbf = static_cast<int64_t>(nbf_val);
-        }
+        token.core.nbf = nbf_val;
         break;
+      }
 
       case CLAIM_CTI:
         // RFC 8392 §3.1.7: `cti` is a CBOR byte string. Reject the older
@@ -1225,6 +1334,15 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
             }
             CatNipEntry e;
             e.tag = cbor_tag_value(arr[j]);
+            // Only the RFC 9164 address tags carry a defined CATNIP
+            // semantics today: 52 = IPv4, 54 = IPv6. Reject any other
+            // tag rather than round-trip an entry whose meaning we
+            // cannot enforce against a claim policy.
+            if (e.tag != 52 && e.tag != 54) {
+              throw InvalidClaimValueError(
+                  "'catnip' entry uses an unrecognised tag "
+                  "(only RFC 9164 tags 52/54 are supported)");
+            }
             cbor_item_t* tagged = cbor_tag_item(arr[j]);
             if (!tagged || !cbor_isa_bytestring(tagged)) {
               cbor_decref(&tagged);
@@ -1232,6 +1350,17 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
                   "'catnip' tagged item must be a byte string");
             }
             size_t elen = cbor_bytestring_length(tagged);
+            // RFC 9164 §3: a bare IP address is exactly 4 bytes (IPv4)
+            // or 16 bytes (IPv6). Enforce the length matches the tag so
+            // a producer cannot smuggle mismatched material past a
+            // downstream address matcher.
+            const size_t expected = (e.tag == 52) ? 4u : 16u;
+            if (elen != expected) {
+              cbor_decref(&tagged);
+              throw InvalidClaimValueError(
+                  "'catnip' address length does not match its tag "
+                  "(RFC 9164 §3)");
+            }
             const unsigned char* edata = cbor_bytestring_handle(tagged);
             e.value.assign(edata, edata + elen);
             cbor_decref(&tagged);
@@ -1417,12 +1546,22 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         token.informational.sub = extract_string(value_item);
         break;
 
-      case CLAIM_IAT:
-        if (!cbor_isa_uint(value_item)) {
-          throw InvalidClaimValueError("'iat' must be an unsigned integer");
+      case CLAIM_IAT: {
+        // `iat` is informational only, but still a NumericDate: accept
+        // negint and float shapes per RFC 8392. Floor fractional values —
+        // "issued at some point during that second" is the intuitive
+        // reading and matches historical behaviour for whole-second
+        // values.
+        int64_t iat_val;
+        if (!decodeNumericDate(value_item, /*round_up_on_fraction=*/false,
+                                iat_val)) {
+          throw InvalidClaimValueError(
+              "'iat' must be a NumericDate (uint, negint, or non-NaN float in "
+              "int64 range)");
         }
-        token.informational.iat = cbor_get_int(value_item);
+        token.informational.iat = iat_val;
         break;
+      }
 
       case CLAIM_CATIFDATA:
         if (cbor_isa_string(value_item)) {
@@ -1499,6 +1638,17 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
               // strict handling for jkt/kid; other forms round-trip via
               // future [[cnf-jwk-decoding]].
             }
+          }
+          // RFC 8747 §3.1 requires `cnf` to carry a proof-of-possession
+          // key reference. An empty recognised subset (neither `jkt`
+          // nor `kid`) would silently be treated as "unbound", which is
+          // exactly the failure mode `cnf` exists to prevent. Fail
+          // closed rather than admit a token whose PoP binding cannot
+          // be checked.
+          if (!cnf.jkt.has_value() && !cnf.kid.has_value()) {
+            throw InvalidClaimValueError(
+                "'cnf' must carry at least one of jkt (label 3) or kid "
+                "(RFC 8747 §3.1)");
           }
           token.dpop.cnf = std::move(cnf);
         }
@@ -2118,31 +2268,13 @@ std::string Cwt::createCwtBase64(
 }
 
 CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
-  // Outer COSE bytes carry an RFC 8152 tag (16/17/18) so the strict loader
-  // cannot handle them directly, but we still enforce the CTA-5007-B
-  // encoded-size bound and require full input consumption.
-  if (cwtBytes.size() > catapult::internal::kMaxDecodedCborBytes) {
-    throw InvalidCborError("COSE input exceeds decoded-bytes limit");
-  }
-  struct cbor_load_result result;
-  auto coseItem = cbor_load_owned(cwtBytes, result);
-
-  if (result.error.code != CBOR_ERR_NONE || !coseItem) {
-    throw InvalidCborError("Failed to parse COSE structure");
-  }
-  if (result.read != cwtBytes.size()) {
-    throw InvalidCborError("Trailing bytes after COSE root item");
-  }
-
-  // Peel a COSE tag (16/17/18) if present — see validateCwt for rationale.
-  if (cbor_isa_tag(coseItem.get())) {
-    const uint64_t tagValue = cbor_tag_value(coseItem.get());
-    if (tagValue != 16 && tagValue != 17 && tagValue != 18) {
-      throw InvalidTokenFormatError();
-    }
-    CborItemPtr innerOwned(cbor_tag_item(coseItem.get()));
-    coseItem = std::move(innerOwned);
-  }
+  // Outer COSE envelope: strict loader with tag 16/17/18 whitelisted. The
+  // helper enforces size, definite-length, duplicate-key, trailing-bytes,
+  // and nesting-depth policy uniformly across every COSE-parse entry
+  // point (see also validateCwt, validateMultiSignedCwt, DpopProof).
+  auto env =
+      catapult::internal::loadStrictCoseEnvelope(cwtBytes, {16, 17, 18});
+  CborItemPtr coseItem = std::move(env.item);
 
   if (!cbor_isa_array(coseItem.get())) {
     throw InvalidTokenFormatError();
@@ -2221,41 +2353,16 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
   try {
     CAT_LOG_DEBUG("Validating CWT token of {} bytes", cwtBytes.size());
 
-    // Parse COSE structure from raw CBOR bytes (RFC 8392 Section 9.2).
-    // Accept both the tagged and untagged forms: RFC 8152 registers
-    // COSE_Sign1 (tag 18), COSE_Mac0 (tag 17), and COSE_Encrypt0 (tag 16),
-    // and CAT-4-MOQT (draft-ietf-moq-c4m) test vectors are emitted with
-    // the tag. Peel the tag if present so the inner array is uniformly
-    // dispatched by size below; require the tag number to be one of the
-    // three registered COSE single-recipient types when present. The outer
-    // COSE tag prevents use of loadStrict here, but we still cap the input
-    // size and reject trailing bytes.
-    if (cwtBytes.size() > catapult::internal::kMaxDecodedCborBytes) {
-      throw InvalidCborError("COSE input exceeds decoded-bytes limit");
-    }
-    struct cbor_load_result result;
-    auto coseItem = cbor_load_owned(cwtBytes, result);
-
-    if (result.error.code != CBOR_ERR_NONE || !coseItem) {
-      throw InvalidCborError("Failed to parse COSE structure");
-    }
-    if (result.read != cwtBytes.size()) {
-      throw InvalidCborError("Trailing bytes after COSE root item");
-    }
-
-    std::optional<uint64_t> coseTag;
-    if (cbor_isa_tag(coseItem.get())) {
-      const uint64_t tagValue = cbor_tag_value(coseItem.get());
-      if (tagValue != 16 && tagValue != 17 && tagValue != 18) {
-        throw InvalidTokenFormatError();
-      }
-      coseTag = tagValue;
-      cbor_item_t* inner = cbor_tag_item(coseItem.get());
-      // cbor_tag_item returns an owned reference; wrap it before releasing
-      // the tag so ownership is single-rooted.
-      CborItemPtr innerOwned(inner);
-      coseItem = std::move(innerOwned);
-    }
+    // Outer COSE envelope: strict loader with the RFC 8152 single-
+    // recipient tags whitelisted. This is the single strict-CBOR
+    // boundary for the outer body — no ad-hoc raw parse remains. If the
+    // producer emitted a tag, it must be 16 (COSE_Encrypt0), 17
+    // (COSE_Mac0), or 18 (COSE_Sign1); anything else is rejected before
+    // we spend any crypto.
+    auto env =
+        catapult::internal::loadStrictCoseEnvelope(cwtBytes, {16, 17, 18});
+    CborItemPtr coseItem = std::move(env.item);
+    std::optional<uint64_t> coseTag = env.tag;
 
     if (!cbor_isa_array(coseItem.get())) {
       throw InvalidTokenFormatError();
@@ -2535,34 +2642,12 @@ Cwt Cwt::validateMultiSignedCwt(
     CAT_LOG_DEBUG("Validating multi-signed CWT token of {} bytes",
                   cwtBytes.size());
 
-    // Enforce the same input-size and trailing-bytes policy as the single-
-    // recipient path: attacker-controlled COSE input must not slip past the
-    // decoded-bytes ceiling, and any trailing data after the root item is
-    // treated as a framing anomaly rather than silently ignored.
-    if (cwtBytes.size() > catapult::internal::kMaxDecodedCborBytes) {
-      throw InvalidCborError("COSE input exceeds decoded-bytes limit");
-    }
-    struct cbor_load_result result;
-    auto coseItem = cbor_load_owned(cwtBytes, result);
-
-    if (result.error.code != CBOR_ERR_NONE || !coseItem) {
-      throw InvalidCborError("Failed to parse COSE structure");
-    }
-    if (result.read != cwtBytes.size()) {
-      throw InvalidCborError("Trailing bytes after COSE root item");
-    }
-
-    // RFC 8152 registers COSE_Sign under tag 98. If a tag is present it
-    // must be 98 — accepting Sign1/Mac0/Encrypt0 tags here would let a
-    // producer label a multi-signed body as a single-recipient structure.
-    if (cbor_isa_tag(coseItem.get())) {
-      const uint64_t tagValue = cbor_tag_value(coseItem.get());
-      if (tagValue != 98) {
-        throw InvalidTokenFormatError();
-      }
-      CborItemPtr innerOwned(cbor_tag_item(coseItem.get()));
-      coseItem = std::move(innerOwned);
-    }
+    // Outer envelope for COSE_Sign (RFC 8152 §4.1) is tag 98. Route this
+    // through the same strict-CBOR boundary as the single-recipient path:
+    // whitelisting only tag 98 keeps a producer from labelling a multi-
+    // signed body as Sign1/Mac0/Encrypt0 and vice-versa.
+    auto env = catapult::internal::loadStrictCoseEnvelope(cwtBytes, {98});
+    CborItemPtr coseItem = std::move(env.item);
 
     if (!cbor_isa_array(coseItem.get())) {
       throw InvalidTokenFormatError();

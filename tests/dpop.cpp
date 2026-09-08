@@ -268,6 +268,87 @@ TEST_SUITE("DPoP CWT wire format") {
                                    real_keys->get_public_key_thumbprint()));
   }
 
+#ifdef CATAPULT_ENABLE_JSON
+  TEST_CASE(
+      "JWT DPoP emits `actx.action` as an action-name string per the pinned "
+      "CAT-4-MOQT profile") {
+    // L-03: the earlier form serialised the numeric COSE label
+    // (`actx.action = 6`) rather than the pinned-draft action name
+    // (`actx.action = "PUBLISH"`). Peers that follow the draft would
+    // reject the numeric form. Verify both the wire payload string
+    // form and a full round-trip.
+    auto keys = makeEs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns.example", "track-1",
+        "relay.example:4433", std::string{"jti-jwt-action"},
+        DpopEncoding::JWT);
+    auto wire = proof.serialize();
+
+    // Split JWT and decode the middle segment (payload) — the action
+    // must be the string "PUBLISH", not an integer.
+    auto first_dot = wire.find('.');
+    auto second_dot = wire.find('.', first_dot + 1);
+    REQUIRE(first_dot != std::string::npos);
+    REQUIRE(second_dot != std::string::npos);
+    auto payload_b64 = wire.substr(first_dot + 1, second_dot - first_dot - 1);
+    auto payload_bytes = base64UrlDecode(payload_b64);
+    std::string payload_json(payload_bytes.begin(), payload_bytes.end());
+    // Direct substring check: the JSON must literally contain
+    // "action":"PUBLISH" — a numeric form would produce "action":6.
+    CHECK(payload_json.find("\"action\":\"PUBLISH\"") != std::string::npos);
+    CHECK(payload_json.find("\"action\":6") == std::string::npos);
+
+    // Round-trip: the parsed struct must map back to the numeric action
+    // for downstream policy checks.
+    auto decoded = DpopProof::deserialize(wire);
+    CHECK(decoded.encoding() == DpopEncoding::JWT);
+    CHECK(decoded.get_payload().actx.action == moqt_actions::PUBLISH);
+  }
+
+  TEST_CASE(
+      "JWT DPoP rejects a numeric or unknown `actx.action` on deserialize") {
+    // A draft-shaped peer emits action names; any producer that still
+    // sends a number, or a name catapult doesn't know, must be rejected
+    // rather than silently reinterpreted.
+    auto keys = makeEs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-numeric-action"}, DpopEncoding::JWT);
+    auto wire = proof.serialize();
+
+    // Mutate the payload segment to carry a numeric action and re-encode.
+    auto first_dot = wire.find('.');
+    auto second_dot = wire.find('.', first_dot + 1);
+    auto header_b64 = wire.substr(0, first_dot);
+    auto sig_b64 = wire.substr(second_dot + 1);
+    auto payload_b64 = wire.substr(first_dot + 1, second_dot - first_dot - 1);
+    auto payload_bytes = base64UrlDecode(payload_b64);
+    std::string payload_json(payload_bytes.begin(), payload_bytes.end());
+
+    // Swap "action":"PUBLISH" for "action":6.
+    auto pos = payload_json.find("\"action\":\"PUBLISH\"");
+    REQUIRE(pos != std::string::npos);
+    payload_json.replace(pos, sizeof("\"action\":\"PUBLISH\"") - 1,
+                         "\"action\":6");
+    auto mutated_b64 = base64UrlEncode(
+        std::vector<uint8_t>(payload_json.begin(), payload_json.end()));
+    std::string mutated_wire =
+        header_b64 + "." + mutated_b64 + "." + sig_b64;
+    CHECK_THROWS(DpopProof::deserialize(mutated_wire));
+
+    // An unknown action name must also reject.
+    auto pos2 = payload_json.find("\"action\":6");
+    REQUIRE(pos2 != std::string::npos);
+    payload_json.replace(pos2, sizeof("\"action\":6") - 1,
+                         "\"action\":\"MADE_UP\"");
+    auto unknown_b64 = base64UrlEncode(
+        std::vector<uint8_t>(payload_json.begin(), payload_json.end()));
+    std::string unknown_wire =
+        header_b64 + "." + unknown_b64 + "." + sig_b64;
+    CHECK_THROWS(DpopProof::deserialize(unknown_wire));
+  }
+#endif  // CATAPULT_ENABLE_JSON
+
   TEST_CASE("CWT DPoP deserialization rejects non-18 outer tag") {
     // HN-03: a COSE_Sign1 body labelled with any other single-recipient
     // tag must be refused before we do any crypto.

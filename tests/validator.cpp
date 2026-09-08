@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 #include "catapult/claims.hpp"
 #include "catapult/moqt_claims.hpp"
+#include "catapult/usage_state.hpp"
 #include "catapult/validator.hpp"
 #include <chrono>
 
@@ -1080,5 +1081,78 @@ TEST_SUITE("tryValidate — non-throwing hot-path surface") {
         auto result = validator.tryIntoValidated(token);
         REQUIRE(result.isError());
         CHECK(result.error() == CatErrorCode::TOKEN_EXPIRED);
+    }
+
+    TEST_CASE("catreplay=None passes without a usage-state hook") {
+        // Explicitly opting out of replay enforcement must not require a
+        // hook — that would break the "issuer says None" contract.
+        auto token = createValidToken().withReplayProtection(
+            CatReplayMode::None);
+        CatTokenValidator validator;
+        REQUIRE_NOTHROW(validator.validate(token));
+    }
+
+    TEST_CASE("catreplay=RejectOnReplay without a hook fails closed") {
+        // Fail-closed contract: a token that opted into replay protection
+        // must be rejected when no hook is available, rather than
+        // silently downgraded to no enforcement.
+        auto token = createValidToken().withReplayProtection(
+            CatReplayMode::RejectOnReplay);
+        CatTokenValidator validator;
+        CHECK_THROWS_AS(validator.validate(token), ReplayAttackError);
+    }
+
+    TEST_CASE("catreplay=RejectOnReplay without cti fails as missing claim") {
+        // Without a cti there is no stable key to record; enforcement is
+        // impossible, and admitting would defeat the whole claim.
+        auto token = CatToken()
+                         .withIssuer("iss")
+                         .withAudience({"aud"})
+                         .withExpiration(std::chrono::system_clock::now() +
+                                         std::chrono::hours(1))
+                         .withReplayProtection(CatReplayMode::RejectOnReplay);
+        InMemoryUsageState hook;
+        CatTokenValidator validator;
+        validator.withUsageStateHook(&hook);
+        CHECK_THROWS_AS(validator.validate(token), MissingRequiredClaimError);
+    }
+
+    TEST_CASE(
+        "catreplay=RejectOnReplay admits once and rejects the second use") {
+        auto now = std::chrono::system_clock::now();
+        auto token = CatToken()
+                         .withIssuer("iss")
+                         .withAudience({"aud"})
+                         .withExpiration(now + std::chrono::hours(1))
+                         .withCwtIdString("cti-reject")
+                         .withReplayProtection(CatReplayMode::RejectOnReplay);
+        InMemoryUsageState hook;
+        CatTokenValidator validator;
+        validator.withUsageStateHook(&hook);
+        REQUIRE_NOTHROW(validator.validate(token));
+        CHECK_THROWS_AS(validator.validate(token), ReplayAttackError);
+    }
+
+    TEST_CASE(
+        "catreplay=RevokeOnReplay marks the cti and rejects any later "
+        "presentation") {
+        auto now = std::chrono::system_clock::now();
+        auto token = CatToken()
+                         .withIssuer("iss")
+                         .withAudience({"aud"})
+                         .withExpiration(now + std::chrono::hours(1))
+                         .withCwtIdString("cti-revoke")
+                         .withReplayProtection(CatReplayMode::RevokeOnReplay);
+        InMemoryUsageState hook;
+        CatTokenValidator validator;
+        validator.withUsageStateHook(&hook);
+        REQUIRE_NOTHROW(validator.validate(token));
+        // Second sighting → Revoked → ReplayAttackError.
+        CHECK_THROWS_AS(validator.validate(token), ReplayAttackError);
+        // A third presentation is still rejected even after we switch
+        // modes on the token, because revocation is sticky in the hook.
+        auto rebadged = token;
+        rebadged.cat.catreplay = CatReplayMode::RejectOnReplay;
+        CHECK_THROWS_AS(validator.validate(rebadged), ReplayAttackError);
     }
 }

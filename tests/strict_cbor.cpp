@@ -11,6 +11,7 @@
 
 using catapult::InvalidCborError;
 using catapult::internal::loadStrict;
+using catapult::internal::loadStrictCoseEnvelope;
 using catapult::internal::StrictCborOptions;
 
 namespace {
@@ -175,4 +176,57 @@ TEST_CASE("strict CBOR accepts canonical length-first map order") {
   auto item = loadStrict(std::span<const uint8_t>(bytes));
   REQUIRE(item);
   CHECK(cbor_typeof(item.get()) == CBOR_TYPE_MAP);
+}
+
+TEST_CASE("strict CBOR accepts a whitelisted tag (context-aware policy)") {
+  // Tag 52 wrapping bytestring 0x00 — a shape catnip test vectors carry.
+  // Under the default policy this is rejected; with the tag in the allow-
+  // list the loader must accept and recurse into the wrapped bytestring.
+  auto bytes = asBytes({0xd8, 0x34, 0x40});
+  StrictCborOptions opts;
+  opts.allowed_tags = {52};
+  auto item = loadStrict(std::span<const uint8_t>(bytes), opts);
+  REQUIRE(item);
+  CHECK(cbor_typeof(item.get()) == CBOR_TYPE_TAG);
+  CHECK(cbor_tag_value(item.get()) == 52);
+}
+
+TEST_CASE("strict CBOR still rejects non-whitelisted tags under narrow policy") {
+  // Tag 52 is whitelisted, but tag 100 is not — the loader must reject.
+  auto bytes = asBytes({0xd8, 0x64, 0x40});
+  StrictCborOptions opts;
+  opts.allowed_tags = {52};
+  CHECK_THROWS_AS(loadStrict(std::span<const uint8_t>(bytes), opts),
+                  InvalidCborError);
+}
+
+TEST_CASE(
+    "strict COSE envelope peels a whitelisted outer tag and returns it") {
+  // Tag 18 (COSE_Sign1) wrapping a 4-element array of definite bytestrings.
+  // Inner array: [h'', {}, h'', h''] serialises to 0x84 0x40 0xa0 0x40 0x40.
+  auto bytes = asBytes({0xd2, 0x84, 0x40, 0xa0, 0x40, 0x40});
+  auto env = loadStrictCoseEnvelope(std::span<const uint8_t>(bytes), {18});
+  REQUIRE(env.item);
+  REQUIRE(env.tag.has_value());
+  CHECK(*env.tag == 18);
+  CHECK(cbor_typeof(env.item.get()) == CBOR_TYPE_ARRAY);
+  CHECK(cbor_array_size(env.item.get()) == 4);
+}
+
+TEST_CASE("strict COSE envelope rejects wrong outer tag") {
+  // Tag 17 (COSE_Mac0) — Sign1-only whitelist must reject before parsing
+  // the body. This is exactly the tag-confusion guard L-04 codifies.
+  auto bytes = asBytes({0xd1, 0x84, 0x40, 0xa0, 0x40, 0x40});
+  CHECK_THROWS_AS(
+      loadStrictCoseEnvelope(std::span<const uint8_t>(bytes), {18}),
+      InvalidCborError);
+}
+
+TEST_CASE("strict COSE envelope accepts untagged COSE array") {
+  // Same inner array, no outer tag: env.tag is unset, item is the array.
+  auto bytes = asBytes({0x84, 0x40, 0xa0, 0x40, 0x40});
+  auto env = loadStrictCoseEnvelope(std::span<const uint8_t>(bytes), {18});
+  REQUIRE(env.item);
+  CHECK_FALSE(env.tag.has_value());
+  CHECK(cbor_typeof(env.item.get()) == CBOR_TYPE_ARRAY);
 }

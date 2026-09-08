@@ -66,3 +66,158 @@ jobs:
       with:
         name: test-results-${{ matrix.os }}-${{ matrix.arch }}
         path: build/Testing/Temporary/LastTest.log
+
+  install-consumer:
+    # Guard the install/export path against silent regressions: build and
+    # install catapult, then configure and build an out-of-tree consumer
+    # that uses `find_package(catapult)` to link against the installed
+    # archive. If the vendored deps ever leak into the export set again
+    # (as they did before EXCLUDE_FROM_ALL + $<TARGET_OBJECTS:...>
+    # bundling), find_package will fail and this job will fail on the
+    # tag-time release workflow too — before it becomes a broken release.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        submodules: recursive
+
+    - name: Set up dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libssl-dev nlohmann-json3-dev
+
+    - name: Configure + build + install catapult (JSON on)
+      run: |
+        cmake -S . -B build-install \
+          -DCMAKE_INSTALL_PREFIX=$RUNNER_TEMP/prefix \
+          -DENABLE_LOGGING=ON \
+          -DCATAPULT_ENABLE_JSON=ON \
+          -DCMAKE_BUILD_TYPE=Release
+        cmake --build build-install --target catapult -j$(nproc)
+        cmake --install build-install
+
+    - name: Assert installed export is relocatable
+      # The exported target must not carry any absolute build-machine path
+      # in its INTERFACE_INCLUDE_DIRECTORIES. If OpenSSL (or any other
+      # dependency) ever leaks its absolute include dir into the export,
+      # a consumer on another host will inherit a nonexistent path.
+      # Fail the job before that lands.
+      run: |
+        TARGETS=$RUNNER_TEMP/prefix/lib/cmake/catapult/catapultTargets.cmake
+        echo "--- catapultTargets.cmake ---"
+        cat "$TARGETS"
+        echo "-----------------------------"
+        # The install prefix itself is a legitimate absolute path (via
+        # _IMPORT_PREFIX). Anything else absolute is a leak — grep
+        # rejects the file if we find "/opt/", "/usr/local/", or any
+        # /home/runner/... build path in the export properties.
+        if grep -E 'INTERFACE_[A-Z_]+ +"[^"]*(/opt/|/usr/local/|/home/runner/work/)' "$TARGETS"; then
+          echo "::error::installed catapultTargets.cmake contains build-machine absolute paths"
+          exit 1
+        fi
+
+    - name: Build a non-JSON out-of-tree consumer
+      # Minimal downstream target that touches only the JSON-free public
+      # headers. If the exported target set references something the
+      # consumer's build tree does not have, this step fails.
+      run: |
+        CONSUMER=$RUNNER_TEMP/consumer-nojson
+        mkdir -p $CONSUMER
+        cat > $CONSUMER/CMakeLists.txt <<'EOF'
+        cmake_minimum_required(VERSION 3.16)
+        project(catapult_consumer_nojson CXX)
+        set(CMAKE_CXX_STANDARD 20)
+        find_package(catapult REQUIRED)
+        add_executable(consumer main.cpp)
+        target_link_libraries(consumer PRIVATE catapult::catapult)
+        EOF
+        cat > $CONSUMER/main.cpp <<'EOF'
+        #include <catapult/validator.hpp>
+        #include <catapult/token.hpp>
+        int main() {
+          catapult::CatToken t;
+          t.core.iss = "issuer";
+          t.core.aud = std::vector<std::string>{"aud"};
+          catapult::CatTokenValidator v;
+          v.withExpectedIssuers({"issuer"}).withExpectedAudiences({"aud"});
+          v.validate(t);
+          return 0;
+        }
+        EOF
+        cmake -S $CONSUMER -B $CONSUMER/build \
+          -DCMAKE_PREFIX_PATH=$RUNNER_TEMP/prefix
+        cmake --build $CONSUMER/build
+        $CONSUMER/build/consumer
+
+    - name: Build a JSON-enabled out-of-tree consumer
+      # Downstream code that pulls in the JSON-carrying headers. Because
+      # nlohmann_json is header-only and not vendored into the installed
+      # archive, the consumer is expected to bring its own
+      # `find_package(nlohmann_json)`. This step proves the JSON contract
+      # end-to-end: install → find_package(catapult) → include
+      # <catapult/json_serialization.hpp> → link.
+      run: |
+        CONSUMER=$RUNNER_TEMP/consumer-json
+        mkdir -p $CONSUMER
+        cat > $CONSUMER/CMakeLists.txt <<'EOF'
+        cmake_minimum_required(VERSION 3.16)
+        project(catapult_consumer_json CXX)
+        set(CMAKE_CXX_STANDARD 20)
+        find_package(nlohmann_json CONFIG REQUIRED)
+        find_package(catapult REQUIRED)
+        add_executable(consumer main.cpp)
+        target_link_libraries(consumer PRIVATE catapult::catapult nlohmann_json::nlohmann_json)
+        EOF
+        cat > $CONSUMER/main.cpp <<'EOF'
+        #include <catapult/token.hpp>
+        #include <catapult/json_serialization.hpp>
+        #include <nlohmann/json.hpp>
+        int main() {
+          catapult::CatToken t;
+          t.core.iss = "issuer";
+          t.core.aud = std::vector<std::string>{"aud"};
+          nlohmann::json j;
+          catapult::json_serialization::to_json(j, t);
+          (void)j;
+          return 0;
+        }
+        EOF
+        cmake -S $CONSUMER -B $CONSUMER/build \
+          -DCMAKE_PREFIX_PATH=$RUNNER_TEMP/prefix
+        cmake --build $CONSUMER/build
+        $CONSUMER/build/consumer
+
+    - name: Configure + build + install catapult (JSON off) into a second prefix
+      # Proves CATAPULT_ENABLE_JSON=OFF actually gates JSON out of the
+      # public contract: nlohmann_json is not declared as a dependency
+      # of the config, and the JSON-carrying headers are still installed
+      # (they compile-out at consumer use because CATAPULT_ENABLE_JSON is
+      # not defined on the exported target).
+      run: |
+        cmake -S . -B build-install-nojson \
+          -DCMAKE_INSTALL_PREFIX=$RUNNER_TEMP/prefix-nojson \
+          -DENABLE_LOGGING=ON \
+          -DCATAPULT_ENABLE_JSON=OFF \
+          -DCMAKE_BUILD_TYPE=Release
+        cmake --build build-install-nojson --target catapult -j$(nproc)
+        cmake --install build-install-nojson
+        # Same non-JSON consumer must build against a JSON-off install.
+        CONSUMER=$RUNNER_TEMP/consumer-nojson-strict
+        mkdir -p $CONSUMER
+        cat > $CONSUMER/CMakeLists.txt <<'EOF'
+        cmake_minimum_required(VERSION 3.16)
+        project(catapult_consumer_nojson_strict CXX)
+        set(CMAKE_CXX_STANDARD 20)
+        find_package(catapult REQUIRED)
+        add_executable(consumer main.cpp)
+        target_link_libraries(consumer PRIVATE catapult::catapult)
+        EOF
+        cat > $CONSUMER/main.cpp <<'EOF'
+        #include <catapult/validator.hpp>
+        #include <catapult/token.hpp>
+        int main() { catapult::CatToken t; (void)t; return 0; }
+        EOF
+        cmake -S $CONSUMER -B $CONSUMER/build \
+          -DCMAKE_PREFIX_PATH=$RUNNER_TEMP/prefix-nojson
+        cmake --build $CONSUMER/build
+        $CONSUMER/build/consumer

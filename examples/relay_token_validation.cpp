@@ -81,7 +81,9 @@ bool authorize_moqt(const ValidatedCatToken& token,
                     int requested_action,
                     const std::string& requested_namespace,
                     const std::string& requested_track,
-                    const std::string& relay_endpoint, std::string& reason) {
+                    const std::string& relay_endpoint,
+                    const CryptographicAlgorithm& client_public_verifier,
+                    std::string& reason) {
   // Step 1: exp/nbf/moqt-reval have already been checked by
   // CatTokenValidator::intoValidated. Audience match is issuer/relay-policy
   // specific, so re-check it here against the relay's own identifier.
@@ -113,14 +115,25 @@ bool authorize_moqt(const ValidatedCatToken& token,
   }
 
   // Step 3: Validate DPoP proof (also received as bytes from network).
-  // CTA-5007-B §4.6.9 binds the token to the client key via `cnf`; the hex
-  // thumbprint is carried in the `kid` field.
-  if (!token.dpop().cnf.has_value() || !token.dpop().cnf->kid.has_value()) {
-    reason = "Token missing DPoP confirmation";
+  //
+  // CAT-4-MOQT DPoP binds the token to the client key via `cnf.jkt`
+  // — the SHA-256 thumbprint of the client's public key. On the wire
+  // this is a raw byte string (RFC 8747 §3.1); DpopProofValidator
+  // compares against the base64url-encoded form, so re-encode here.
+  //
+  // Some issuer profiles also emit `cnf.kid` — the previous form of
+  // this example fell back to `cnf.kid` without a `jkt` present, which
+  // conflates key identity with a key-material-derived binding.
+  // Prefer `cnf.jkt` explicitly.
+  if (!token.dpop().cnf.has_value() ||
+      !token.dpop().cnf->jkt.has_value()) {
+    reason = "Token missing DPoP `cnf.jkt` binding";
     return false;
   }
+  std::string expected_thumbprint =
+      base64UrlEncode(token.dpop().cnf->jkt.value());
 
-  // Convert DPoP proof bytes to string for deserialization
+  // Convert DPoP proof bytes to string for deserialization.
   std::string dpop_proof_str(dpop_proof_bytes.begin(), dpop_proof_bytes.end());
   DpopProof proof = DpopProof::deserialize(dpop_proof_str);
 
@@ -128,11 +141,23 @@ bool authorize_moqt(const ValidatedCatToken& token,
   dpop_settings.set_window(std::chrono::seconds{300});
   DpopProofValidator validator(dpop_settings);
 
+  // CWT-encoded proofs carry a COSE_Key but no signing algorithm
+  // instance; the relay must supply a verifier built from the client
+  // public key that CWT_Sign1 will verify against. Without this,
+  // `DpopProofValidator::validate_proof` correctly fails closed — that
+  // is the audit's L-03 objection: the previous example never
+  // configured `set_cwt_verifier`, so a CWT proof would always be
+  // rejected regardless of validity. JWT proofs self-resolve their
+  // algorithm from the embedded JWK, so they do not need this hook.
+  if (proof.encoding() == DpopEncoding::CWT) {
+    validator.set_cwt_verifier(&client_public_verifier);
+  }
+
   auto expected_uri = moqt_dpop::construct_moqt_uri(
       relay_endpoint, requested_namespace, requested_track);
 
   if (!validator.validate_proof(proof, requested_action, expected_uri,
-                                token.dpop().cnf->kid.value())) {
+                                expected_thumbprint)) {
     reason = "DPoP proof validation failed";
     return false;
   }
@@ -161,8 +186,17 @@ int main() {
   auto client_algo = std::make_unique<Es256Algorithm>();
   DpopKeyPair client_keys(std::move(client_algo));
 
-  // Auth server creates the token. Bind the client's thumbprint (hex string)
-  // via `cnf.kid` per CTA-5007-B §4.6.9 / RFC 8747 §3.4.
+  // Auth server creates the token. Bind the client's public key via
+  // `cnf.jkt` — the SHA-256 thumbprint of the key — per CTA-5007-B
+  // §4.6.9, RFC 8747 §3.1, and CAT-4-MOQT DPoP §3. `cnf.kid` names a
+  // key by identity but does not commit to its material; `cnf.jkt` is
+  // the proof-of-possession binding the relay actually needs.
+  //
+  // On the wire `cnf.jkt` is a raw byte string (32 bytes for SHA-256);
+  // catapult's DpopKeyPair exposes the same value pre-encoded as
+  // base64url in `get_public_key_thumbprint()`. The relay-side check
+  // below re-decodes the token's `jkt` bytes to reconstruct that
+  // string before comparing.
   auto token = CatToken::builder()
                    .issuer("auth.moqt-cdn.example.com")
                    .audience("relay.moqt-cdn.example.com")
@@ -170,7 +204,8 @@ int main() {
                    .build();
   {
     CatConfirmation cnf;
-    cnf.kid = client_keys.get_public_key_thumbprint();
+    // Decode base64url form back to raw bytes to populate the wire field.
+    cnf.jkt = base64UrlDecode(client_keys.get_public_key_thumbprint());
     token.dpop.cnf = std::move(cnf);
   }
 
@@ -221,7 +256,12 @@ int main() {
   // TEST SCENARIOS
   // ========================================
 
-  // Client generates DPoP proof for PUBLISH request
+  // Client generates a DPoP proof for the PUBLISH request. The
+  // encoding follows the pinned CAT-4-MOQT DPoP profile — CWT here.
+  // The relay must therefore supply a verifier built from the client
+  // public key, because CWT proofs do not embed the algorithm the way
+  // JWTs (via JWK) do.
+  const auto& client_public_verifier = client_keys.get_algorithm();
   auto jti = moqt_dpop::generate_jti();
   auto proof = client_keys.generate_proof(moqt_actions::PUBLISH, "live",
                                           "video", relay_endpoint, jti);
@@ -234,7 +274,8 @@ int main() {
   std::cout << "Test 1: Valid PUBLISH to live/video\n";
   std::string reason1;
   bool ok1 = authorize_moqt(validated, proof_bytes, moqt_actions::PUBLISH,
-                            "live", "video", relay_endpoint, reason1);
+                            "live", "video", relay_endpoint,
+                            client_public_verifier, reason1);
   std::cout << "  Result: " << (ok1 ? "AUTHORIZED" : "DENIED") << " - "
             << reason1 << "\n\n";
 
@@ -247,7 +288,8 @@ int main() {
   std::vector<uint8_t> proof2_bytes(proof2_str.begin(), proof2_str.end());
   std::string reason2;
   bool ok2 = authorize_moqt(validated, proof2_bytes, moqt_actions::SUBSCRIBE,
-                            "live", "video", relay_endpoint, reason2);
+                            "live", "video", relay_endpoint,
+                            client_public_verifier, reason2);
   std::cout << "  Result: " << (ok2 ? "AUTHORIZED" : "DENIED") << " - "
             << reason2 << "\n\n";
 
@@ -260,7 +302,8 @@ int main() {
   std::vector<uint8_t> proof3_bytes(proof3_str.begin(), proof3_str.end());
   std::string reason3;
   bool ok3 = authorize_moqt(validated, proof3_bytes, moqt_actions::PUBLISH,
-                            "other", "video", relay_endpoint, reason3);
+                            "other", "video", relay_endpoint,
+                            client_public_verifier, reason3);
   std::cout << "  Result: " << (ok3 ? "AUTHORIZED" : "DENIED") << " - "
             << reason3 << "\n\n";
 

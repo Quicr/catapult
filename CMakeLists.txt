@@ -10,6 +10,12 @@ option(CATAPULT_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehavior
 option(CATAPULT_ENABLE_TSAN "Enable ThreadSanitizer (mutually exclusive with ASan/UBSan)" OFF)
 option(CATAPULT_ENABLE_WERROR "Treat compiler warnings as errors in library and test builds" OFF)
 option(CATAPULT_ENABLE_LTO "Enable interprocedural optimization (LTO) for library targets" OFF)
+option(CATAPULT_ENABLE_FUZZERS "Build libFuzzer harnesses (requires Clang and -fsanitize=fuzzer)" OFF)
+option(CATAPULT_INSTALL "Generate install and package-config targets" ON)
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
 # Dependency management
 find_package(OpenSSL REQUIRED)
 
@@ -21,13 +27,28 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 # libcbor: only the static `cbor` target is linked into catapult. Its
 # defaults would build ~10 example binaries and emit install rules for
 # headers and pkg-config; force them off so an in-tree rebuild does not
-# spend time on artefacts we never ship.
+# spend time on artefacts we never ship. `EXCLUDE_FROM_ALL` also blocks the
+# `install()` calls in the vendored subdirectory from firing when we run
+# `cmake --install` on the parent — the whole libcbor artefact set stays
+# in the build tree only, and its object files reach the consumer through
+# the `$<TARGET_OBJECTS:cbor>` bundling below.
 set(WITH_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(WITH_TESTS OFF CACHE BOOL "" FORCE)
 set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON CACHE BOOL "" FORCE)
-add_subdirectory(external/libcbor)
+add_subdirectory(external/libcbor EXCLUDE_FROM_ALL)
 
 if(CATAPULT_ENABLE_JSON)
+    if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND NOT TARGET nlohmann_json::nlohmann_json)
+        # Prefer a system-installed nlohmann_json when available so the
+        # target we link against is IMPORTED. install(EXPORT) validates
+        # that INTERFACE_LINK_LIBRARIES entries are either IMPORTED
+        # targets, imported ALIASes, or members of the same export set —
+        # an in-tree add_subdirectory() would fail that check because
+        # the vendored `nlohmann_json` target is neither imported nor
+        # part of catapultTargets. Only fall back to the vendored
+        # submodule when no system copy is on CMAKE_PREFIX_PATH.
+        find_package(nlohmann_json CONFIG QUIET)
+    endif()
     if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND NOT TARGET nlohmann_json::nlohmann_json)
         # nlohmann_json is header-only (INTERFACE) so the compiled bloat is
         # already zero, but its own CMake exposes JSON_BuildTests /
@@ -36,7 +57,11 @@ if(CATAPULT_ENABLE_JSON)
         # default change) cannot silently pull tests or install rules in.
         set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
         set(JSON_Install OFF CACHE BOOL "" FORCE)
-        add_subdirectory(external/nlohmann_json)
+        add_subdirectory(external/nlohmann_json EXCLUDE_FROM_ALL)
+        # Record that we resolved JSON from the vendored submodule so the
+        # install path can refuse to emit a mangled export set (see
+        # CATAPULT_JSON_FROM_VENDORED handling near install(EXPORT)).
+        set(CATAPULT_JSON_FROM_VENDORED ON)
     endif()
 endif()
 
@@ -57,6 +82,7 @@ set(CATAPULT_SOURCES
     src/token.cpp
     src/trie.cpp
     src/uri.cpp
+    src/usage_state.cpp
 )
 
 # Add JSON-dependent sources only when JSON is enabled
@@ -67,24 +93,86 @@ if(CATAPULT_ENABLE_JSON)
     )
 endif()
 
-add_library(catapult STATIC ${CATAPULT_SOURCES})
+# Bundle cbor's compiled object files directly into libcatapult so the
+# installed static archive is self-contained. Without this, catapultTargets
+# would carry a link-time reference to `libcbor::libcbor` — a target that
+# does not exist in the consumer's build tree because cbor is vendored, not
+# installed — and `find_package(catapult)` would fail.
+add_library(catapult STATIC ${CATAPULT_SOURCES} $<TARGET_OBJECTS:cbor>)
 
-# Link libraries
+# Link libraries.
+#
+# OpenSSL is a genuine PUBLIC dependency — CryptographicAlgorithm and the
+# COSE verification paths pull EVP types through the compiled surface, so
+# consumers linking against the installed catapult must also link OpenSSL.
+# Use the imported targets so the exported catapultTargets.cmake references
+# names that `find_dependency(OpenSSL)` will re-materialise on the consumer.
 target_link_libraries(catapult
-    cbor
-    ${OPENSSL_LIBRARIES}
+    PUBLIC  OpenSSL::Crypto OpenSSL::SSL
 )
 
-# Link nlohmann_json if JSON support is enabled
+# libcbor's public headers are consumed by catapult's .cpp files and by
+# `internal/cbor_owned.hpp` in the private include path. Ensure the
+# compiler can find them during the catapult build without exporting the
+# cbor target itself into the install set.
+target_include_directories(catapult PRIVATE
+    $<BUILD_INTERFACE:$<TARGET_PROPERTY:cbor,INCLUDE_DIRECTORIES>>
+)
+
+# nlohmann_json is header-only and appears in catapult's public headers
+# (json_serialization.hpp, jwk.hpp) when JSON is enabled, so it must
+# propagate through the INTERFACE for both build-tree and installed
+# consumers.
+#
+# Split the reference between BUILD_INTERFACE and INSTALL_INTERFACE:
+#
+#   - BUILD_INTERFACE picks up the vendored `nlohmann_json::nlohmann_json`
+#     target defined by external/nlohmann_json/CMakeLists.txt.
+#   - INSTALL_INTERFACE emits the bare target name into the exported
+#     catapultTargets.cmake. The corresponding `find_dependency(nlohmann_json)`
+#     block in catapultConfig.cmake.in re-imports that target on the
+#     consumer side before catapultTargets.cmake is loaded, so the
+#     reference resolves cleanly on a fresh toolchain.
+#
+# The BUILD_INTERFACE / INSTALL_INTERFACE split also lets install(EXPORT)
+# succeed — a straight `target_link_libraries(... PUBLIC nlohmann_json::nlohmann_json)`
+# fails because the vendored target is not itself part of the export set.
 if(CATAPULT_ENABLE_JSON AND TARGET nlohmann_json::nlohmann_json)
-    target_link_libraries(catapult nlohmann_json::nlohmann_json)
+    target_link_libraries(catapult
+        PUBLIC
+            $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
+            $<INSTALL_INTERFACE:nlohmann_json::nlohmann_json>
+    )
     target_compile_definitions(catapult PUBLIC CATAPULT_ENABLE_JSON)
 endif()
 
-# Set up include directories for the library
+# Set up include directories for the library.
+# BUILD_INTERFACE points at the in-tree headers; INSTALL_INTERFACE points at
+# the installed layout so consumers using `find_package(catapult)` pick up
+# `<prefix>/include` rather than the build tree.
+#
+# ${OPENSSL_INCLUDE_DIR} is deliberately wrapped in $<BUILD_INTERFACE:...>.
+# Without that wrapper, `install(EXPORT)` bakes the build-machine's absolute
+# OpenSSL path (e.g. `/opt/homebrew/Cellar/openssl@3/3.6.3/include`) into
+# the installed `catapultTargets.cmake`. A consumer on another machine
+# would then inherit a nonexistent include path. On the consumer side,
+# `find_dependency(OpenSSL)` in `catapultConfig.cmake.in` re-imports
+# `OpenSSL::Crypto` and `OpenSSL::SSL`, whose own INTERFACE properties
+# carry the correct include directories for the consumer's environment.
 target_include_directories(catapult
-    PUBLIC include
-    PUBLIC ${OPENSSL_INCLUDE_DIR}
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        $<BUILD_INTERFACE:${OPENSSL_INCLUDE_DIR}>
+)
+
+# Version metadata so ABI-breaking releases can rev SOVERSION independently
+# of the marketing version. Static libraries do not honour SOVERSION at link
+# time, but tooling (packagers, SBOM producers) reads the property to record
+# the ABI generation.
+set_target_properties(catapult PROPERTIES
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
 # Add spdlog if logging is enabled
@@ -99,9 +187,20 @@ if(ENABLE_LOGGING)
         set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
         set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
         set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
-        add_subdirectory(external/spdlog)
+        add_subdirectory(external/spdlog EXCLUDE_FROM_ALL)
     endif()
-    target_link_libraries(catapult spdlog::spdlog)
+    # spdlog is used only from library .cpp files (via logging.hpp macros that
+    # expand to nothing when ENABLE_LOGGING is off at compile time). Bundle
+    # its object files into libcatapult the same way we do for libcbor so the
+    # installed archive is self-contained and consumers do not need spdlog on
+    # their include or link path.
+    target_sources(catapult PRIVATE $<TARGET_OBJECTS:spdlog>)
+    target_include_directories(catapult PRIVATE
+        $<BUILD_INTERFACE:$<TARGET_PROPERTY:spdlog,INCLUDE_DIRECTORIES>>
+    )
+    target_compile_definitions(catapult PRIVATE
+        $<TARGET_PROPERTY:spdlog,INTERFACE_COMPILE_DEFINITIONS>
+    )
 endif()
 
 # Set compiler flags with enhanced security and warnings
@@ -187,6 +286,82 @@ if(ENABLE_LOGGING)
     target_compile_definitions(catapult PRIVATE ENABLE_LOGGING)
 endif()
 
+# ---------------------------------------------------------------------------
+# Install & package-config
+# ---------------------------------------------------------------------------
+#
+# `CATAPULT_INSTALL` gates the install() calls so a parent build embedding
+# catapult via add_subdirectory() can opt out and avoid dragging our
+# artefacts into its own `cmake --install` output.
+#
+# Vendored submodules (cbor, spdlog, nlohmann_json) are pinned upstream to
+# NOT emit install rules (see the CACHE FORCE lines above), so the install
+# set covers only catapult's own headers and the archive built here — a
+# consumer is expected to bring their own OpenSSL / cbor / spdlog via
+# `find_package` if needed. The generated package config declares
+# `find_dependency(OpenSSL REQUIRED)` explicitly for that reason.
+if(CATAPULT_INSTALL AND CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    # install(EXPORT) requires every INTERFACE_LINK_LIBRARIES entry to be
+    # either an IMPORTED target or a member of the same export set. If
+    # nlohmann_json was resolved from the vendored submodule (no system
+    # find_package hit and JSON is on), the resulting target is neither,
+    # and CMake would refuse to generate catapultTargets.cmake. That would
+    # produce a mangled install that silently omits the JSON dependency
+    # contract — refuse the install with a targeted error instead so the
+    # operator picks a supported path.
+    if(CATAPULT_ENABLE_JSON AND CATAPULT_JSON_FROM_VENDORED)
+        message(FATAL_ERROR
+            "CATAPULT_ENABLE_JSON=ON was resolved via the vendored "
+            "external/nlohmann_json submodule, which cannot appear in "
+            "catapult's install export set. Install a system copy of "
+            "nlohmann_json (find_package must succeed) or reconfigure "
+            "with -DCATAPULT_ENABLE_JSON=OFF before running "
+            "`cmake --install`.")
+    endif()
+
+    install(TARGETS catapult
+        EXPORT catapultTargets
+        ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+
+    install(DIRECTORY include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING
+            PATTERN "*.hpp"
+    )
+
+    set(CATAPULT_CMAKE_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/catapult)
+
+    install(EXPORT catapultTargets
+        FILE catapultTargets.cmake
+        NAMESPACE catapult::
+        DESTINATION ${CATAPULT_CMAKE_INSTALL_DIR}
+    )
+
+    configure_package_config_file(
+        cmake/catapultConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/catapultConfig.cmake
+        INSTALL_DESTINATION ${CATAPULT_CMAKE_INSTALL_DIR}
+    )
+
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/catapultConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        # SameMajorVersion: within a major, later minors are drop-in compatible;
+        # major bumps are the ABI break signal (mirrors SOVERSION above).
+        COMPATIBILITY SameMajorVersion
+    )
+
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/catapultConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/catapultConfigVersion.cmake
+        DESTINATION ${CATAPULT_CMAKE_INSTALL_DIR}
+    )
+endif()
+
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     # Enable testing
     enable_testing()
@@ -197,7 +372,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     if(NOT TARGET doctest::doctest)
         set(DOCTEST_WITH_TESTS OFF CACHE BOOL "" FORCE)
         set(DOCTEST_NO_INSTALL ON CACHE BOOL "" FORCE)
-        add_subdirectory(external/doctest)
+        add_subdirectory(external/doctest EXCLUDE_FROM_ALL)
     endif()
 
     # Add spdlog if logging is enabled and not already added. Guards match
@@ -208,7 +383,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
         set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
         set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
-        add_subdirectory(external/spdlog)
+        add_subdirectory(external/spdlog EXCLUDE_FROM_ALL)
     endif()
 
     # Find Google Benchmark
@@ -243,6 +418,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         tests/token.cpp
         tests/token_factory.cpp
         tests/trie.cpp
+        tests/usage_state.cpp
         tests/validator.cpp
     )
 
@@ -321,10 +497,16 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
             examples/cat_cwt_per_signature_example.cpp
     )
 
+    # In-tree examples need spdlog headers when they include
+    # `catapult/logging.hpp` under `ENABLE_LOGGING`. That header propagates
+    # spdlog through the preprocessor; the library keeps spdlog off its
+    # PUBLIC include path so installed consumers do not pick it up, but
+    # in-tree examples can borrow it via the spdlog::spdlog target.
     target_link_libraries(cat_cwt_per_signature_example catapult)
 
     if(ENABLE_LOGGING)
         target_compile_definitions(cat_cwt_per_signature_example PRIVATE ENABLE_LOGGING)
+        target_link_libraries(cat_cwt_per_signature_example spdlog::spdlog)
     endif()
 
     add_executable(cat_cwt_crypto
@@ -355,5 +537,16 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         add_executable(catapult_perf_tests tests/performance.cpp)
         target_link_libraries(catapult_perf_tests catapult Catch2::Catch2WithMain)
         add_test(NAME catapult_performance_tests COMMAND catapult_perf_tests)
+    endif()
+
+    # libFuzzer harnesses. Gated on Clang since -fsanitize=fuzzer is a
+    # Clang/LLVM feature; other toolchains would silently link a stub.
+    if(CATAPULT_ENABLE_FUZZERS)
+        if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            message(FATAL_ERROR
+                "CATAPULT_ENABLE_FUZZERS requires Clang "
+                "(current: ${CMAKE_CXX_COMPILER_ID}).")
+        endif()
+        add_subdirectory(fuzz)
     endif()
 endif()

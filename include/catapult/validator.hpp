@@ -14,6 +14,7 @@
 #include "error.hpp"
 #include "revalidation_callback.hpp"
 #include "token.hpp"
+#include "usage_state.hpp"
 
 namespace catapult {
 
@@ -89,6 +90,13 @@ class CatTokenValidator {
       ///< Non-owning; the caller is responsible for lifetime. A nullptr
       ///< means "do nothing" — equivalent to installing a
       ///< NoopRevalidationCallback but without the vtable dispatch.
+  UsageStateHook* usage_state_ = nullptr;
+      ///< Enforcement hook for CTA-5007-B `catreplay` modes. Non-owning;
+      ///< the caller is responsible for lifetime. A nullptr means "do
+      ///< not enforce" — a token carrying `catreplay=RejectOnReplay`
+      ///< or `RevokeOnReplay` is then rejected outright, because
+      ///< silently downgrading to `None` would let a misconfigured
+      ///< relay believe it was enforcing replay when it was not.
 
  public:
   /**
@@ -132,6 +140,27 @@ class CatTokenValidator {
    * See RevalidationCallback docs for the on-hot-path contract.
    */
   CatTokenValidator& withRevalidationCallback(RevalidationCallback* callback);
+
+  /**
+   * @brief Install a usage-state hook for `catreplay` enforcement.
+   *
+   * When the validator sees a token whose `catreplay` claim is
+   * `RejectOnReplay` or `RevokeOnReplay`, it consults the installed
+   * `UsageStateHook` to decide whether the token's `cti` has already
+   * been admitted. Without a hook installed the validator MUST fail
+   * closed on those modes — otherwise a claim intended to enforce
+   * one-time or revocable use would silently degrade to unenforced.
+   *
+   * Ownership is not transferred — the hook must outlive the validator.
+   * Pass `nullptr` to disable (equivalent to the default; tokens with
+   * `catreplay=RejectOnReplay|RevokeOnReplay` will then throw
+   * `MissingRequiredClaimError` or `ReplayAttackError` as appropriate).
+   *
+   * The default `InMemoryUsageState` is suitable for tests and single-
+   * process relays. Multi-instance deployments MUST supply an external
+   * implementation whose state is shared across relays.
+   */
+  CatTokenValidator& withUsageStateHook(UsageStateHook* hook);
 
   /**
    * @brief Validate a CAT token

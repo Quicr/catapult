@@ -211,9 +211,89 @@ TEST_SUITE("CWT Encode/Decode Tests") {
         CHECK_THROWS_AS(Cwt::decodePayload(cbor), InvalidClaimValueError);
     }
 
-    TEST_CASE("Decoder rejects malformed 'exp' (negative)") {
+    TEST_CASE("Decoder accepts negative 'exp' NumericDate (pre-1970)") {
+        // RFC 8392 §3.1.1 says exp is a NumericDate — the JSON/JWT
+        // equivalent, which is representable as a CBOR negint for
+        // pre-1970 timestamps. Rejecting the negint shape (which was the
+        // pre-L-10 behaviour) would leave the library non-conformant with
+        // RFC 8392; a spec-compliant producer emitting a pre-1970 exp
+        // must round-trip successfully.
+        // Map(1) { exp: -1 }
         std::vector<uint8_t> cbor = {0xa1, 0x04, 0x20};
-        CHECK_THROWS_AS(Cwt::decodePayload(cbor), InvalidClaimValueError);
+        auto tok = Cwt::decodePayload(cbor);
+        REQUIRE(tok.core.exp.has_value());
+        CHECK(*tok.core.exp == -1);
+    }
+
+    TEST_CASE("Decoder accepts 'exp' NumericDate float and floors it") {
+        // Map(1) { exp: 100.9 } as a CBOR double float.
+        // 0xfb = double-precision float major type.
+        std::vector<uint8_t> cbor = {0xa1, 0x04, 0xfb, 0x40, 0x59, 0x39,
+                                     0x99, 0x99, 0x99, 0x99, 0x9a};
+        auto tok = Cwt::decodePayload(cbor);
+        REQUIRE(tok.core.exp.has_value());
+        // Floor: 100.9 → 100. Fail-closed direction for expiry.
+        CHECK(*tok.core.exp == 100);
+    }
+
+    TEST_CASE("Decoder accepts 'nbf' NumericDate float and ceils it") {
+        // Map(1) { nbf: 100.1 } as a CBOR double float.
+        std::vector<uint8_t> cbor = {0xa1, 0x05, 0xfb, 0x40, 0x59, 0x06,
+                                     0x66, 0x66, 0x66, 0x66, 0x66};
+        auto tok = Cwt::decodePayload(cbor);
+        REQUIRE(tok.core.nbf.has_value());
+        // Ceil: 100.1 → 101. Fail-closed direction for not-before.
+        CHECK(*tok.core.nbf == 101);
+    }
+
+    TEST_CASE("Decoder rejects 'exp' NaN and infinity") {
+        // NaN and infinity in NumericDate are meaningless (RFC 8392) and
+        // must not be silently coerced to any int64_t value. The strict
+        // CBOR pre-flight rejects NaN/Inf ahead of the claim decoder — so
+        // the outer failure mode is InvalidCborError rather than
+        // InvalidClaimValueError, but both mean "fail closed". This test
+        // pins that behaviour: a spec-compliant relay MUST refuse these
+        // shapes.
+        // Map(1) { exp: NaN } as a CBOR half-precision float 0x7e00.
+        std::vector<uint8_t> nan_cbor = {0xa1, 0x04, 0xf9, 0x7e, 0x00};
+        CHECK_THROWS(Cwt::decodePayload(nan_cbor));
+
+        // Map(1) { exp: +Infinity } as a CBOR half-precision float 0x7c00.
+        std::vector<uint8_t> inf_cbor = {0xa1, 0x04, 0xf9, 0x7c, 0x00};
+        CHECK_THROWS(Cwt::decodePayload(inf_cbor));
+    }
+
+    TEST_CASE("Decoder accepts 'iat' negint NumericDate") {
+        // Map(1) { iat: -100 } (encoded as 0x38 0x63 → negint 0x63 = 99 → -100)
+        std::vector<uint8_t> cbor = {0xa1, 0x06, 0x38, 0x63};
+        auto tok = Cwt::decodePayload(cbor);
+        REQUIRE(tok.informational.iat.has_value());
+        CHECK(*tok.informational.iat == -100);
+    }
+
+    TEST_CASE("Encoder emits negint for negative NumericDate claims") {
+        // A token with a pre-1970 exp/nbf/iat must round-trip: encode via
+        // the negint major type, then decode back to the same signed
+        // int64 value. Prior to L-10 the encoder cast the int64 straight
+        // to uint64, which produced a garbled uint claim on the wire.
+        // Populate exp/nbf directly rather than via withExpiration() —
+        // the builders take a time_point which cannot express pre-1970
+        // via a plain integer literal.
+        auto token = CatToken().withIssuer("t");
+        token.core.exp = -1000;
+        token.core.nbf = -1500;
+        token.informational.iat = -2000;
+
+        Cwt cwt(ALG_ES256, token);
+        auto encoded = cwt.encodePayload();
+        auto decoded = Cwt::decodePayload(encoded);
+
+        REQUIRE(decoded.core.exp.has_value());
+        REQUIRE(decoded.core.nbf.has_value());
+        REQUIRE(decoded.informational.iat.has_value());
+        CHECK(*decoded.core.exp == -1000);
+        CHECK(*decoded.core.nbf == -1500);
+        CHECK(*decoded.informational.iat == -2000);
     }
 
     TEST_CASE("Decoder rejects non-uint claim key") {

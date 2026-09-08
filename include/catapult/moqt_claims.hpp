@@ -27,12 +27,22 @@
 namespace catapult {
 
 /**
- * @brief MOQT claim identifiers according to the specification
- * Using high numbers (65000+) to avoid conflicts with existing CBOR tags
+ * @brief MOQT claim identifiers.
+ *
+ * draft-ietf-moq-c4m-01 lists these claims as TBD_MOQT / TBD_MOQT_REVAL and
+ * defers final label assignment to IANA. Until IANA assigns numbers we use
+ * the private-label range (RFC 8949 §3.4 permits values ≥ 65000 for
+ * private use) so that a token minted against catapult cannot collide with
+ * a future IANA-registered claim id at any lower label. Deployments that
+ * negotiate a different pair MUST swap these constants together and MUST
+ * NOT ship them alongside another implementation without checking the
+ * label pair matches — the wire form is otherwise silently incompatible.
  */
-constexpr int64_t CLAIM_MOQT = 65000;  ///< MOQT claim (was TBD_MOQT in spec)
+constexpr int64_t CLAIM_MOQT = 65000;  ///< MOQT scope claim (private label
+                                       ///< pending IANA assignment)
 constexpr int64_t CLAIM_MOQT_REVAL =
-    65001;  ///< MOQT revalidation claim (was TBD_MOQT_REVAL in spec)
+    65001;  ///< MOQT revalidation claim (private label pending IANA
+            ///< assignment)
 
 /**
  * @brief MOQT action identifiers per draft-ietf-moq-c4m
@@ -95,17 +105,47 @@ concept MoqtActionType = std::integral<T> && requires(T action) {
 };
 
 /**
- * @brief Binary match types according to CTA-5007-B 4.6.1
+ * @brief Binary match types according to CTA-5007-B §4.6.1.
+ *
+ * `CONTAINS` (type 3) is intentionally in-model but out-of-profile for
+ * CAT-4-MOQT: the draft's bin-match CDDL admits only exact/prefix/suffix,
+ * so accepting an incoming type-3 tuple would silently broaden a token's
+ * authorization scope. Both the encoder (src/cwt.cpp:serializeBinaryMatch)
+ * and the decoder (src/cwt.cpp: `parse_bin_match`) reject type 3. The
+ * factory `MoqtBinaryMatch::contains()` is kept so in-memory policy code
+ * can express a substring test locally, and so the wire-form rejection
+ * tests can construct a value to encode-and-fail against — but the value
+ * MUST NOT reach any external interface.
  */
 enum class BinaryMatchType : int {
-  EXACT = 0,    ///< Exact match
-  PREFIX = 1,   ///< Prefix match
-  SUFFIX = 2,   ///< Suffix match
-  CONTAINS = 3  ///< Contains match
+  EXACT = 0,    ///< Exact match (CAT-4-MOQT profile)
+  PREFIX = 1,   ///< Prefix match (CAT-4-MOQT profile)
+  SUFFIX = 2,   ///< Suffix match (CAT-4-MOQT profile)
+  CONTAINS = 3  ///< In-memory only; not part of CAT-4-MOQT wire profile
 };
 
 /**
  * @brief Binary match object for namespace and track matching
+ *
+ * ## Wildcard vs. "exact empty"
+ *
+ * A `MoqtBinaryMatch` distinguishes two shapes that share the same wire
+ * shorthand and used to be conflated:
+ *
+ *   - `any()` — the wildcard: authorizes every resource on this dimension.
+ *     Internally carried by the `is_wildcard_` flag, NOT by an empty
+ *     `pattern` vector. On the wire this is encoded by omitting the match
+ *     from the containing scope entirely.
+ *   - `exact("")` — the exact zero-length match: authorizes only when the
+ *     resource on this dimension is itself empty. Encoded as a bare
+ *     empty bytestring (`0x40`).
+ *
+ * Prior versions returned `is_empty() == true` for both shapes, which
+ * silently upgraded an `exact("")` to a wildcard. The factories now reject
+ * empty patterns for `prefix()`/`suffix()`/`contains()` (an empty prefix
+ * or suffix is a policy bug — it degenerates to "match everything" —
+ * so the only permitted expression of that intent is `any()`), and
+ * `exact("")` produces a match that trips only on empty inputs.
  */
 class MoqtBinaryMatch {
  public:
@@ -122,22 +162,43 @@ class MoqtBinaryMatch {
   }
 
   static MoqtBinaryMatch prefix(std::string_view pattern) {
+    if (pattern.empty()) {
+      throw InvalidClaimValueError(
+          "MoqtBinaryMatch::prefix('') is ambiguous: an empty prefix "
+          "matches every input. Use any() to express 'no restriction'.");
+    }
     return MoqtBinaryMatch{BinaryMatchType::PREFIX, pattern};
   }
 
   static MoqtBinaryMatch suffix(std::string_view pattern) {
+    if (pattern.empty()) {
+      throw InvalidClaimValueError(
+          "MoqtBinaryMatch::suffix('') is ambiguous: an empty suffix "
+          "matches every input. Use any() to express 'no restriction'.");
+    }
     return MoqtBinaryMatch{BinaryMatchType::SUFFIX, pattern};
   }
 
   static MoqtBinaryMatch contains(std::string_view pattern) {
+    if (pattern.empty()) {
+      throw InvalidClaimValueError(
+          "MoqtBinaryMatch::contains('') is ambiguous: an empty substring "
+          "matches every input. Use any() to express 'no restriction'.");
+    }
     return MoqtBinaryMatch{BinaryMatchType::CONTAINS, pattern};
   }
 
  private:
   /**
-   * @brief Default constructor for empty match (matches all)
+   * @brief Default constructor for the wildcard match (matches all)
+   *
+   * The wildcard is the ONLY match shape that returns `is_wildcard() ==
+   * true` and short-circuits `matches()` to accept everything. Every
+   * other factory produces a match with `is_wildcard_ == false`, even
+   * when the resulting pattern is empty (i.e. `exact("")`).
    */
-  MoqtBinaryMatch() : match_type(BinaryMatchType::EXACT), pattern{} {}
+  MoqtBinaryMatch()
+      : match_type(BinaryMatchType::EXACT), pattern{}, is_wildcard_(true) {}
 
   /**
    * @brief Constructor with match type and pattern
@@ -173,9 +234,19 @@ class MoqtBinaryMatch {
   }
 
   /**
-   * @brief Check if this is an empty match (matches everything)
+   * @brief True iff this match is the wildcard (produced by `any()`).
+   *
+   * `is_empty()` is retained as a synonym for source compatibility but
+   * now shares the same "wildcard-only" semantics — a match with an
+   * empty pattern but non-wildcard type (e.g. `exact("")`) returns
+   * `false` here.
    */
-  [[nodiscard]] bool is_empty() const noexcept { return pattern.empty(); }
+  [[nodiscard]] bool is_wildcard() const noexcept { return is_wildcard_; }
+
+  /**
+   * @brief Alias for `is_wildcard()`. Retained for source compatibility.
+   */
+  [[nodiscard]] bool is_empty() const noexcept { return is_wildcard_; }
 
   /**
    * @brief Get pattern as string view (for debugging)
@@ -187,6 +258,14 @@ class MoqtBinaryMatch {
                            [](uint8_t b) { return static_cast<char>(b); });
     return result;
   }
+
+ private:
+  // True only for matches produced by `any()`. Not part of the wire form:
+  // encoders omit a wildcard from the emitted scope entirely rather than
+  // shipping any bytestring for it, and decoders reconstruct a wildcard by
+  // inserting `any()` in the compound-match list. Distinguishes the
+  // wildcard shape from `exact("")` (which authorises only empty inputs).
+  bool is_wildcard_ = false;
 };  // class MoqtBinaryMatch
 
 /**

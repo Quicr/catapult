@@ -1,0 +1,45 @@
+# catapultConfig.cmake — generated at configure time by
+# configure_package_config_file(). Consumers use it via:
+#
+#   find_package(catapult REQUIRED)
+#   target_link_libraries(mytarget PRIVATE catapult::catapult)
+#
+# The exported target already carries the include search path, the
+# CATAPULT_ENABLE_JSON public compile-definition (when JSON was enabled at
+# library-build time), and the transitive dependency on OpenSSL declared
+# below. Consumers do not need to `find_package(OpenSSL)` themselves.
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# OpenSSL is a hard runtime dependency of libcatapult (crypto primitives,
+# HMAC, ECDSA, RSA). Declare it as a dependency of the package so
+# `find_package(catapult)` fails loudly when the consumer environment does
+# not have OpenSSL, rather than at final link time.
+find_dependency(OpenSSL REQUIRED)
+
+# libcbor is vendored into the catapult static archive; its symbols are
+# already linked in and its headers are not part of the public API surface,
+# so we deliberately do NOT re-export it here. spdlog is likewise bundled
+# and hidden — it never touches the installed include path.
+#
+# nlohmann_json is the one exception. When the library was built with
+# CATAPULT_ENABLE_JSON=ON, `catapult/json_serialization.hpp` and
+# `catapult/jwk.hpp` include `<nlohmann/json.hpp>` in their public surface,
+# and `catapult::catapult` carries `nlohmann_json::nlohmann_json` in its
+# INSTALL_INTERFACE_LINK_LIBRARIES (see the target_link_libraries split
+# in the parent CMakeLists.txt). find_dependency must therefore succeed
+# BEFORE catapultTargets.cmake tries to resolve that reference — otherwise
+# the include emitted below fails on a fresh consumer toolchain.
+#
+# CATAPULT_ENABLE_JSON=OFF installs never emit the nlohmann_json edge,
+# so this block is a no-op for that build variant.
+set(CATAPULT_ENABLE_JSON @CATAPULT_ENABLE_JSON@)
+if(CATAPULT_ENABLE_JSON)
+    find_dependency(nlohmann_json CONFIG)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/catapultTargets.cmake")
+
+check_required_components(catapult)

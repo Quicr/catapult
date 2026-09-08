@@ -11,19 +11,24 @@
 namespace catapult {
 
 bool MoqtBinaryMatch::matches(std::span<const uint8_t> data) const noexcept {
-  if (is_empty()) {
-    return true;  // Empty match matches everything
-  }
-
-  if (pattern.empty()) {
-    return data.empty();
+  // The wildcard (produced by `any()`) is the only shape that accepts
+  // every input. An `exact("")` match must fall through to the EXACT
+  // arm and authorise only when `data` is itself empty.
+  if (is_wildcard()) {
+    return true;
   }
 
   switch (match_type) {
     case BinaryMatchType::EXACT:
+      // Equal handles the pattern-empty case correctly: it returns true
+      // iff both ranges are empty, which is exactly the semantics of
+      // `exact("")`.
       return std::ranges::equal(pattern, data);
 
     case BinaryMatchType::PREFIX:
+      // Factory rejects an empty prefix pattern, so `pattern.size() > 0`
+      // holds here. A zero-length data cannot carry a positive-length
+      // prefix.
       if (data.size() < pattern.size()) {
         return false;
       }
@@ -39,8 +44,6 @@ bool MoqtBinaryMatch::matches(std::span<const uint8_t> data) const noexcept {
       if (data.size() < pattern.size()) {
         return false;
       }
-
-      // Use std::search to find pattern within data
       auto it = std::ranges::search(data, pattern);
       return it.begin() != data.end();
     }

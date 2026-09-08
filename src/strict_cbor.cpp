@@ -159,12 +159,17 @@ void walk(cbor_item_t* item, const StrictCborOptions& opts,
       return;
     }
 
-    case CBOR_TYPE_TAG:
-      if (opts.forbid_unrecognized_tags) {
+    case CBOR_TYPE_TAG: {
+      const uint64_t tag = cbor_tag_value(item);
+      if (opts.forbid_unrecognized_tags && !opts.isTagAllowed(tag)) {
         throw InvalidCborError("Unrecognized CBOR tag in strict input");
       }
-      walk(cbor_move(cbor_tag_item(item)), opts, depth + 1);
+      // cbor_tag_item returns a new reference; wrap it so the recursive
+      // walk cannot leak on throw.
+      CborItemPtr inner(cbor_tag_item(item));
+      walk(inner.get(), opts, depth + 1);
       return;
+    }
 
     case CBOR_TYPE_FLOAT_CTRL:
       // Bool / null / undefined / half/single/double float. Reject NaN
@@ -253,6 +258,31 @@ void canonicalizeMapOrder(cbor_item_t* item) {
     default:
       return;
   }
+}
+
+StrictCoseEnvelope loadStrictCoseEnvelope(
+    std::span<const uint8_t> data,
+    std::initializer_list<uint64_t> allowed_tags) {
+  StrictCborOptions opts;
+  // The outer COSE tag itself is legal only under this specific call, so
+  // widen the allowlist to the caller's expected tag(s) — everything else
+  // still falls under the strict-by-default policy.
+  for (uint64_t t : allowed_tags) {
+    opts.allowed_tags.push_back(t);
+  }
+  CborItemPtr root = loadStrict(data, opts);
+
+  StrictCoseEnvelope env;
+  if (cbor_isa_tag(root.get())) {
+    env.tag = cbor_tag_value(root.get());
+    // cbor_tag_item returns a new (owned) reference; wrap it before
+    // dropping the parent so ownership is single-rooted.
+    CborItemPtr inner(cbor_tag_item(root.get()));
+    env.item = std::move(inner);
+  } else {
+    env.item = std::move(root);
+  }
+  return env;
 }
 
 CborItemPtr loadStrict(std::span<const uint8_t> data,

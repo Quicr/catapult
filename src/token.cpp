@@ -54,6 +54,12 @@ CatTokenValidator& CatTokenValidator::withRevalidationCallback(
   return *this;
 }
 
+CatTokenValidator& CatTokenValidator::withUsageStateHook(
+    UsageStateHook* hook) {
+  usage_state_ = hook;
+  return *this;
+}
+
 /**
  * @brief Template-based claim validation helper
  */
@@ -318,9 +324,67 @@ void CatTokenValidator::validateGeographicRestrictions(
   }
 }
 
+// CTA-5007-B §4.6.9 `catreplay`: enforce one-time (RejectOnReplay) or
+// one-time-plus-sticky-revocation (RevokeOnReplay) semantics through an
+// installed `UsageStateHook`. Mode `None` is intentionally a no-op — a
+// token that opts out of replay protection cannot be "replayed" in a
+// sense that a resource server enforces.
+//
+// Fail-closed contracts:
+//  - `RejectOnReplay` / `RevokeOnReplay` require the token to carry a
+//    `cti`. Without one there is no stable key to record; admitting
+//    without recording would defeat the claim's whole purpose.
+//  - Without a hook installed, both non-None modes throw a missing-
+//    required-claim style error. Silently downgrading to `None` would
+//    let a misconfigured relay believe it was enforcing replay when it
+//    was not, which is exactly the failure the claim exists to prevent.
 void CatTokenValidator::validateUsageLimits(const CatToken& token) const {
-  // Placeholder for usage limit validation
-  // In a real implementation, this would check against a usage tracking system
+  if (!token.cat.catreplay.has_value()) {
+    return;
+  }
+  const CatReplayMode mode = *token.cat.catreplay;
+  if (mode == CatReplayMode::None) {
+    return;
+  }
+
+  if (!token.core.cti.has_value() || token.core.cti->empty()) {
+    throw MissingRequiredClaimError(
+        "cti (required when 'catreplay' opts into replay enforcement)");
+  }
+
+  if (usage_state_ == nullptr) {
+    // No hook installed. Fail closed rather than accept a token that
+    // opted into replay enforcement and silently receive none.
+    throw ReplayAttackError();
+  }
+
+  const auto& cti_bytes = *token.core.cti;
+  std::string_view cti_view(
+      reinterpret_cast<const char*>(cti_bytes.data()), cti_bytes.size());
+
+  auto now = std::chrono::system_clock::now();
+  std::optional<std::chrono::system_clock::time_point> exp_tp;
+  if (token.core.exp.has_value()) {
+    exp_tp = std::chrono::system_clock::time_point(
+        std::chrono::seconds(*token.core.exp));
+  }
+
+  const auto result = usage_state_->admit(cti_view, mode, now, exp_tp);
+  switch (result) {
+    case UsageAdmitResult::Admitted:
+      return;
+    case UsageAdmitResult::Replay:
+    case UsageAdmitResult::Revoked:
+      throw ReplayAttackError();
+    case UsageAdmitResult::StoreExhausted:
+      // Treat exhaustion as replay (fail closed): admitting a token the
+      // store could not record would mean the next presentation would
+      // also be admitted, silently disabling replay protection under
+      // load. Matches the ReplayStore contract for DPoP jti tracking.
+      throw ReplayAttackError();
+  }
+  // Exhaustive switch above; keep the compiler happy on -Werror builds.
+  throw ReplayAttackError();
 }
 
 // draft-ietf-moq-c4m-01 §"MOQT Revalidation Claim": `moqt-reval` MUST NOT

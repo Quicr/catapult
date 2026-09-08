@@ -320,17 +320,22 @@ std::vector<uint8_t> DpopProof::create_signing_input() const {
   }
 
 #ifdef CATAPULT_ENABLE_JSON
-  // JWT DPoP signs `base64url(header) "." base64url(payload)` where header
-  // is the JSON header and payload is the JSON payload — but our payload
-  // is CBOR here, matching the wire form emitted by serialize_jwt. Mirror
-  // that exactly so signer and verifier see identical bytes.
+  // JWT DPoP signs `base64url(header) "." base64url(payload)`. The wire
+  // format follows the pinned CAT-4-MOQT profile
+  // (draft-nandakumar-moq-generic-dpop-proof-00 §4): `actx.action` MUST
+  // be the human-readable action name string (`PUBLISH`, `SUBSCRIBE`, …),
+  // not the numeric COSE label used by CWT proofs. Emit the string form
+  // via `moqt_actions::action_name` so signer and verifier hash identical
+  // bytes and the value round-trips against draft-conformant peers.
   json header_json = {{"typ", "dpop-proof+jwt"},
                       {"alg", header_.alg},
                       {"jwk", json::parse(header_.jwk)}};
+  std::string action_name_str =
+      std::string(moqt_actions::action_name(payload_.actx.action));
   json payload_json = {{"iat", payload_.iat},
                        {"actx",
                         {{"type", payload_.actx.type},
-                         {"action", payload_.actx.action},
+                         {"action", action_name_str},
                          {"tns", payload_.actx.tns},
                          {"tn", payload_.actx.tn}}}};
   if (payload_.jti.has_value()) {
@@ -464,10 +469,14 @@ std::string DpopProof::serialize_jwt() const {
                       {"alg", header_.alg},
                       {"jwk", json::parse(header_.jwk)}};
 
+  // See create_signing_input(): the pinned CAT-4-MOQT DPoP profile uses
+  // the action *name* string here — the numeric COSE label is CWT-only.
+  std::string action_name_str =
+      std::string(moqt_actions::action_name(payload_.actx.action));
   json payload_json = {{"iat", payload_.iat},
                        {"actx",
                         {{"type", payload_.actx.type},
-                         {"action", payload_.actx.action},
+                         {"action", action_name_str},
                          {"tns", payload_.actx.tns},
                          {"tn", payload_.actx.tn}}}};
 
@@ -516,27 +525,20 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
     throw InvalidTokenFormatError{};
   }
 
-  cbor_load_result result;
-  auto cose_root =
-      cbor_load_owned(reinterpret_cast<const uint8_t*>(cose_bytes.data()),
-                      cose_bytes.size(), result);
-
-  if (result.error.code != CBOR_ERR_NONE ||
-      result.read != cose_bytes.size() || !cose_root) {
+  // Outer COSE envelope: a CWT DPoP proof is a COSE_Sign1 (RFC 8152 §4.2).
+  // The strict loader enforces the CTA-5007-B size ceiling, definite-length
+  // forms, duplicate-key rejection, trailing-byte rejection, and — crucially
+  // — that any outer tag is 18. Accepting any other single-recipient tag
+  // would let a Mac0/Encrypt0-labelled body reach signature dispatch and
+  // defeat the tag/structure binding we enforce elsewhere (HN-03).
+  CborItemPtr cose_root;
+  try {
+    auto env = catapult::internal::loadStrictCoseEnvelope(
+        std::span<const uint8_t>(cose_bytes.data(), cose_bytes.size()),
+        {18});
+    cose_root = std::move(env.item);
+  } catch (const InvalidCborError&) {
     throw InvalidTokenFormatError{};
-  }
-
-  // A CWT DPoP proof is a COSE_Sign1 (RFC 8152 §4.2). If the producer
-  // tagged it, the tag MUST be 18 — accepting any other single-recipient
-  // tag would let a Mac0/Encrypt0-labelled body reach signature dispatch
-  // and defeat the tag/structure binding we enforce elsewhere (HN-03).
-  if (cbor_isa_tag(cose_root.get())) {
-    const uint64_t tagValue = cbor_tag_value(cose_root.get());
-    if (tagValue != 18) {
-      throw InvalidTokenFormatError{};
-    }
-    CborItemPtr inner(cbor_tag_item(cose_root.get()));
-    cose_root = std::move(inner);
   }
 
   if (!cose_root || !cbor_isa_array(cose_root.get()) ||
@@ -804,21 +806,29 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
   if (payload_json.contains("actx")) {
     auto actx_json = payload_json["actx"];
     payload.actx.type = actx_json.value("type", "moqt");
-    // Range-check `action` before narrowing (HN-03). Unsigned JSON
-    // numbers can hold values outside `int`; a silent narrow could
-    // yield a legitimate-looking small integer that impersonates a
-    // different MOQT action.
+    // Pinned CAT-4-MOQT DPoP profile (draft-nandakumar-moq-generic-dpop-
+    // proof-00 §4): `actx.action` on the wire is the action-name string
+    // ("PUBLISH", "SUBSCRIBE", …). Decode by reversing
+    // `moqt_actions::action_name` — an unknown name is rejected so a
+    // draft-shaped proof cannot slip through with an unrecognised action.
     if (actx_json.contains("action")) {
       const auto& action_val = actx_json.at("action");
-      if (!action_val.is_number_integer()) {
+      if (!action_val.is_string()) {
         throw InvalidTokenFormatError{};
       }
-      int64_t raw_action = action_val.get<int64_t>();
-      if (raw_action < std::numeric_limits<int>::min() ||
-          raw_action > std::numeric_limits<int>::max()) {
+      const std::string action_name_str = action_val.get<std::string>();
+      bool resolved = false;
+      for (int i = moqt_actions::CLIENT_SETUP;
+           i <= moqt_actions::TRACK_STATUS; ++i) {
+        if (moqt_actions::action_name(i) == action_name_str) {
+          payload.actx.action = i;
+          resolved = true;
+          break;
+        }
+      }
+      if (!resolved) {
         throw InvalidTokenFormatError{};
       }
-      payload.actx.action = static_cast<int>(raw_action);
     }
     payload.actx.tns = actx_json.value("tns", "");
     payload.actx.tn = actx_json.value("tn", "");
