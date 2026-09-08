@@ -2716,6 +2716,15 @@ Cwt Cwt::validateMultiSignedCwt(
     if (signaturesCount > MAX_SIGNATURES) {
       throw InvalidClaimValueError("Too many signatures");
     }
+    // RFC 8152 §4.1: a COSE_Sign body MUST carry at least one signature
+    // (the CDDL requires `+ COSE_Signature`, i.e. one-or-more). An empty
+    // signatures array leaves the payload unauthenticated but wrapped in
+    // a legitimate-looking Sign envelope; treat it as a malformed proof
+    // so a hostile producer cannot smuggle unsigned claims through the
+    // multi-signature path.
+    if (signaturesCount == 0) {
+      throw InvalidTokenFormatError();
+    }
 
     for (size_t i = 0; i < signaturesCount; i++) {
       if (!cbor_isa_array(signaturesArray[i]) ||

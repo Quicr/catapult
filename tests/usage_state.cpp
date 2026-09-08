@@ -95,7 +95,7 @@ TEST_SUITE("InMemoryUsageState") {
     auto now = Clock::now();
     REQUIRE(store.admit("cti-1", CatReplayMode::RejectOnReplay, now,
                         now + 60s) == UsageAdmitResult::Admitted);
-    store.revoke("cti-1");
+    CHECK(store.revoke("cti-1") == RevokeResult::Accepted);
     CHECK(store.admit("cti-1", CatReplayMode::RejectOnReplay, now + 1s,
                       now + 60s) == UsageAdmitResult::Revoked);
   }
@@ -146,66 +146,77 @@ TEST_SUITE("InMemoryUsageState") {
     auto now = Clock::now();
     REQUIRE(store.admit("a", CatReplayMode::RejectOnReplay, now,
                         now + 1h) == UsageAdmitResult::Admitted);
-    store.revoke("r");
+    REQUIRE(store.revoke("r") == RevokeResult::Accepted);
     CHECK(store.size() == 2);
     CHECK(store.admit("b", CatReplayMode::RejectOnReplay, now, now + 1h) ==
           UsageAdmitResult::StoreExhausted);
   }
 
-  TEST_CASE("revoke() succeeds at capacity by evicting the oldest revocation") {
-    // revoke() has no failure channel: the operator has already decided
-    // the cti MUST be blocked. When the store is at cap the newest
-    // revocation MUST persist even if that means dropping the oldest.
+  TEST_CASE("revoke() refuses at capacity and preserves older revocations") {
+    // A full store must never silently drop an older revocation to make
+    // room for a new one — that would forget operator intent that was
+    // already committed. The new revocation is refused via StoreExhausted
+    // and the store is left unchanged.
     InMemoryUsageState store{2, 100};
-    store.revoke("old");
-    store.revoke("mid");
+    REQUIRE(store.revoke("old") == RevokeResult::Accepted);
+    REQUIRE(store.revoke("mid") == RevokeResult::Accepted);
     REQUIRE(store.size() == 2);
-    // "old" is the oldest revocation — evicting it makes room for "new".
-    store.revoke("new");
+
+    // Store is at cap. The new revocation MUST be rejected, and neither
+    // "old" nor "mid" may be evicted.
+    CHECK(store.revoke("new") == RevokeResult::StoreExhausted);
     CHECK(store.size() == 2);
 
-    // "old" no longer blocks — it lost its revocation record to make room
-    // for the newer intent, which is the documented tradeoff.
+    // Both original revocations still block admissions. We can observe
+    // one at a time — StoreExhausted takes precedence when the store is
+    // full and there's no matching entry, so verify each after freeing
+    // a slot via a fresh store or via purge. Simpler: just check both
+    // via admit() calls that hit the revoked-set fast path (which does
+    // not require capacity for its check).
     auto now = Clock::now();
     CHECK(store.admit("old", CatReplayMode::RejectOnReplay, now,
+                      now + 1h) == UsageAdmitResult::Revoked);
+    CHECK(store.admit("mid", CatReplayMode::RejectOnReplay, now,
+                      now + 1h) == UsageAdmitResult::Revoked);
+    // A truly-new cti still fails closed — the store is at cap.
+    CHECK(store.admit("new", CatReplayMode::RejectOnReplay, now,
                       now + 1h) == UsageAdmitResult::StoreExhausted);
-    // "mid" and "new" are still revoked. (We can only observe one of them
-    // directly since the store is at cap; the "new" revocation is the
-    // most-recent-operator-intent that MUST have persisted.)
-    // Free a slot first so admit() has room to reach the revoked check.
-    store.purgeExpired(now);
-    // No admitted entries had exp, so purge is a no-op. Free the slot by
-    // constructing a store with more room and re-verifying by re-revoke.
-    InMemoryUsageState store2{3, 100};
-    store2.revoke("a");
-    store2.revoke("b");
-    store2.revoke("c");
-    // "a" is oldest; a fourth revocation evicts it.
-    store2.revoke("d");
-    CHECK(store2.admit("d", CatReplayMode::RejectOnReplay, now, now + 1h) ==
-          UsageAdmitResult::Revoked);
-    CHECK(store2.admit("c", CatReplayMode::RejectOnReplay, now, now + 1h) ==
-          UsageAdmitResult::Revoked);
-    CHECK(store2.admit("b", CatReplayMode::RejectOnReplay, now, now + 1h) ==
-          UsageAdmitResult::Revoked);
   }
 
-  TEST_CASE("Repeat revoke() of the same cti is idempotent and does not evict") {
-    // A repeat revoke() of a cti already in the revoked set must not
-    // consume capacity or shift FIFO order — otherwise a caller looping
-    // over an external revocation list could accidentally evict older
-    // revocations by re-issuing them.
+  TEST_CASE("revoke() of a currently-admitted cti succeeds even at capacity") {
+    // Revoking a cti that is already admitted transfers one slot between
+    // sets — no net capacity change — so the operator's intent must land
+    // even when the store is full. This is the escape hatch that lets
+    // operators respond to a compromise without needing spare capacity.
     InMemoryUsageState store{2, 100};
-    store.revoke("a");
-    store.revoke("b");
+    auto now = Clock::now();
+    REQUIRE(store.admit("a", CatReplayMode::RejectOnReplay, now,
+                        now + 1h) == UsageAdmitResult::Admitted);
+    REQUIRE(store.admit("b", CatReplayMode::RejectOnReplay, now,
+                        now + 1h) == UsageAdmitResult::Admitted);
+    REQUIRE(store.size() == 2);
+    CHECK(store.revoke("a") == RevokeResult::Accepted);
+    CHECK(store.size() == 2);
+    CHECK(store.admit("a", CatReplayMode::RejectOnReplay, now + 1s,
+                      now + 1h) == UsageAdmitResult::Revoked);
+  }
+
+  TEST_CASE("Repeat revoke() of the same cti is idempotent") {
+    // A repeat revoke() of a cti already in the revoked set is a no-op
+    // that reports Accepted — the cti is (still) revoked, which is the
+    // outcome the caller asked for. This lets callers loop over an
+    // external revocation list without special-casing duplicates.
+    InMemoryUsageState store{2, 100};
+    REQUIRE(store.revoke("a") == RevokeResult::Accepted);
+    REQUIRE(store.revoke("b") == RevokeResult::Accepted);
     REQUIRE(store.size() == 2);
 
-    // Repeat revoke of "a" — must remain a no-op.
-    store.revoke("a");
-    store.revoke("a");
+    // Repeat revokes remain Accepted and do not consume capacity.
+    CHECK(store.revoke("a") == RevokeResult::Accepted);
+    CHECK(store.revoke("a") == RevokeResult::Accepted);
     CHECK(store.size() == 2);
 
-    // Both original revocations must still block.
+    // Both original revocations still block.
     auto now = Clock::now();
     CHECK(store.admit("a", CatReplayMode::RejectOnReplay, now, now + 1h) ==
           UsageAdmitResult::Revoked);

@@ -33,7 +33,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <list>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -63,6 +62,27 @@ enum class UsageAdmitResult {
   /// Store cannot admit a new entry (capacity exhausted). Callers MUST
   /// treat exhaustion as a replay to fail closed rather than silently
   /// admitting.
+  StoreExhausted,
+};
+
+/**
+ * @brief Outcome of a `UsageStateHook::revoke()` call.
+ *
+ * `revoke()` reports its outcome so operators can observe whether the
+ * intent was recorded. It never silently discards an older revocation to
+ * satisfy a new one — a full store refuses the new entry rather than
+ * lose earlier intent.
+ */
+enum class RevokeResult {
+  /// The cti was inserted into the revoked set (or was already present).
+  /// Future `admit()` calls for this cti will return `Revoked`.
+  Accepted,
+  /// The store is at capacity and cannot record the new revocation without
+  /// evicting an existing entry. The revocation was NOT recorded; older
+  /// entries are preserved. Callers MUST treat this as a hard failure and
+  /// escalate (e.g. page an operator, plug in a larger backend). Returning
+  /// success would silently drop earlier revocation intent, which is worse
+  /// than surfacing the exhaustion.
   StoreExhausted,
 };
 
@@ -112,8 +132,15 @@ class UsageStateHook {
    * band (compromise notifications, subscription cancellation, etc.).
    * Not called by `CatTokenValidator` itself — the validator only writes
    * through `admit()`; revocation is an operator action.
+   *
+   * @return `Accepted` if the cti is now recorded as revoked (including
+   *   the case where it was already revoked — the call is idempotent).
+   *   `StoreExhausted` if the backend cannot record the revocation
+   *   without evicting an older entry; in that case the new revocation
+   *   is NOT recorded and older revocations are preserved. Callers MUST
+   *   escalate rather than proceed as if revocation succeeded.
    */
-  virtual void revoke(std::string_view cti) = 0;
+  virtual RevokeResult revoke(std::string_view cti) = 0;
 
   /**
    * @brief Drop admitted entries whose stored expiry is before `now`.
@@ -143,13 +170,13 @@ class UsageStateHook {
  *     `CatTokenValidator` treats that as `ReplayAttackError`, so a full
  *     store cannot silently admit a token whose sighting could not be
  *     recorded.
- *   - `revoke()` must succeed (it has no failure channel and the caller
- *     has already decided that the cti MUST be blocked). When the cap
- *     is reached, `revoke()` evicts the oldest revocation FIFO to make
- *     room. This preserves the "most recent operator intent wins"
- *     property at the cost of forgetting an older revocation. Operators
- *     who cannot tolerate that tradeoff MUST plug in an external
- *     backend whose capacity matches their revocation-list size.
+ *   - `revoke()` refuses to silently drop older revocations. When the
+ *     cap is reached and no expired admission can be reclaimed, it
+ *     returns `StoreExhausted` and leaves the store unchanged. Callers
+ *     MUST treat that as a hard failure — swallowing it would forget an
+ *     older revocation that an operator already committed to. Operators
+ *     whose revocation-list size approaches the bound MUST plug in an
+ *     external backend whose capacity matches their workload.
  *
  * Suitable for a single-process relay whose live token working set fits
  * comfortably under the bound; not suitable when usage state must survive
@@ -174,7 +201,7 @@ class InMemoryUsageState final : public UsageStateHook {
       std::chrono::system_clock::time_point now,
       std::optional<std::chrono::system_clock::time_point> expiry) override;
 
-  void revoke(std::string_view cti) override;
+  RevokeResult revoke(std::string_view cti) override;
 
   void purgeExpired(std::chrono::system_clock::time_point now) override;
 
@@ -190,19 +217,16 @@ class InMemoryUsageState final : public UsageStateHook {
   mutable std::mutex mu_;
   std::unordered_map<std::string, Entry> admitted_;
   std::unordered_set<std::string> revoked_;
-  // FIFO of keys in `revoked_`, oldest first. Used to evict the oldest
-  // revocation when a new one would exceed `max_entries_`. std::list so
-  // that eviction from the front is O(1) and does not invalidate iterators
-  // to unaffected entries.
-  std::list<std::string> revoked_order_;
   std::size_t admits_since_cleanup_{0};
   const std::size_t max_entries_;
   const std::size_t cleanup_interval_;
 
   void purgeExpiredLocked(std::chrono::system_clock::time_point now);
-  // Insert `key` into the revoked set + FIFO. Evicts the oldest revocation
-  // if the store is otherwise at capacity. Caller must hold `mu_`.
-  void insertRevokedLocked(const std::string& key);
+  // Insert `key` into the revoked set. Returns `StoreExhausted` if the
+  // store is at capacity and no admitted slot could be reclaimed —
+  // older revocations are preserved rather than evicted. Caller must
+  // hold `mu_`.
+  RevokeResult insertRevokedLocked(const std::string& key);
 };
 
 }  // namespace catapult

@@ -304,7 +304,14 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
 }  // anonymous namespace
 
 std::vector<uint8_t> DpopProof::create_signing_input() const {
-  auto payload_cbor = Cwt::createDpopSigningInput(payload_.actx, payload_.iat,
+  // Signer side: `iat` MUST be present. An unset iat here would produce a
+  // proof that is_valid()/is_fresh() reject at verification time; refuse
+  // to sign such a proof rather than emit a value that will fail closed
+  // downstream.
+  if (!payload_.iat.has_value()) {
+    throw InvalidTokenFormatError{};
+  }
+  auto payload_cbor = Cwt::createDpopSigningInput(payload_.actx, *payload_.iat,
                                                   payload_.jti, payload_.ath);
 
   if (encoding_ == DpopEncoding::CWT) {
@@ -332,7 +339,7 @@ std::vector<uint8_t> DpopProof::create_signing_input() const {
                       {"jwk", json::parse(header_.jwk)}};
   std::string action_name_str =
       std::string(moqt_actions::action_name(payload_.actx.action));
-  json payload_json = {{"iat", payload_.iat},
+  json payload_json = {{"iat", *payload_.iat},
                        {"actx",
                         {{"type", payload_.actx.type},
                          {"action", action_name_str},
@@ -443,7 +450,10 @@ std::string DpopProof::serialize_cwt() const {
   pushArrayItem(CborItemPtr(cbor_new_definite_map(0)),
                 "COSE_Sign1 unprotected header");
 
-  auto payload_cbor = Cwt::createDpopSigningInput(payload_.actx, payload_.iat,
+  if (!payload_.iat.has_value()) {
+    throw InvalidTokenFormatError{};
+  }
+  auto payload_cbor = Cwt::createDpopSigningInput(payload_.actx, *payload_.iat,
                                                   payload_.jti, payload_.ath);
   pushArrayItem(CborItemPtr(cbor_build_bytestring(payload_cbor.data(),
                                                   payload_cbor.size())),
@@ -473,7 +483,10 @@ std::string DpopProof::serialize_jwt() const {
   // the action *name* string here — the numeric COSE label is CWT-only.
   std::string action_name_str =
       std::string(moqt_actions::action_name(payload_.actx.action));
-  json payload_json = {{"iat", payload_.iat},
+  if (!payload_.iat.has_value()) {
+    throw InvalidTokenFormatError{};
+  }
+  json payload_json = {{"iat", *payload_.iat},
                        {"actx",
                         {{"type", payload_.actx.type},
                          {"action", action_name_str},
@@ -611,6 +624,10 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   // Parse payload
   auto payload_bstr = cbor_array_get_owned(cose_array, 2);
   DpopPayload payload(0, "", "");
+  // Producer default initialises iat to now(); clear it so a missing wire
+  // `iat` remains `nullopt` and is_fresh()/is_valid() fail closed rather
+  // than silently accept a proof whose iat we synthesised ourselves.
+  payload.iat.reset();
 
   if (!payload_bstr || !cbor_isa_bytestring(payload_bstr.get())) {
     throw InvalidTokenFormatError{};
@@ -802,6 +819,9 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
   }
 
   DpopPayload payload(0, "", "");
+  // See CBOR path: clear the producer-default iat so absence on the wire
+  // remains observable as `nullopt`.
+  payload.iat.reset();
 
   if (payload_json.contains("actx")) {
     auto actx_json = payload_json["actx"];
@@ -961,11 +981,24 @@ bool DpopProofValidator::validate_proof(
     return false;
   }
 
-  // Check JTI if enabled and present. All bookkeeping — TOCTOU-safe
-  // check-and-record, size cap, expiry, cross-process sharing — is the
-  // replay store's responsibility. Exhaustion is treated as a replay
-  // (fail closed) so a full store cannot be turned into an admit oracle.
-  if (settings_.get_jti_processing() && proof.get_payload().jti.has_value()) {
+  // Check JTI if enabled. All bookkeeping — TOCTOU-safe check-and-record,
+  // size cap, expiry, cross-process sharing — is the replay store's
+  // responsibility. Exhaustion is treated as a replay (fail closed) so a
+  // full store cannot be turned into an admit oracle.
+  //
+  // A-02: when jti_processing is on, absence of `jti` on the wire is a
+  // fatal error, not a "skip the check" path. Previously a proof that
+  // omitted `jti` bypassed the replay store entirely, so an attacker
+  // could replay the same jti-less proof indefinitely (or, more subtly,
+  // a producer could set `jti` once and reuse it — the store would only
+  // see the first sighting). Under jti_processing the proof MUST carry
+  // a jti or be rejected.
+  if (settings_.get_jti_processing()) {
+    if (!proof.get_payload().jti.has_value()) {
+      CAT_LOG_WARN(
+          "DPoP proof rejected: jti processing enabled but proof carries no jti");
+      return false;
+    }
     const auto& jti = proof.get_payload().jti.value();
     auto now = std::chrono::system_clock::now();
     auto result = replay_store_->admit(jti, now,

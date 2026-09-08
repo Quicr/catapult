@@ -42,7 +42,10 @@ UsageAdmitResult InMemoryUsageState::admit(
     // net capacity change happens.
     if (mode == CatReplayMode::RevokeOnReplay) {
       admitted_.erase(it);
-      insertRevokedLocked(key);
+      // Slot transfer: we just freed one admitted slot, so insert cannot
+      // exhaust unless another thread raced in between — impossible while
+      // we hold `mu_`. The return value is therefore always `Accepted`.
+      (void)insertRevokedLocked(key);
       return UsageAdmitResult::Revoked;
     }
     return UsageAdmitResult::Replay;
@@ -70,11 +73,14 @@ UsageAdmitResult InMemoryUsageState::admit(
   return UsageAdmitResult::Admitted;
 }
 
-void InMemoryUsageState::revoke(std::string_view cti) {
+RevokeResult InMemoryUsageState::revoke(std::string_view cti) {
   std::lock_guard<std::mutex> lock(mu_);
   const std::string key(cti);
+  // Erase any prior admission first: doing so releases one slot before
+  // insertRevokedLocked runs the cap check, which is what allows an
+  // already-admitted cti to always be revokable regardless of store fill.
   admitted_.erase(key);
-  insertRevokedLocked(key);
+  return insertRevokedLocked(key);
 }
 
 void InMemoryUsageState::purgeExpired(
@@ -99,38 +105,25 @@ void InMemoryUsageState::purgeExpiredLocked(
   }
 }
 
-void InMemoryUsageState::insertRevokedLocked(const std::string& key) {
-  // Idempotent: re-revoking an already-revoked cti is a no-op. We do NOT
-  // touch the FIFO position — a repeat revoke() call is a duplicate, not
-  // a refresh of intent.
+RevokeResult InMemoryUsageState::insertRevokedLocked(const std::string& key) {
+  // Idempotent: re-revoking an already-revoked cti is a no-op that reports
+  // success. The cti is (still) recorded as revoked, which is the outcome
+  // the caller asked for.
   if (revoked_.find(key) != revoked_.end()) {
-    return;
+    return RevokeResult::Accepted;
   }
 
-  // Enforce the combined cap. revoke() has no failure channel and the
-  // caller has already decided the cti MUST be blocked, so if we are at
-  // capacity we evict the oldest revocation to make room. Prefer evicting
-  // an expired admitted entry first — that is a cheaper source of a slot
-  // and preserves older revocation intent for as long as possible.
+  // Enforce the combined cap. When we cannot fit the new revocation we
+  // refuse it and leave the store untouched: silently evicting an older
+  // revocation would forget operator intent that was already committed,
+  // which is a more dangerous failure than surfacing exhaustion. Callers
+  // are documented to treat StoreExhausted as a hard failure.
   if (admitted_.size() + revoked_.size() >= max_entries_) {
-    // Try to reclaim a slot from an expired admitted entry. We do not have
-    // `now` here (revoke has no time input), so we cannot purge by expiry;
-    // fall back directly to FIFO revocation eviction.
-    if (!revoked_order_.empty()) {
-      const std::string& oldest = revoked_order_.front();
-      revoked_.erase(oldest);
-      revoked_order_.pop_front();
-    } else if (!admitted_.empty()) {
-      // No revocations to evict but admitted is at cap. Drop an admitted
-      // entry to make room; revocation MUST succeed. The evicted cti loses
-      // its replay-tracking sighting, which is strictly safer than leaving
-      // the revocation unrecorded.
-      admitted_.erase(admitted_.begin());
-    }
+    return RevokeResult::StoreExhausted;
   }
 
   revoked_.insert(key);
-  revoked_order_.push_back(key);
+  return RevokeResult::Accepted;
 }
 
 }  // namespace catapult

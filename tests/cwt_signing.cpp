@@ -276,6 +276,54 @@ TEST_SUITE("CWT Multi-Signature (COSE_Sign) Tests") {
     CHECK(validated.payload.core.exp == 9876543210);
   }
 
+  TEST_CASE("Empty signatures array is rejected (RFC 8152 §4.1)") {
+    // A-03: RFC 8152 §4.1 CDDL requires `+ COSE_Signature` — one or more,
+    // never zero. Previously validateMultiSignedCwt admitted an empty
+    // signatures array, so an attacker could wrap any payload in a
+    // legitimate-looking COSE_Sign envelope with no signatures at all and
+    // extract claims out the other side. Confirm that an empty array is
+    // now refused.
+    //
+    // Hand-craft: tag 98 (0xd8 0x62) around a 4-element array whose
+    // signatures element is an empty array (0x80).
+    //   d8 62    — tag 98 (COSE_Sign) wrapping the following item
+    //   84       — array of length 4
+    //   40       — empty protected header (byte string len 0)
+    //   a0       — empty unprotected header (map len 0)
+    //   43 a10101 — payload = 3-byte bytestring containing map {1: 1}
+    //              (issuer=1 style; content doesn't matter since
+    //              validation must reject before parsing)
+    //   80       — signatures: array of length 0 (REJECTED)
+    std::vector<uint8_t> zero_sig_wire = {0xd8, 0x62, 0x84, 0x40, 0xa0,
+                                          0x43, 0xa1, 0x01, 0x01, 0x80};
+
+    auto algorithm = std::make_unique<Es256Algorithm>();
+    std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>>
+        algorithms;
+    algorithms.emplace(algorithm->algorithmId(), std::cref(*algorithm));
+
+    CHECK_THROWS(Cwt::validateMultiSignedCwt(zero_sig_wire, algorithms));
+
+    // Positive control: swap the empty signatures array for a
+    // signatures array containing one well-formed (but bogus) triple.
+    // The wire body now passes structural checks, so validation must
+    // fail later — at signature verification. This confirms the earlier
+    // rejection was specifically driven by signaturesCount == 0.
+    //
+    //   81      — signatures: array of length 1
+    //   83      — signature triple: array of length 3
+    //   40      — protected header bytestring (empty)
+    //   a0      — unprotected header map (empty)
+    //   40      — signature bytestring (empty)
+    std::vector<uint8_t> one_bogus_sig_wire = {
+        0xd8, 0x62, 0x84, 0x40, 0xa0, 0x43, 0xa1, 0x01, 0x01,
+        0x81, 0x83, 0x40, 0xa0, 0x40};
+    // Must throw for a *different* reason: the empty-signature
+    // rejection has left this path. Not asserting the exact exception
+    // type — just that we no longer reject at the size-check gate.
+    CHECK_THROWS(Cwt::validateMultiSignedCwt(one_bogus_sig_wire, algorithms));
+  }
+
   TEST_CASE("COSE_Sign vs COSE_Sign1 Structure Validation") {
     CatToken token;
     token.core.iss = "structure-test";

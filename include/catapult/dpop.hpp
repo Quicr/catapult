@@ -170,7 +170,16 @@ struct AuthorizationContext {
 struct DpopPayload {
   std::optional<std::string> jti;  ///< JWT ID for replay protection
   AuthorizationContext actx;       ///< Authorization context
-  int64_t iat;                     ///< Issued at timestamp
+  // `iat` is intentionally optional: `std::nullopt` distinguishes "the
+  // wire form did not carry an `iat` claim" from "iat present and zero".
+  // The deserializer MUST NOT synthesise a value (e.g. Clock::now()) for
+  // a missing claim — doing so silently lets an unauthenticated proof
+  // pass `is_fresh()`, which reads back exactly the value that was
+  // synthesised a moment earlier. `is_valid()` and `is_fresh()` fail
+  // closed when this is unset. Producer paths still default-initialise
+  // `iat` to the current time so a freshly-constructed payload stays
+  // signable.
+  std::optional<int64_t> iat;
   std::optional<std::string> ath;  ///< Access token hash (optional)
 
   /**
@@ -186,7 +195,7 @@ struct DpopPayload {
    * @brief Validate payload claims
    */
   [[nodiscard]] bool is_valid() const noexcept {
-    return actx.is_valid() && iat > 0;
+    return actx.is_valid() && iat.has_value() && *iat > 0;
   }
 
   /**
@@ -197,14 +206,20 @@ struct DpopPayload {
       std::chrono::seconds window = std::chrono::seconds{300},
       std::chrono::seconds future_tolerance = std::chrono::seconds{
           60}) const noexcept {
+    // No `iat` on the wire ⇒ we have no freshness anchor. Fail closed
+    // rather than treat "unknown" as "fresh": a proof that omitted iat
+    // cannot be replayed against a window we never measured.
+    if (!iat.has_value()) {
+      return false;
+    }
     auto now =
         std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     // Reject timestamps too far in the future (prevents pre-generated proofs)
-    if (iat > now + future_tolerance.count()) {
+    if (*iat > now + future_tolerance.count()) {
       return false;
     }
     // Check if timestamp is within the past window
-    auto age = now - iat;
+    auto age = now - *iat;
     return age >= 0 && age <= window.count();
   }
 };
@@ -243,7 +258,14 @@ struct DpopValidationSettings {
   void set_window(std::chrono::seconds time_window) { window = time_window; }
 
   /**
-   * @brief Set JTI processing preference
+   * @brief Set JTI processing preference.
+   *
+   * When true (the default) the validator MUST refuse any proof that
+   * omits `jti` — a jti-less proof under jti processing has no stable
+   * replay identifier and would silently bypass the ReplayStore. Set to
+   * false only when the caller has an out-of-band replay defence and
+   * has verified that the wider deployment does not depend on this
+   * check.
    */
   void set_jti_processing(bool honor) { honor_jti = honor; }
 
