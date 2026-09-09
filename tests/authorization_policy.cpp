@@ -18,6 +18,7 @@
 
 #include "catapult/authorization_policy.hpp"
 #include "catapult/claims.hpp"
+#include "catapult/dpop.hpp"
 #include "catapult/token.hpp"
 #include "catapult/validator.hpp"
 
@@ -373,6 +374,94 @@ TEST_SUITE("AuthorizationPolicyHook — validator wiring") {
     CHECK_FALSE(policy.last_client_id.has_value());
     CHECK_FALSE(policy.last_client_ip.has_value());
     CHECK_FALSE(policy.last_moqt_action.has_value());
+  }
+
+  TEST_CASE("Required context fields: missing client_ip is rejected") {
+    // A deployment that pins allow-lists on client IP must be able to say
+    // "the request MUST carry a client_ip" at validator-construction time.
+    // The check runs before the hook fires, so a hook that forgets to
+    // validate its own inputs cannot silently succeed.
+    auto token = baseToken();
+    CatProofOfPossession por;
+    por.probability = 1.0;
+    por.identifier = {0x01};
+    token.cat.catpor = por;
+
+    RecordingPolicy policy;
+    CatTokenValidator validator;
+    validator.withAuthorizationPolicy(&policy);
+    RequiredPolicyContextFields required;
+    required.client_ip = true;
+    validator.withRequiredContextFields(required);
+
+    CHECK_THROWS_AS(validator.validate(token), MissingRequiredClaimError);
+    // The hook must not have been called: the required-field check runs
+    // before dispatch.
+    CHECK_FALSE(policy.por_seen);
+  }
+
+  TEST_CASE("Required context fields: all populated admits token") {
+    auto token = baseToken();
+    CatProofOfPossession por;
+    por.probability = 1.0;
+    por.identifier = {0x01};
+    token.cat.catpor = por;
+
+    RecordingPolicy policy;
+    CatTokenValidator validator;
+    validator.withAuthorizationPolicy(&policy);
+    validator.withRequiredContextFields(RequiredPolicyContextFields::all());
+
+    PolicyContext ctx;
+    std::string client_id = "session-1";
+    std::string client_ip = "203.0.113.9";
+    std::string ns = "example/live";
+    std::string track = "audio";
+    std::string session = "conn-42";
+    DpopPayload payload{7, "example/live", "audio"};
+    // The required-fields check only inspects the pointer for non-null.
+    ctx.client_id = client_id;
+    ctx.client_ip = client_ip;
+    ctx.dpop_proof = &payload;
+    ctx.moqt_action = 7;
+    ctx.moqt_namespace = ns;
+    ctx.moqt_track = track;
+    ctx.session_id = session;
+    ctx.request_time = std::chrono::system_clock::now();
+
+    CHECK_NOTHROW(validator.validate(token, ctx));
+    CHECK(policy.por_seen);
+  }
+
+  TEST_CASE(
+      "Required context fields: not enforced when no gated claim is present") {
+    // Required-field enforcement is scoped to tokens that would actually
+    // reach the hook. A plain token with no hook-relevant claims must
+    // still validate even when the validator is configured to require
+    // every context field.
+    auto token = baseToken();
+    CatTokenValidator validator;
+    validator.withRequiredContextFields(RequiredPolicyContextFields::all());
+    CHECK_NOTHROW(validator.validate(token));
+  }
+
+  TEST_CASE(
+      "Required context fields: missing dpop_proof pointer is rejected") {
+    auto token = baseToken();
+    CatDpopSettings settings;
+    settings.window_seconds = 60;
+    token.dpop.catdpop = settings;
+
+    RecordingPolicy policy;
+    CatTokenValidator validator;
+    validator.withAuthorizationPolicy(&policy);
+    RequiredPolicyContextFields required;
+    required.dpop_proof = true;
+    validator.withRequiredContextFields(required);
+
+    PolicyContext ctx;  // dpop_proof stays nullptr
+    CHECK_THROWS_AS(validator.validate(token, ctx), MissingRequiredClaimError);
+    CHECK_FALSE(policy.dpop_seen);
   }
 
   TEST_CASE("tryValidate surfaces the policy failure via error code") {

@@ -108,6 +108,61 @@ struct PolicyContext {
    *        state may prefer their own clock.
    */
   std::optional<std::chrono::system_clock::time_point> request_time;
+
+  /**
+   * @brief Opaque session-scope handle the relay can use to correlate a
+   *        policy decision with a persistent session (session id,
+   *        connection id, or a hash of them). Non-owning; the hook must
+   *        not retain the pointer past the callback.
+   *
+   * The library never inspects this field; it is a pass-through for
+   * operator-supplied policy code that needs to bind a decision to a
+   * session-scoped external record (e.g., a DPoP jkt already pinned at
+   * connection establishment).
+   */
+  std::optional<std::string_view> session_id;
+};
+
+/**
+ * @brief Declares which `PolicyContext` fields the validator will require
+ *        callers to populate before invoking the authorization-policy hook.
+ *
+ * A relay knows which request-side facts its policies depend on: a policy
+ * enforcing IP allowlists needs `client_ip`; a policy binding DPoP proofs
+ * needs `dpop_proof`; a MOQT-aware policy needs the action/namespace/track
+ * triple. Rather than trust each hook implementation to check its own
+ * inputs (and silently succeed on unpopulated fields when it forgets), the
+ * validator enforces the required-field contract centrally.
+ *
+ * `validate(token, ctx)` throws `MissingRequiredClaimError` before any
+ * `AuthorizationPolicyHook::accept*` callback fires if a required field
+ * is missing. Fields not listed here are informational and may be
+ * `std::nullopt`; hooks are still free to inspect them.
+ */
+struct RequiredPolicyContextFields {
+  bool client_id = false;
+  bool client_ip = false;
+  bool dpop_proof = false;
+  bool moqt_action = false;
+  bool moqt_namespace = false;
+  bool moqt_track = false;
+  bool request_time = false;
+  bool session_id = false;
+
+  /// Convenience: require every field. Suitable for the strictest MOQT
+  /// deployments where any missing input is a bug on the caller side.
+  [[nodiscard]] static constexpr RequiredPolicyContextFields all() noexcept {
+    RequiredPolicyContextFields r;
+    r.client_id = true;
+    r.client_ip = true;
+    r.dpop_proof = true;
+    r.moqt_action = true;
+    r.moqt_namespace = true;
+    r.moqt_track = true;
+    r.request_time = true;
+    r.session_id = true;
+    return r;
+  }
 };
 
 /**

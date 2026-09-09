@@ -66,6 +66,12 @@ CatTokenValidator& CatTokenValidator::withAuthorizationPolicy(
   return *this;
 }
 
+CatTokenValidator& CatTokenValidator::withRequiredContextFields(
+    RequiredPolicyContextFields fields) {
+  required_context_fields_ = fields;
+  return *this;
+}
+
 /**
  * @brief Template-based claim validation helper
  */
@@ -438,6 +444,37 @@ void CatTokenValidator::validateAuthorizationPolicy(
     throw MissingRequiredClaimError(
         "authorization policy hook (token carries semantic claims requiring "
         "operator-supplied enforcement)");
+  }
+
+  // Enforce the required-field contract centrally, so a hook that forgets
+  // to check its own inputs cannot silently admit unenforced requests.
+  // The check fires only when the token actually carries a hook-relevant
+  // claim (guarded above by `needs_policy`), so callers can leave the
+  // context empty for token-only paths that never touch the hook.
+  const auto& req = required_context_fields_;
+  if (req.client_id && !context.client_id.has_value()) {
+    throw MissingRequiredClaimError("policy context: client_id");
+  }
+  if (req.client_ip && !context.client_ip.has_value()) {
+    throw MissingRequiredClaimError("policy context: client_ip");
+  }
+  if (req.dpop_proof && context.dpop_proof == nullptr) {
+    throw MissingRequiredClaimError("policy context: dpop_proof");
+  }
+  if (req.moqt_action && !context.moqt_action.has_value()) {
+    throw MissingRequiredClaimError("policy context: moqt_action");
+  }
+  if (req.moqt_namespace && !context.moqt_namespace.has_value()) {
+    throw MissingRequiredClaimError("policy context: moqt_namespace");
+  }
+  if (req.moqt_track && !context.moqt_track.has_value()) {
+    throw MissingRequiredClaimError("policy context: moqt_track");
+  }
+  if (req.request_time && !context.request_time.has_value()) {
+    throw MissingRequiredClaimError("policy context: request_time");
+  }
+  if (req.session_id && !context.session_id.has_value()) {
+    throw MissingRequiredClaimError("policy context: session_id");
   }
 
   if (has_por &&

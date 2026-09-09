@@ -107,6 +107,15 @@ class CatTokenValidator {
       ///< installed, validation fails closed with a missing-required-
       ///< claim error. Test suites and staged rollouts can install
       ///< `PermissivePolicy` to opt out of enforcement explicitly.
+  RequiredPolicyContextFields required_context_fields_{};
+      ///< Which `PolicyContext` fields the validator will require callers
+      ///< to populate before dispatching to `authz_policy_`. Default is
+      ///< "no field is required" — the caller is responsible for opting
+      ///< in per deployment via `withRequiredContextFields()`. When a
+      ///< required field is missing, `validate()` throws
+      ///< `MissingRequiredClaimError` *before* any policy callback fires,
+      ///< so a forgetful caller cannot silently succeed against a hook
+      ///< that fails to check its own inputs.
 
  public:
   /**
@@ -190,6 +199,28 @@ class CatTokenValidator {
    * auditable choice rather than a silent default.
    */
   CatTokenValidator& withAuthorizationPolicy(AuthorizationPolicyHook* hook);
+
+  /**
+   * @brief Declare which `PolicyContext` fields the caller must populate
+   *        before the authorization-policy hook is consulted.
+   *
+   * When a token carries a claim that requires the hook (see
+   * `withAuthorizationPolicy`), the validator first checks that every
+   * field marked in `fields` is populated on the incoming `PolicyContext`.
+   * If any required field is missing the validator throws
+   * `MissingRequiredClaimError` and no `accept*()` callback fires.
+   *
+   * This lets a relay express the request-side contract centrally rather
+   * than trust every hook implementation to check its own inputs — a hook
+   * that forgets to reject on a missing field would otherwise silently
+   * admit unenforced tokens.
+   *
+   * The default is "no field required" — callers must opt in explicitly.
+   * Use `RequiredPolicyContextFields::all()` for the strictest MOQT
+   * deployments.
+   */
+  CatTokenValidator& withRequiredContextFields(
+      RequiredPolicyContextFields fields);
 
   /**
    * @brief Validate a CAT token
