@@ -422,6 +422,162 @@ TEST_SUITE("DPoP CWT wire format") {
         stripped_header_b64 + "." + payload_b64 + "." + sig_b64;
     CHECK_THROWS(DpopProof::deserialize(stripped_wire));
   }
+
+  TEST_CASE("JWT DPoP deserialization rejects a non-object header or payload") {
+    // A JOSE header and JWT claims set are JSON objects (RFC 7519 §5, §7.2).
+    // A wire form whose header or payload segment decodes to an array,
+    // scalar, or `null` is malformed and MUST fail parse. The prior
+    // lenient parse would then apply `.value("k", default)` to a
+    // non-object, throwing `json::type_error` — which the outer catch
+    // (parse_error only) does not handle, letting the exception escape
+    // the API.
+    auto keys = makeEs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-jwt-shape"}, DpopEncoding::JWT);
+    auto wire = proof.serialize();
+    auto first_dot = wire.find('.');
+    auto second_dot = wire.find('.', first_dot + 1);
+    REQUIRE(first_dot != std::string::npos);
+    REQUIRE(second_dot != std::string::npos);
+    auto header_b64 = wire.substr(0, first_dot);
+    auto payload_b64 = wire.substr(first_dot + 1, second_dot - first_dot - 1);
+    auto sig_b64 = wire.substr(second_dot + 1);
+
+    // Non-object header: replace the header segment with the JSON array
+    // `["dpop-proof+jwt"]`. base64url-encode and reassemble.
+    {
+      const std::string arr = R"(["dpop-proof+jwt"])";
+      auto arr_b64 =
+          base64UrlEncode(std::vector<uint8_t>(arr.begin(), arr.end()));
+      std::string bad_wire = arr_b64 + "." + payload_b64 + "." + sig_b64;
+      CHECK_THROWS(DpopProof::deserialize(bad_wire));
+    }
+
+    // Non-object payload: same idea for the middle segment.
+    {
+      const std::string arr = R"(["not-an-object"])";
+      auto arr_b64 =
+          base64UrlEncode(std::vector<uint8_t>(arr.begin(), arr.end()));
+      std::string bad_wire = header_b64 + "." + arr_b64 + "." + sig_b64;
+      CHECK_THROWS(DpopProof::deserialize(bad_wire));
+    }
+
+    // Scalar payload: a bare number is valid JSON but not a claims set.
+    {
+      const std::string scalar = "42";
+      auto scalar_b64 = base64UrlEncode(
+          std::vector<uint8_t>(scalar.begin(), scalar.end()));
+      std::string bad_wire = header_b64 + "." + scalar_b64 + "." + sig_b64;
+      CHECK_THROWS(DpopProof::deserialize(bad_wire));
+    }
+  }
+
+  TEST_CASE(
+      "JWT DPoP deserialization rejects non-string JOSE fields and non-object "
+      "jwk") {
+    // JWS/JWT: `alg` is a string (RFC 7515 §4.1.1); `jwk` is a JSON
+    // object (RFC 7517 §4). The previous `header_json.value("alg", "")`
+    // read and `.dump()` on `jwk` accepted a numeric alg or a scalar
+    // jwk — the former would produce a bogus header.alg the verifier
+    // then dispatched on; the latter would serialize a non-JWK string
+    // that no key importer could consume. Fail at parse instead.
+    auto keys = makeEs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-jwt-jose-shape"}, DpopEncoding::JWT);
+    auto wire = proof.serialize();
+    auto first_dot = wire.find('.');
+    auto second_dot = wire.find('.', first_dot + 1);
+    auto header_b64 = wire.substr(0, first_dot);
+    auto payload_b64 = wire.substr(first_dot + 1, second_dot - first_dot - 1);
+    auto sig_b64 = wire.substr(second_dot + 1);
+    auto header_bytes = base64UrlDecode(header_b64);
+    std::string header_json(header_bytes.begin(), header_bytes.end());
+
+    // Numeric alg.
+    {
+      auto pos = header_json.find("\"alg\":\"ES256\"");
+      REQUIRE(pos != std::string::npos);
+      std::string mutated = header_json;
+      mutated.replace(pos, sizeof("\"alg\":\"ES256\"") - 1, "\"alg\":42     ");
+      auto b64 = base64UrlEncode(
+          std::vector<uint8_t>(mutated.begin(), mutated.end()));
+      std::string bad_wire = b64 + "." + payload_b64 + "." + sig_b64;
+      CHECK_THROWS(DpopProof::deserialize(bad_wire));
+    }
+
+    // Non-object jwk: inject `"jwk":"a-string"` before the closing brace.
+    // Producer output may or may not include a jwk depending on the
+    // key path taken; if the field is absent, insert one; if present,
+    // swap it for a scalar.
+    {
+      std::string mutated = header_json;
+      auto jwk_pos = mutated.find("\"jwk\":");
+      if (jwk_pos == std::string::npos) {
+        // Insert `"jwk":"x",` right after the opening `{`.
+        auto brace = mutated.find('{');
+        REQUIRE(brace != std::string::npos);
+        mutated.insert(brace + 1, "\"jwk\":\"x\",");
+      } else {
+        // Locate the value start and rewrite to a scalar; keep sizes
+        // compatible by re-serializing the whole header as a minimal
+        // object.
+        mutated = "{\"typ\":\"dpop-proof+jwt\",\"alg\":\"ES256\",\"jwk\":\"x\"}";
+      }
+      auto b64 = base64UrlEncode(
+          std::vector<uint8_t>(mutated.begin(), mutated.end()));
+      std::string bad_wire = b64 + "." + payload_b64 + "." + sig_b64;
+      CHECK_THROWS(DpopProof::deserialize(bad_wire));
+    }
+  }
+
+  TEST_CASE(
+      "JWT DPoP deserialization rejects non-string jti/ath and non-object "
+      "actx") {
+    // These fields have JSON string / object types (draft §4, RFC 9449
+    // §4.2). Prior code called `.get<std::string>()` and
+    // `actx.value(...)` without type checks — a wire form with
+    // `"jti": 1`, `"ath": []`, or `"actx": "not-a-map"` would raise
+    // `json::type_error`, which is not caught, and would escape.
+    auto keys = makeEs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-jwt-payload-shape"}, DpopEncoding::JWT);
+    auto wire = proof.serialize();
+    auto first_dot = wire.find('.');
+    auto second_dot = wire.find('.', first_dot + 1);
+    auto header_b64 = wire.substr(0, first_dot);
+    auto payload_b64 = wire.substr(first_dot + 1, second_dot - first_dot - 1);
+    auto sig_b64 = wire.substr(second_dot + 1);
+    auto payload_bytes = base64UrlDecode(payload_b64);
+    std::string payload_json(payload_bytes.begin(), payload_bytes.end());
+
+    // Non-string jti.
+    {
+      auto pos = payload_json.find("\"jti\":\"jti-jwt-payload-shape\"");
+      REQUIRE(pos != std::string::npos);
+      std::string mutated = payload_json;
+      mutated.replace(pos, sizeof("\"jti\":\"jti-jwt-payload-shape\"") - 1,
+                      "\"jti\":123                        ");
+      auto b64 = base64UrlEncode(
+          std::vector<uint8_t>(mutated.begin(), mutated.end()));
+      std::string bad_wire = header_b64 + "." + b64 + "." + sig_b64;
+      CHECK_THROWS(DpopProof::deserialize(bad_wire));
+    }
+
+    // Non-object actx — swap the whole `"actx":{...}` for a scalar.
+    // Build a minimal payload with only jti + a bad actx to avoid
+    // string-length fiddling around nested braces.
+    {
+      std::string mutated =
+          R"({"jti":"j","iat":1000,"actx":"not-a-map"})";
+      auto b64 = base64UrlEncode(
+          std::vector<uint8_t>(mutated.begin(), mutated.end()));
+      std::string bad_wire = header_b64 + "." + b64 + "." + sig_b64;
+      CHECK_THROWS(DpopProof::deserialize(bad_wire));
+    }
+  }
 #endif  // CATAPULT_ENABLE_JSON
 
   TEST_CASE("Missing iat fails is_valid() and is_fresh() — no synthesis") {

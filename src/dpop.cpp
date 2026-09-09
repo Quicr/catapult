@@ -835,6 +835,17 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
     throw InvalidTokenFormatError{};
   }
 
+  // A JOSE header and JWT claims set are JSON objects (RFC 7519 §5, §7.2).
+  // An array, scalar, or `null` at the root is not a valid JWT and MUST
+  // reject before any field access — nlohmann::json's `.value()` and
+  // `.get<>()` calls below assume object semantics and would throw
+  // `json::type_error` (not `parse_error`) if applied to a non-object,
+  // escaping past the parse-error catch and surfacing as an uncaught
+  // exception at the API boundary.
+  if (!header_json.is_object() || !payload_json.is_object()) {
+    throw InvalidTokenFormatError{};
+  }
+
   DpopHeader header;
   header.set_encoding(DpopEncoding::JWT);
   // draft-nandakumar-moq-generic-dpop-proof-00 §3.1 / RFC 9449 §4.2 pin
@@ -850,8 +861,24 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
     throw InvalidTokenFormatError{};
   }
   header.typ = header_json["typ"].get<std::string>();
-  header.alg = header_json.value("alg", "");
+  // Type-check every remaining JOSE field before reading it. The
+  // pre-existing `.value("alg", "")` form throws `json::type_error` on
+  // a non-string value (e.g. `"alg": 42`), and the catch above only
+  // handles `json::parse_error`. Fail closed instead of letting the
+  // exception escape.
+  if (header_json.contains("alg")) {
+    if (!header_json["alg"].is_string()) {
+      throw InvalidTokenFormatError{};
+    }
+    header.alg = header_json["alg"].get<std::string>();
+  }
   if (header_json.contains("jwk")) {
+    // A JWK is a JSON object (RFC 7517 §4). Anything else is a malformed
+    // proof; accepting it would let `.dump()` serialize a scalar/array
+    // that no verifier would ever import.
+    if (!header_json["jwk"].is_object()) {
+      throw InvalidTokenFormatError{};
+    }
     header.jwk = header_json["jwk"].dump();
   }
 
@@ -861,8 +888,21 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
   payload.iat.reset();
 
   if (payload_json.contains("actx")) {
-    auto actx_json = payload_json["actx"];
-    payload.actx.type = actx_json.value("type", "moqt");
+    // `actx` is a nested claims object (draft §4). A string or array
+    // here would make `.value("type", "moqt")` throw a `type_error` we
+    // don't catch.
+    if (!payload_json["actx"].is_object()) {
+      throw InvalidTokenFormatError{};
+    }
+    const auto& actx_json = payload_json["actx"];
+    if (actx_json.contains("type")) {
+      if (!actx_json["type"].is_string()) {
+        throw InvalidTokenFormatError{};
+      }
+      payload.actx.type = actx_json["type"].get<std::string>();
+    } else {
+      payload.actx.type = "moqt";
+    }
     // Pinned CAT-4-MOQT DPoP profile (draft-nandakumar-moq-generic-dpop-
     // proof-00 §4): `actx.action` on the wire is the action-name string
     // ("PUBLISH", "SUBSCRIBE", …). Decode by reversing
@@ -887,9 +927,24 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
         throw InvalidTokenFormatError{};
       }
     }
-    payload.actx.tns = actx_json.value("tns", "");
-    payload.actx.tn = actx_json.value("tn", "");
-    payload.actx.resource_uri = actx_json.value("resource", "");
+    if (actx_json.contains("tns")) {
+      if (!actx_json["tns"].is_string()) {
+        throw InvalidTokenFormatError{};
+      }
+      payload.actx.tns = actx_json["tns"].get<std::string>();
+    }
+    if (actx_json.contains("tn")) {
+      if (!actx_json["tn"].is_string()) {
+        throw InvalidTokenFormatError{};
+      }
+      payload.actx.tn = actx_json["tn"].get<std::string>();
+    }
+    if (actx_json.contains("resource")) {
+      if (!actx_json["resource"].is_string()) {
+        throw InvalidTokenFormatError{};
+      }
+      payload.actx.resource_uri = actx_json["resource"].get<std::string>();
+    }
   }
 
   if (payload_json.contains("iat")) {
@@ -912,9 +967,15 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
   }
 
   if (payload_json.contains("jti")) {
+    if (!payload_json["jti"].is_string()) {
+      throw InvalidTokenFormatError{};
+    }
     payload.jti = payload_json["jti"].get<std::string>();
   }
   if (payload_json.contains("ath")) {
+    if (!payload_json["ath"].is_string()) {
+      throw InvalidTokenFormatError{};
+    }
     payload.ath = payload_json["ath"].get<std::string>();
   }
 
