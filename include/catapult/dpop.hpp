@@ -17,12 +17,15 @@
 
 #include <chrono>
 #include <concepts>
+#include <list>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 
+#include <unordered_map>
 #include <unordered_set>
 
 #include "claims.hpp"
@@ -254,6 +257,17 @@ struct DpopValidationSettings {
   // signature verifier is invoked so a rogue `alg` cannot even provoke
   // key-material handling.
   std::unordered_set<int64_t> allowed_dpop_algorithms;
+  // Maximum number of parsed JWK → `CryptographicAlgorithm` entries the
+  // validator will retain across proofs. JWK import (BIGNUM decode,
+  // OSSL_PARAM_BLD, EVP_PKEY_fromdata, DER round-trip) is measurably
+  // more expensive than the ECDSA verify itself; caching by JWK
+  // thumbprint (SHA-256 of the RFC 7638 canonical form) turns each
+  // repeat-client validation from three parsing passes into one. The
+  // cache is bounded — an attacker who rotated JWKs endlessly would
+  // otherwise pin arbitrary memory in the relay. `0` disables the cache
+  // (imports every time); `std::nullopt` uses the built-in default of
+  // 256 keys, which fits ~64 KiB in typical deployments.
+  std::optional<size_t> parsed_key_cache_max_size;
 
   /**
    * @brief Default constructor with reasonable defaults
@@ -339,6 +353,23 @@ struct DpopValidationSettings {
    */
   void set_jti_cleanup_interval(size_t interval) {
     jti_cleanup_interval = interval;
+  }
+
+  /**
+   * @brief Set maximum entries in the validator's parsed-key cache.
+   * @param max_entries `0` disables caching entirely. Values > 0 bound
+   *        the cache; the least-recently-used entry is evicted on
+   *        overflow. Default (unset) is 256.
+   */
+  void set_parsed_key_cache_max_size(size_t max_entries) {
+    parsed_key_cache_max_size = max_entries;
+  }
+
+  /**
+   * @brief Get the effective parsed-key cache size (default 256).
+   */
+  [[nodiscard]] size_t get_parsed_key_cache_max_size() const noexcept {
+    return parsed_key_cache_max_size.value_or(256);
   }
 
   /**
@@ -716,6 +747,35 @@ class DpopProofValidator {
   // validator fails closed rather than silently skipping signature check.
   const CryptographicAlgorithm* cwt_verifier_{nullptr};
 
+  // Bounded LRU cache from JWK thumbprint → parsed `CryptographicAlgorithm`.
+  // JWK import is roughly an order of magnitude more expensive than the
+  // ECDSA verify it enables; caching avoids re-parsing the same client
+  // key on every proof from that client. Bounding + LRU eviction keeps a
+  // rotation-heavy peer from pinning arbitrary memory.
+  //
+  // Rotation-aware identity: entries are keyed by the SHA-256 thumbprint
+  // of the RFC 7638 canonical JWK form. A rotated key produces a fresh
+  // thumbprint → fresh entry; the old entry ages out via LRU. No
+  // time-based invalidation is needed because the identity is
+  // content-derived — a stale entry cannot silently start referring to
+  // different key material.
+  struct ParsedKeyEntry {
+    std::string thumbprint;
+    std::shared_ptr<CryptographicAlgorithm> algorithm;
+  };
+  using LruList = std::list<ParsedKeyEntry>;
+  mutable std::mutex parsed_key_cache_mu_;
+  mutable LruList parsed_key_lru_;
+  mutable std::unordered_map<std::string, LruList::iterator>
+      parsed_key_index_;
+
+  // Look up (or import + cache) the `CryptographicAlgorithm` for a JWT
+  // DPoP proof. Non-owning `shared_ptr` — the cache retains ownership.
+  // Returns null on unusable material (unsupported alg, malformed JWK,
+  // cache disabled + import failure).
+  std::shared_ptr<CryptographicAlgorithm> get_or_import_jwk_algorithm(
+      const std::string& alg_name, const std::string& jwk_json);
+
  public:
   /**
    * @brief Construct with settings and a default in-memory replay store.
@@ -813,6 +873,16 @@ class DpopProofValidator {
    */
   [[nodiscard]] ReplayStore& replay_store() const noexcept {
     return *replay_store_;
+  }
+
+  /**
+   * @brief Current number of entries in the parsed-key cache.
+   *
+   * Exposed for tests and metrics; not part of the wire contract.
+   */
+  [[nodiscard]] size_t parsed_key_cache_size() const noexcept {
+    std::lock_guard<std::mutex> lock(parsed_key_cache_mu_);
+    return parsed_key_lru_.size();
   }
 
   /**

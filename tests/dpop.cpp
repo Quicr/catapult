@@ -23,6 +23,9 @@
 #include "catapult/crypto.hpp"
 #include "catapult/dpop.hpp"
 #include "catapult/moqt_claims.hpp"
+#ifdef CATAPULT_ENABLE_JSON
+#include "catapult/jwk.hpp"
+#endif
 
 using namespace catapult;
 
@@ -577,6 +580,111 @@ TEST_SUITE("DPoP CWT wire format") {
       std::string bad_wire = header_b64 + "." + b64 + "." + sig_b64;
       CHECK_THROWS(DpopProof::deserialize(bad_wire));
     }
+  }
+
+  TEST_CASE("JWT DPoP validator caches parsed keys keyed by JWK thumbprint") {
+    // The validator imports the JWK from the proof header on every JWT
+    // proof; that import (BIGNUM + EVP_PKEY_fromdata + DER round-trip) is
+    // measurably more expensive than the verify itself. A per-validator
+    // bounded LRU cache — keyed on the RFC 7638 thumbprint — turns a
+    // repeat client's second proof into a cache hit. This test doesn't
+    // measure timing; it exercises the observable side-effect (cache
+    // population).
+    auto keys = makeEs256KeyPair();
+    auto expected_uri =
+        moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
+
+    DpopValidationSettings settings;
+    settings.set_window(std::chrono::seconds{300});
+    settings.set_jti_processing(false);  // Sidestep replay bookkeeping.
+    DpopProofValidator validator(settings);
+
+    CHECK(validator.parsed_key_cache_size() == 0);
+
+    // JWT proofs bind to the JWK thumbprint, not the COSE thumbprint —
+    // `DpopKeyPair::get_public_key_thumbprint()` returns the latter.
+    const std::string jwk_thumb =
+        jwk::calculateJWKThumbprint(keys->get_public_key_jwk());
+
+    for (int i = 0; i < 3; ++i) {
+      auto proof = keys->generate_proof(
+          moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+          std::string{"jti-cache-hit-"} + std::to_string(i),
+          DpopEncoding::JWT);
+      auto wire = proof.serialize();
+      auto decoded = DpopProof::deserialize(wire);
+      CHECK(validator.validate_proof(decoded, moqt_actions::PUBLISH,
+                                     expected_uri, jwk_thumb));
+    }
+
+    // The same JWK was seen three times — cache holds one entry.
+    CHECK(validator.parsed_key_cache_size() == 1);
+  }
+
+  TEST_CASE("JWT DPoP parsed-key cache evicts LRU beyond the configured cap") {
+    // Bound the cache to two entries and drive three distinct keys
+    // through the validator. The oldest entry must have been evicted so
+    // that only the two most-recently-imported keys remain resident.
+    DpopValidationSettings settings;
+    settings.set_window(std::chrono::seconds{300});
+    settings.set_jti_processing(false);
+    settings.set_parsed_key_cache_max_size(2);
+    DpopProofValidator validator(settings);
+
+    std::vector<std::unique_ptr<DpopKeyPair>> peers;
+    peers.push_back(makeEs256KeyPair());
+    peers.push_back(makeEs256KeyPair());
+    peers.push_back(makeEs256KeyPair());
+
+    auto expected_uri =
+        moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
+
+    for (size_t i = 0; i < peers.size(); ++i) {
+      auto proof = peers[i]->generate_proof(
+          moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+          std::string{"jti-cache-evict-"} + std::to_string(i),
+          DpopEncoding::JWT);
+      auto wire = proof.serialize();
+      auto decoded = DpopProof::deserialize(wire);
+      const std::string jwk_thumb =
+          jwk::calculateJWKThumbprint(peers[i]->get_public_key_jwk());
+      CHECK(validator.validate_proof(
+          decoded, moqt_actions::PUBLISH, expected_uri, jwk_thumb));
+    }
+
+    // Three keys, cap of two — cache size must have been clamped.
+    CHECK(validator.parsed_key_cache_size() == 2);
+  }
+
+  TEST_CASE("JWT DPoP parsed-key cache is disabled when max size is zero") {
+    // A validator configured with cap=0 must still validate JWT proofs
+    // correctly, but its cache must never grow. This is the escape
+    // hatch for callers whose deployments already sit behind a
+    // higher-level cache and want the raw import path.
+    DpopValidationSettings settings;
+    settings.set_window(std::chrono::seconds{300});
+    settings.set_jti_processing(false);
+    settings.set_parsed_key_cache_max_size(0);
+    DpopProofValidator validator(settings);
+
+    auto keys = makeEs256KeyPair();
+    auto expected_uri =
+        moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
+    const std::string jwk_thumb =
+        jwk::calculateJWKThumbprint(keys->get_public_key_jwk());
+
+    for (int i = 0; i < 3; ++i) {
+      auto proof = keys->generate_proof(
+          moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+          std::string{"jti-cache-off-"} + std::to_string(i),
+          DpopEncoding::JWT);
+      auto wire = proof.serialize();
+      auto decoded = DpopProof::deserialize(wire);
+      CHECK(validator.validate_proof(decoded, moqt_actions::PUBLISH,
+                                     expected_uri, jwk_thumb));
+    }
+
+    CHECK(validator.parsed_key_cache_size() == 0);
   }
 #endif  // CATAPULT_ENABLE_JSON
 

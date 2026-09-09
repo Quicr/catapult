@@ -244,39 +244,43 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
       throw CryptoError("Invalid EC coordinates size for P-256");
     }
 
+    // OSSL_PARAM_BLD_push_BN with `EC_PUB_X`/`EC_PUB_Y` builds a key that
+    // `EVP_PKEY_fromdata` will accept but `i2d_PUBKEY` cannot serialize —
+    // OpenSSL's EC provider needs the uncompressed point encoding
+    // (`0x04 || X || Y`) supplied as `OSSL_PKEY_PARAM_PUB_KEY` (an octet
+    // string) to produce a fully-formed public key. Assemble the point
+    // and hand it over as a single parameter so downstream `i2d_PUBKEY`
+    // / verify calls have the encoded point they expect.
+    std::vector<uint8_t> uncompressed_point;
+    uncompressed_point.reserve(1 + x_bytes.size() + y_bytes.size());
+    uncompressed_point.push_back(0x04);
+    uncompressed_point.insert(uncompressed_point.end(), x_bytes.begin(),
+                              x_bytes.end());
+    uncompressed_point.insert(uncompressed_point.end(), y_bytes.begin(),
+                              y_bytes.end());
+
     EVP_PKEY* pkey = nullptr;
     OSSL_PARAM_BLD* param_bld = OSSL_PARAM_BLD_new();
     if (!param_bld) {
       throw CryptoError("Failed to create parameter builder");
     }
 
-    BIGNUM* x_bn = BN_bin2bn(x_bytes.data(), x_bytes.size(), nullptr);
-    BIGNUM* y_bn = BN_bin2bn(y_bytes.data(), y_bytes.size(), nullptr);
-
-    if (!x_bn || !y_bn) {
-      OSSL_PARAM_BLD_free(param_bld);
-      if (x_bn) BN_free(x_bn);
-      if (y_bn) BN_free(y_bn);
-      throw CryptoError("Failed to create BIGNUM from coordinates");
-    }
-
     OSSL_PARAM_BLD_push_utf8_string(param_bld, OSSL_PKEY_PARAM_GROUP_NAME,
                                     "prime256v1", 0);
-    OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_EC_PUB_X, x_bn);
-    OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_EC_PUB_Y, y_bn);
+    OSSL_PARAM_BLD_push_octet_string(param_bld, OSSL_PKEY_PARAM_PUB_KEY,
+                                     uncompressed_point.data(),
+                                     uncompressed_point.size());
 
     OSSL_PARAM* params = OSSL_PARAM_BLD_to_param(param_bld);
     EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(nullptr, "EC", nullptr);
 
     bool success =
-        ctx && EVP_PKEY_fromdata_init(ctx) > 0 &&
+        ctx && params && EVP_PKEY_fromdata_init(ctx) > 0 &&
         EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) > 0;
 
     OSSL_PARAM_BLD_free(param_bld);
-    OSSL_PARAM_free(params);
+    if (params) OSSL_PARAM_free(params);
     if (ctx) EVP_PKEY_CTX_free(ctx);
-    BN_free(x_bn);
-    BN_free(y_bn);
 
     if (!success) {
       if (pkey) EVP_PKEY_free(pkey);
@@ -1068,9 +1072,20 @@ bool DpopProofValidator::validate_proof(
       signature_ok = proof.verify_signature(*cwt_verifier_);
     }
   } else {
-    // DpopProof::verify_signature() constructs the verifier from the
-    // embedded JWK for JWT proofs; it returns false on any failure.
+#ifdef CATAPULT_ENABLE_JSON
+    // JWT proofs carry their verifying key inline as a JWK. Route the
+    // import through the bounded parsed-key cache: a repeat client
+    // (same JWK across many proofs) then pays the JWK-import cost only
+    // once, while a rotation-heavy peer is capped at
+    // `settings_.get_parsed_key_cache_max_size()` retained entries.
+    auto algorithm = get_or_import_jwk_algorithm(proof.get_header().alg,
+                                                 proof.get_header().jwk);
+    if (algorithm) {
+      signature_ok = proof.verify_signature(*algorithm);
+    }
+#else
     signature_ok = proof.verify_signature();
+#endif
   }
   if (!signature_ok) {
     CAT_LOG_ERROR(
@@ -1154,6 +1169,101 @@ void DpopProofValidator::cleanup_expired_jtis() {
   replay_store_->purgeExpired(std::chrono::system_clock::now(),
                               settings_.get_effective_window());
 }
+
+#ifdef CATAPULT_ENABLE_JSON
+std::shared_ptr<CryptographicAlgorithm>
+DpopProofValidator::get_or_import_jwk_algorithm(const std::string& alg_name,
+                                                const std::string& jwk_json) {
+  // Cache size 0 → bypass entirely and import on every call. This is the
+  // pre-cache behaviour and remains useful for tests that want to
+  // exercise the raw parse path without cache interference.
+  const size_t cap = settings_.get_parsed_key_cache_max_size();
+  if (cap == 0) {
+    try {
+      auto owned = createAlgorithmFromJWK(alg_name, jwk_json);
+      return std::shared_ptr<CryptographicAlgorithm>(std::move(owned));
+    } catch (const std::exception&) {
+      return nullptr;
+    }
+  }
+
+  // Identify the key by its RFC 7638 JWK thumbprint. Reusing the same
+  // thumbprint function that binds the proof to `cnf` (see
+  // `validate_proof` below) keeps the cache identity aligned with the
+  // wire identity — a proof that would fail the `cnf` check cannot
+  // accidentally hit an entry keyed under a different-shaped canonical
+  // form.
+  std::string thumbprint;
+  try {
+    thumbprint = jwk::calculateJWKThumbprint(jwk_json);
+  } catch (const std::exception&) {
+    // Malformed JWK — no stable identity to cache under. Fall through
+    // to the direct-import path so the caller's verify_signature() sees
+    // the same failure it would have seen without a cache.
+    try {
+      auto owned = createAlgorithmFromJWK(alg_name, jwk_json);
+      return std::shared_ptr<CryptographicAlgorithm>(std::move(owned));
+    } catch (const std::exception&) {
+      return nullptr;
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(parsed_key_cache_mu_);
+    auto it = parsed_key_index_.find(thumbprint);
+    if (it != parsed_key_index_.end()) {
+      // LRU touch: move the found entry to the front of the list. The
+      // index still refers to the same list node so no reindex needed.
+      parsed_key_lru_.splice(parsed_key_lru_.begin(), parsed_key_lru_,
+                             it->second);
+      return it->second->algorithm;
+    }
+  }
+
+  // Miss: parse outside the lock so a slow import (BIGNUM, EVP_PKEY,
+  // DER round-trip) does not stall other lookups.
+  std::shared_ptr<CryptographicAlgorithm> parsed;
+  try {
+    auto owned = createAlgorithmFromJWK(alg_name, jwk_json);
+    parsed = std::shared_ptr<CryptographicAlgorithm>(std::move(owned));
+  } catch (const std::exception&) {
+    return nullptr;
+  }
+
+  std::lock_guard<std::mutex> lock(parsed_key_cache_mu_);
+  // A concurrent import may have populated the slot while we were
+  // parsing. If so, prefer the already-cached instance so callers
+  // sharing this validator observe the same object identity.
+  auto it = parsed_key_index_.find(thumbprint);
+  if (it != parsed_key_index_.end()) {
+    parsed_key_lru_.splice(parsed_key_lru_.begin(), parsed_key_lru_,
+                           it->second);
+    return it->second->algorithm;
+  }
+
+  // Evict the least-recently-used entry before inserting a new one.
+  // Bounding is what makes this cache safe against a peer that rotates
+  // JWKs indefinitely.
+  while (parsed_key_lru_.size() >= cap) {
+    if (parsed_key_lru_.empty()) break;
+    const auto& victim = parsed_key_lru_.back();
+    parsed_key_index_.erase(victim.thumbprint);
+    parsed_key_lru_.pop_back();
+  }
+
+  parsed_key_lru_.push_front(ParsedKeyEntry{thumbprint, parsed});
+  parsed_key_index_.emplace(thumbprint, parsed_key_lru_.begin());
+  return parsed;
+}
+#else
+std::shared_ptr<CryptographicAlgorithm>
+DpopProofValidator::get_or_import_jwk_algorithm(const std::string&,
+                                                const std::string&) {
+  // Without JSON support there is no JWK to parse; JWT DPoP is
+  // unsupported in this build and the caller path is unreachable.
+  return nullptr;
+}
+#endif
 
 // DpopKeyPair implementation
 
