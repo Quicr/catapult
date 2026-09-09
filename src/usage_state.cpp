@@ -60,6 +60,7 @@ UsageAdmitResult InMemoryUsageState::admit(
   if (total() >= max_entries_) {
     purgeExpiredLocked(now);
     if (total() >= max_entries_) {
+      ++exhaustion_events_;
       return UsageAdmitResult::StoreExhausted;
     }
   }
@@ -94,6 +95,11 @@ std::size_t InMemoryUsageState::size() const {
   return admitted_.size() + revoked_.size();
 }
 
+std::size_t InMemoryUsageState::exhaustion_events() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return exhaustion_events_;
+}
+
 void InMemoryUsageState::purgeExpiredLocked(
     std::chrono::system_clock::time_point now) {
   for (auto it = admitted_.begin(); it != admitted_.end();) {
@@ -119,6 +125,7 @@ RevokeResult InMemoryUsageState::insertRevokedLocked(const std::string& key) {
   // which is a more dangerous failure than surfacing exhaustion. Callers
   // are documented to treat StoreExhausted as a hard failure.
   if (admitted_.size() + revoked_.size() >= max_entries_) {
+    ++exhaustion_events_;
     return RevokeResult::StoreExhausted;
   }
 

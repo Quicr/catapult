@@ -33,6 +33,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -157,6 +158,37 @@ class UsageStateHook {
    * @brief Best-effort snapshot of live entry count (admitted + revoked).
    */
   virtual std::size_t size() const = 0;
+
+  /**
+   * @brief Report the store's hard capacity ceiling.
+   *
+   * Returns `std::numeric_limits<std::size_t>::max()` for backends that
+   * do not enforce a fixed cap (e.g. a Redis adapter whose limit is set
+   * externally). Callers use `size() / capacity()` as a fill-percentage
+   * gauge — alert at 80% so operators can grow the backend before
+   * `StoreExhausted` fires under load.
+   *
+   * Default implementation returns "unbounded" so existing hook
+   * implementations do not have to opt in; the shipped in-memory store
+   * overrides it with its true cap.
+   */
+  virtual std::size_t capacity() const {
+    return (std::numeric_limits<std::size_t>::max)();
+  }
+
+  /**
+   * @brief Best-effort count of `StoreExhausted` outcomes observed on
+   *        this instance.
+   *
+   * Increments on every `admit()` that returned `StoreExhausted` and on
+   * every `revoke()` that returned `StoreExhausted`. Exposed so operators
+   * can chart the rate of hard-incident events instead of only relying on
+   * log tailing. Reset semantics are implementation-defined; the shipped
+   * in-memory store makes the counter monotonic.
+   *
+   * Default is 0 for backends that don't yet track this.
+   */
+  virtual std::size_t exhaustion_events() const { return 0; }
 };
 
 /**
@@ -207,6 +239,10 @@ class InMemoryUsageState final : public UsageStateHook {
 
   std::size_t size() const override;
 
+  std::size_t capacity() const override { return max_entries_; }
+
+  std::size_t exhaustion_events() const override;
+
  private:
   struct Entry {
     // Absolute expiry; nullopt means "never forget" (RevokeOnReplay or
@@ -218,6 +254,7 @@ class InMemoryUsageState final : public UsageStateHook {
   std::unordered_map<std::string, Entry> admitted_;
   std::unordered_set<std::string> revoked_;
   std::size_t admits_since_cleanup_{0};
+  std::size_t exhaustion_events_{0};
   const std::size_t max_entries_;
   const std::size_t cleanup_interval_;
 

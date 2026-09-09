@@ -5,8 +5,12 @@
 
 #include <doctest/doctest.h>
 
+#include <atomic>
 #include <chrono>
 #include <optional>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include "catapult/claims.hpp"
 #include "catapult/usage_state.hpp"
@@ -222,6 +226,141 @@ TEST_SUITE("InMemoryUsageState") {
           UsageAdmitResult::Revoked);
     CHECK(store.admit("b", CatReplayMode::RejectOnReplay, now, now + 1h) ==
           UsageAdmitResult::Revoked);
+  }
+
+  TEST_CASE("Concurrent admit of the same cti admits exactly once") {
+    // Contract: `admit()` must atomically check-and-record. If N threads
+    // race against the same cti, exactly one MUST see Admitted; the rest
+    // MUST see Replay (or Revoked, for RevokeOnReplay). A non-atomic
+    // implementation would let two threads pass the "not seen" check
+    // before either recorded a sighting, and both would be admitted —
+    // silently disabling replay protection under load.
+    InMemoryUsageState store{10'000, 1'000};
+    auto now = Clock::now();
+    const int threads = 16;
+    const std::string cti = "shared-cti";
+    std::atomic<int> admitted_count{0};
+    std::atomic<int> replay_count{0};
+    std::vector<std::thread> workers;
+    workers.reserve(threads);
+    for (int i = 0; i < threads; ++i) {
+      workers.emplace_back([&]() {
+        auto res = store.admit(cti, CatReplayMode::RejectOnReplay, now,
+                                now + 1h);
+        if (res == UsageAdmitResult::Admitted) admitted_count.fetch_add(1);
+        else if (res == UsageAdmitResult::Replay) replay_count.fetch_add(1);
+      });
+    }
+    for (auto& t : workers) t.join();
+    CHECK(admitted_count.load() == 1);
+    CHECK(replay_count.load() == threads - 1);
+  }
+
+  TEST_CASE("Concurrent admit of distinct ctis admits every one") {
+    // Distinct ctis are independent — the store's mutex serialises admits
+    // but must not stop them from succeeding. Under contention every
+    // thread on a unique cti must land as Admitted.
+    InMemoryUsageState store{10'000, 1'000};
+    auto now = Clock::now();
+    const int threads = 32;
+    std::atomic<int> admitted_count{0};
+    std::vector<std::thread> workers;
+    workers.reserve(threads);
+    for (int i = 0; i < threads; ++i) {
+      workers.emplace_back([&, i]() {
+        std::string cti = "cti-" + std::to_string(i);
+        if (store.admit(cti, CatReplayMode::RejectOnReplay, now, now + 1h) ==
+            UsageAdmitResult::Admitted) {
+          admitted_count.fetch_add(1);
+        }
+      });
+    }
+    for (auto& t : workers) t.join();
+    CHECK(admitted_count.load() == threads);
+    CHECK(store.size() == static_cast<std::size_t>(threads));
+  }
+
+  TEST_CASE("Concurrent revoke() vs. admit() never admits the revoked cti") {
+    // An operator revocation race must not lose to a live admission on
+    // the same cti. Either the admit happens before revoke (Admitted;
+    // subsequent admits see Revoked) or revoke happens first (all
+    // admits see Revoked). Under no schedule may a thread that started
+    // its admit after revoke returned Accepted see Admitted.
+    for (int trial = 0; trial < 20; ++trial) {
+      InMemoryUsageState store;
+      auto now = Clock::now();
+      const std::string cti = "target";
+      std::atomic<bool> revoked_done{false};
+      std::vector<std::thread> workers;
+      std::atomic<int> post_revoke_admissions{0};
+      // Thread A: revoke.
+      workers.emplace_back([&]() {
+        (void)store.revoke(cti);
+        revoked_done.store(true);
+      });
+      // Threads B..: retry admit until they see either Admitted or
+      // Revoked. If any admit lands after revoked_done is observed true
+      // but sees Admitted, the store violated its contract.
+      for (int i = 0; i < 8; ++i) {
+        workers.emplace_back([&]() {
+          auto res = store.admit(cti, CatReplayMode::RejectOnReplay, now,
+                                  now + 1h);
+          if (revoked_done.load() && res == UsageAdmitResult::Admitted) {
+            post_revoke_admissions.fetch_add(1);
+          }
+        });
+      }
+      for (auto& t : workers) t.join();
+      CHECK(post_revoke_admissions.load() == 0);
+      // The final state must have the cti visible as Revoked to any
+      // subsequent admit.
+      CHECK(store.admit(cti, CatReplayMode::RejectOnReplay, now, now + 1h) ==
+            UsageAdmitResult::Revoked);
+    }
+  }
+
+  TEST_CASE("capacity() reflects the constructor's max_entries") {
+    // Operators chart size() / capacity() to alert before StoreExhausted
+    // fires. The value must match the cap the store actually enforces —
+    // not a rounded or dynamically-adjusted one — so dashboards do not
+    // mislead.
+    InMemoryUsageState store{4096, 100};
+    CHECK(store.capacity() == 4096u);
+    // Zero is coerced to 1 in the constructor; capacity() must report the
+    // effective cap, not the raw argument.
+    InMemoryUsageState clamped{0, 100};
+    CHECK(clamped.capacity() == 1u);
+  }
+
+  TEST_CASE("exhaustion_events() counts StoreExhausted from admit and revoke") {
+    // Operators need a monotonic counter for hard-incident alerting: every
+    // admit() that returned StoreExhausted and every revoke() that returned
+    // StoreExhausted MUST increment the counter. A silent counter would
+    // mean pages fire from log tailing alone — brittle at scale.
+    InMemoryUsageState store{2, 100};
+    auto now = Clock::now();
+    CHECK(store.exhaustion_events() == 0u);
+    REQUIRE(store.admit("a", CatReplayMode::RejectOnReplay, now,
+                        now + 1h) == UsageAdmitResult::Admitted);
+    REQUIRE(store.admit("b", CatReplayMode::RejectOnReplay, now,
+                        now + 1h) == UsageAdmitResult::Admitted);
+    CHECK(store.exhaustion_events() == 0u);
+
+    // admit() at cap — first exhaustion event.
+    REQUIRE(store.admit("c", CatReplayMode::RejectOnReplay, now, now + 1h) ==
+            UsageAdmitResult::StoreExhausted);
+    CHECK(store.exhaustion_events() == 1u);
+
+    // A second admit() at cap increments again — the counter is monotonic
+    // and not deduplicated per cti.
+    REQUIRE(store.admit("d", CatReplayMode::RejectOnReplay, now, now + 1h) ==
+            UsageAdmitResult::StoreExhausted);
+    CHECK(store.exhaustion_events() == 2u);
+
+    // revoke() that lands StoreExhausted also increments — same class of
+    // incident, same counter.
+    REQUIRE(store.revoke("new-revoke") == RevokeResult::StoreExhausted);
+    CHECK(store.exhaustion_events() == 3u);
   }
 
   TEST_CASE("RevokeOnReplay promotion respects the combined cap") {

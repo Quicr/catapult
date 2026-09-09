@@ -400,6 +400,18 @@ void CatTokenValidator::validateUsageLimits(const CatToken& token) const {
       // store could not record would mean the next presentation would
       // also be admitted, silently disabling replay protection under
       // load. Matches the ReplayStore contract for DPoP jti tracking.
+      //
+      // Exhaustion is a hard incident, not a routine replay — log at
+      // ERROR so operators can distinguish it from ordinary replay
+      // rejections and page on it. A ReplayAttackError still propagates
+      // because from the caller's point of view the token is rejected;
+      // the ERROR log is the observability signal that says "your
+      // capacity is inadequate for the workload".
+      CAT_LOG_ERROR(
+          "UsageStateHook::admit returned StoreExhausted for a well-formed "
+          "catreplay token — replay protection is failing closed under load. "
+          "This is a hard incident: provision a larger backend, plug in a "
+          "distributed store, or reduce token issuance rate.");
       throw ReplayAttackError();
   }
   // Exhaustive switch above; keep the compiler happy on -Werror builds.
