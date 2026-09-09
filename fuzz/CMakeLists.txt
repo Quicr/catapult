@@ -26,8 +26,16 @@ add_custom_target(catapult_fuzz_all)
 foreach(fuzz_target ${CATAPULT_FUZZ_TARGETS})
     add_executable(${fuzz_target} ${fuzz_target}.cpp)
     target_link_libraries(${fuzz_target} PRIVATE catapult)
+    # libcbor headers are pulled in transitively by
+    # `catapult/internal/strict_cbor.hpp` and are marked PRIVATE on the
+    # catapult target so they do not leak into the installed include set.
+    # Fuzz harnesses do include those internal headers directly, so re-add
+    # the vendored libcbor include directories here — using the same
+    # generator expression the library build uses.
     target_include_directories(${fuzz_target}
-        PRIVATE ${CMAKE_SOURCE_DIR}/include
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/include
+            $<BUILD_INTERFACE:$<TARGET_PROPERTY:cbor,INCLUDE_DIRECTORIES>>
     )
     target_compile_options(${fuzz_target} PRIVATE ${CATAPULT_FUZZ_FLAGS})
     target_link_options(${fuzz_target} PRIVATE ${CATAPULT_FUZZ_FLAGS})

@@ -46,10 +46,11 @@ else
     ctest ${CTEST_ARGS} --timeout "${TEST_TIMEOUT}"
 fi
 
-# Run memory tests if enabled
+# Run memory tests if enabled. The unit-test binary is `catapult_tests`;
+# the historical names `cat_tests`/`integration_tests` no longer exist.
 if [[ "${ENABLE_MEMORY_TESTS}" == "true" ]] && command -v valgrind >/dev/null 2>&1; then
     echo "Running memory tests with Valgrind..."
-    for test_binary in cat_tests integration_tests; do
+    for test_binary in catapult_tests; do
         if [[ -f "${test_binary}" ]]; then
             echo "Memory testing ${test_binary}..."
             if [[ "${GENERATE_REPORT}" == "true" ]]; then
@@ -59,16 +60,19 @@ if [[ "${ENABLE_MEMORY_TESTS}" == "true" ]] && command -v valgrind >/dev/null 2>
             else
                 valgrind --tool=memcheck --leak-check=full "./${test_binary}" || echo "Memory test failed for ${test_binary}"
             fi
+        else
+            echo "Warning: expected test binary ${test_binary} not found in ${BUILD_DIR}"
         fi
     done
 elif [[ "${ENABLE_MEMORY_TESTS}" == "true" ]]; then
     echo "Warning: Valgrind not available, skipping memory tests"
 fi
 
-# Run performance tests if enabled
+# Run performance tests if enabled. `composite_claims_bench` was folded into
+# catapult_benchmarks; `catapult_perf_tests` is the standalone perf suite.
 if [[ "${ENABLE_PERFORMANCE_TESTS}" == "true" ]]; then
     echo "Running performance tests..."
-    for bench_binary in catapult_benchmarks composite_claims_bench; do
+    for bench_binary in catapult_benchmarks catapult_perf_tests; do
         if [[ -f "${bench_binary}" ]]; then
             echo "Running ${bench_binary}..."
             if [[ "${GENERATE_REPORT}" == "true" ]]; then

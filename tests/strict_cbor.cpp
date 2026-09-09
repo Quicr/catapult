@@ -128,6 +128,36 @@ TEST_CASE("strict CBOR allows nesting within depth limit") {
   CHECK(cbor_typeof(item.get()) == CBOR_TYPE_ARRAY);
 }
 
+TEST_CASE("strict CBOR pre-scan rejects oversized array header") {
+  // 0x9a followed by a 4-byte length ~2^30 with no payload. libcbor
+  // pre-allocates array storage from this header; without the pre-scan
+  // this input would attempt a multi-GB allocation.
+  auto bytes = asBytes({0x9a, 0x40, 0x00, 0x00, 0x00});
+  CHECK_THROWS_AS(loadStrict(std::span<const uint8_t>(bytes)),
+                  InvalidCborError);
+}
+
+TEST_CASE("strict CBOR pre-scan rejects oversized map header") {
+  // 0xba (map, 4-byte length) with count 2^20 but only 5 bytes of input.
+  auto bytes = asBytes({0xba, 0x00, 0x10, 0x00, 0x00});
+  CHECK_THROWS_AS(loadStrict(std::span<const uint8_t>(bytes)),
+                  InvalidCborError);
+}
+
+TEST_CASE("strict CBOR pre-scan rejects oversized bytestring header") {
+  // 0x5a (bytestring, 4-byte length) claiming ~1 GiB with 0 payload bytes.
+  auto bytes = asBytes({0x5a, 0x40, 0x00, 0x00, 0x00});
+  CHECK_THROWS_AS(loadStrict(std::span<const uint8_t>(bytes)),
+                  InvalidCborError);
+}
+
+TEST_CASE("strict CBOR pre-scan rejects truncated head length") {
+  // 0x1a (uint32) with only 2 length bytes present.
+  auto bytes = asBytes({0x1a, 0x01, 0x02});
+  CHECK_THROWS_AS(loadStrict(std::span<const uint8_t>(bytes)),
+                  InvalidCborError);
+}
+
 TEST_CASE("strict CBOR rejects payloads exceeding size cap") {
   // Craft a "definite bytestring" header claiming a huge length so we do
   // not have to allocate a huge buffer; the length check should trip

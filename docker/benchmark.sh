@@ -31,9 +31,10 @@ if [[ "${GENERATE_REPORT}" == "true" ]]; then
     mkdir -p "${BENCHMARK_REPORTS_DIR}"
 fi
 
-# Run main benchmark suite
+# Run main benchmark suite. `composite_claims_bench` was folded into
+# `catapult_benchmarks`; the standalone perf-tests binary is separate.
 echo "Running main benchmark suite..."
-for benchmark_binary in catapult_benchmarks composite_claims_bench; do
+for benchmark_binary in catapult_benchmarks catapult_perf_tests; do
     if [[ -f "${benchmark_binary}" ]]; then
         echo "Running ${benchmark_binary}..."
         
@@ -66,15 +67,5 @@ for benchmark_binary in catapult_benchmarks composite_claims_bench; do
         echo "Warning: ${benchmark_binary} not found, skipping..."
     fi
 done
-
-# Run custom benchmarks if available
-if [[ -f "test_cbor_dpop" ]]; then
-    echo "Running CBOR DPoP benchmark..."
-    if [[ "${GENERATE_REPORT}" == "true" ]]; then
-        timeout "${BENCHMARK_TIMEOUT}" "./test_cbor_dpop" > "${BENCHMARK_REPORTS_DIR}/cbor-dpop-results.txt" || echo "CBOR DPoP benchmark failed"
-    else
-        timeout "${BENCHMARK_TIMEOUT}" "./test_cbor_dpop" || echo "CBOR DPoP benchmark failed"
-    fi
-fi
 
 echo "=== Benchmark execution completed ==="

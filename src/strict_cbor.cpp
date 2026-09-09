@@ -285,6 +285,189 @@ StrictCoseEnvelope loadStrictCoseEnvelope(
   return env;
 }
 
+namespace {
+
+// Wire-level pre-scan: walk each CBOR head and reject declared lengths that
+// exceed what the remaining input can possibly hold.
+//
+// libcbor's `cbor_load` pre-allocates the storage for every array/map/string
+// based on the length field parsed from the head byte(s), *before* the
+// element/byte payload is consumed. A crafted 42-byte input carrying a head
+// like `9a XX XX XX XX` (major type 4, 4-byte length prefix ~4 billion) will
+// therefore cause a multi-GB allocation attempt that OOMs the process even
+// though the wire encoding is nowhere near that size.
+//
+// The pre-scan below reads the CBOR wire encoding token by token (without
+// allocating) and enforces:
+//   - declared bytestring/string length must fit within remaining input,
+//   - declared array/map length (number of items) must fit within remaining
+//     input, using 1 byte as the theoretical minimum encoded size of an
+//     element (map counts twice for key+value pairs),
+//   - nesting depth is bounded before recursion is entered,
+//   - indefinite-length forms are rejected up front (loadStrict already
+//     rejects them post-parse, but doing it here lets us skip the eager
+//     libcbor allocation entirely for such inputs).
+//
+// This is a fail-closed pre-check. Everything strictly checked post-parse
+// (canonical integer form, duplicate keys, canonical map order, disallowed
+// tags, NaN/negative-zero, etc.) still runs in `walk()` on the DOM.
+struct PreScanCursor {
+  const uint8_t* p;
+  const uint8_t* end;
+  std::size_t depth_limit;
+  std::size_t max_bytes;
+};
+
+// Read a big-endian unsigned integer of `n` bytes from the cursor. Advances
+// the cursor by `n`. Caller must have already checked `n` bytes are available.
+uint64_t readBe(PreScanCursor& c, std::size_t n) {
+  uint64_t v = 0;
+  for (std::size_t i = 0; i < n; ++i) {
+    v = (v << 8) | c.p[i];
+  }
+  c.p += n;
+  return v;
+}
+
+void preScanOne(PreScanCursor& c, std::size_t depth) {
+  if (depth > c.depth_limit) {
+    throw InvalidCborError("CBOR nesting depth exceeds strict limit");
+  }
+  if (c.p >= c.end) {
+    throw InvalidCborError("Truncated CBOR head");
+  }
+  const uint8_t initial = *c.p++;
+  const uint8_t mt = (initial >> 5) & 0x07;
+  const uint8_t ai = initial & 0x1F;
+
+  auto readLen = [&](uint64_t& out) {
+    if (ai <= 23) {
+      out = ai;
+      return;
+    }
+    std::size_t n = 0;
+    switch (ai) {
+      case 24:
+        n = 1;
+        break;
+      case 25:
+        n = 2;
+        break;
+      case 26:
+        n = 4;
+        break;
+      case 27:
+        n = 8;
+        break;
+      case 31:
+        // Indefinite length — rejected by strict; the walk pass will fire
+        // its own error message if a caller ever gets past pre-scan.
+        throw InvalidCborError("Indefinite-length CBOR item is not canonical");
+      default:
+        throw InvalidCborError("Reserved additional-info in CBOR head");
+    }
+    if (static_cast<std::size_t>(c.end - c.p) < n) {
+      throw InvalidCborError("Truncated CBOR length field");
+    }
+    out = readBe(c, n);
+  };
+
+  switch (mt) {
+    case 0:  // unsigned int
+    case 1:  // negative int
+    {
+      uint64_t v;
+      readLen(v);
+      return;
+    }
+    case 2:  // byte string
+    case 3:  // text string
+    {
+      uint64_t len;
+      readLen(len);
+      // Declared byte length must fit within remaining input.
+      if (len > c.max_bytes ||
+          len > static_cast<uint64_t>(c.end - c.p)) {
+        throw InvalidCborError(
+            "CBOR bytestring/textstring length exceeds remaining input");
+      }
+      c.p += static_cast<std::size_t>(len);
+      return;
+    }
+    case 4:  // array
+    case 5:  // map
+    {
+      uint64_t count;
+      readLen(count);
+      const std::size_t items = (mt == 5) ? 2 : 1;  // map pairs count twice
+      // Each nested item is at least 1 byte on the wire (a smallest int is
+      // one head byte). Reject counts that cannot possibly fit.
+      const std::size_t remaining =
+          static_cast<std::size_t>(c.end - c.p);
+      if (count > c.max_bytes ||
+          count * items > remaining) {
+        throw InvalidCborError(
+            "CBOR array/map declared count exceeds remaining input");
+      }
+      const std::size_t total_items =
+          static_cast<std::size_t>(count) * items;
+      for (std::size_t i = 0; i < total_items; ++i) {
+        preScanOne(c, depth + 1);
+      }
+      return;
+    }
+    case 6:  // tag
+    {
+      uint64_t tag;
+      readLen(tag);
+      preScanOne(c, depth + 1);
+      return;
+    }
+    case 7:  // float / simple
+    {
+      // additional info 20/21/22/23: simple values, no payload.
+      if (ai <= 23) return;
+      std::size_t n = 0;
+      switch (ai) {
+        case 24:
+          n = 1;
+          break;
+        case 25:
+          n = 2;
+          break;
+        case 26:
+          n = 4;
+          break;
+        case 27:
+          n = 8;
+          break;
+        case 31:
+          throw InvalidCborError(
+              "Indefinite-length break outside container");
+        default:
+          throw InvalidCborError("Reserved additional-info in CBOR head");
+      }
+      if (static_cast<std::size_t>(c.end - c.p) < n) {
+        throw InvalidCborError("Truncated CBOR float/simple payload");
+      }
+      c.p += n;
+      return;
+    }
+  }
+}
+
+void preScanStrict(std::span<const uint8_t> data,
+                   const StrictCborOptions& opts) {
+  PreScanCursor c{data.data(), data.data() + data.size(), opts.max_depth,
+                  opts.max_bytes};
+  preScanOne(c, 0);
+  if (c.p != c.end) {
+    throw InvalidCborError("Trailing bytes after CBOR root item");
+  }
+}
+
+}  // namespace
+
 CborItemPtr loadStrict(std::span<const uint8_t> data,
                        const StrictCborOptions& opts) {
   if (data.empty()) {
@@ -293,6 +476,13 @@ CborItemPtr loadStrict(std::span<const uint8_t> data,
   if (data.size() > opts.max_bytes) {
     throw InvalidCborError("CBOR input exceeds strict size limit");
   }
+
+  // Pre-scan the wire encoding before handing bytes to libcbor. libcbor
+  // allocates array/map/string storage from the wire-declared length
+  // header before verifying enough payload bytes remain, so a small
+  // crafted input can trigger a multi-GB allocation. The pre-scan
+  // rejects such inputs before any allocation happens.
+  preScanStrict(data, opts);
 
   struct cbor_load_result result{};
   auto item = cbor_load_owned(data.data(), data.size(), result);

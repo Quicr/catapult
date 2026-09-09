@@ -542,11 +542,30 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 
     # libFuzzer harnesses. Gated on Clang since -fsanitize=fuzzer is a
     # Clang/LLVM feature; other toolchains would silently link a stub.
+    #
+    # Apple's system clang (Xcode / AppleClang) does not ship the libFuzzer
+    # runtime (libclang_rt.fuzzer_osx.a). Detect that up front and emit an
+    # actionable error pointing the user at a Homebrew LLVM toolchain, whose
+    # compiler-rt package does include the fuzzer runtime. Homebrew LLVM
+    # reports CMAKE_CXX_COMPILER_ID = "Clang" (not "AppleClang"), so this
+    # check only fires on the system compiler.
     if(CATAPULT_ENABLE_FUZZERS)
         if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
             message(FATAL_ERROR
                 "CATAPULT_ENABLE_FUZZERS requires Clang "
                 "(current: ${CMAKE_CXX_COMPILER_ID}).")
+        endif()
+        if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+            message(FATAL_ERROR
+                "CATAPULT_ENABLE_FUZZERS on macOS requires Homebrew LLVM.\n"
+                "Apple's system clang does not ship the libFuzzer runtime "
+                "(libclang_rt.fuzzer_osx.a). Install LLVM via Homebrew and "
+                "point CMake at it, e.g.:\n"
+                "  brew install llvm\n"
+                "  cmake -S . -B build-fuzz \\\n"
+                "    -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm/bin/clang \\\n"
+                "    -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ \\\n"
+                "    -DCATAPULT_ENABLE_FUZZERS=ON")
         endif()
         add_subdirectory(fuzz)
     endif()
