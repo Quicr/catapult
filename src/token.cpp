@@ -182,6 +182,7 @@ void CatTokenValidator::validate(const CatToken& token,
   validateCompositeClaims(token);
   validateAuthorizationPolicy(token, context);
   validateMoqtRevalidation(token, now);
+  validateMoqtScopes(token, context);
 }
 
 // CAT-4-MOQT (draft-ietf-moq-c4m-01): if `moqt-reval` is present the
@@ -507,6 +508,43 @@ void CatTokenValidator::validateAuthorizationPolicy(
       !authz_policy_->acceptGeoAltitude(*token.cat.catgeoalt, context)) {
     throw GeographicValidationError(
         "catgeoalt rejected by authorization policy");
+  }
+}
+
+// CAT-4-MOQT (draft-ietf-moq-c4m-01): a token that carries `moqt` scopes
+// declares which (action, namespace, track) tuples the bearer is
+// authorized for. When the caller supplies the request tuple through
+// `PolicyContext` we enforce that at least one scope authorises it.
+//
+// If the token has scopes but the caller supplied only part of the
+// tuple, the check is skipped — the caller has opted out of MOQT-level
+// enforcement for that call. A relay that wants "you MUST hand me the
+// tuple" behaviour uses `withRequiredContextFields()` to force
+// population before the check runs.
+//
+// If the token has scopes and the caller supplied all three fields, at
+// least one scope must return true from `isAuthorized`; otherwise the
+// bearer is out of scope for this request and the validator rejects.
+void CatTokenValidator::validateMoqtScopes(
+    const CatToken& token, const PolicyContext& context) const {
+  if (!token.extended.hasMoqtClaims()) {
+    return;
+  }
+  if (!context.moqt_action.has_value() ||
+      !context.moqt_namespace.has_value() ||
+      !context.moqt_track.has_value()) {
+    return;
+  }
+  const auto* moqt = token.extended.getMoqtClaimsReadOnly();
+  if (moqt == nullptr) {
+    return;
+  }
+  const bool authorized = moqt->isAuthorized(*context.moqt_action,
+                                             *context.moqt_namespace,
+                                             *context.moqt_track);
+  if (!authorized) {
+    throw InvalidClaimValueError(
+        "MOQT scopes do not authorize the requested action/namespace/track");
   }
 }
 

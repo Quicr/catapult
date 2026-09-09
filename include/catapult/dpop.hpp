@@ -23,6 +23,7 @@
 #include <string>
 #include <string_view>
 
+#include "claims.hpp"
 #include "crypto.hpp"
 #include "error.hpp"
 #include "moqt_claims.hpp"
@@ -311,6 +312,43 @@ struct DpopValidationSettings {
    */
   [[nodiscard]] size_t get_max_jti_entries() const noexcept {
     return max_jti_entries.value_or(1000000);
+  }
+
+  /**
+   * @brief Overlay an on-wire `CatDpopSettings` binding onto this
+   *        validator config.
+   *
+   * The token's `catdpop` claim declares the *policy the issuer wants
+   * enforced* — an acceptance-window ceiling and whether replay tracking
+   * on `jti` is mandatory. The relay side owns the *validator-side
+   * knobs* — JTI cache sizing, cleanup interval, critical-setting
+   * requirements. Only the fields present on the wire form are copied,
+   * so a relay can start from a hardened baseline (this instance) and
+   * tighten it per-token from the on-wire binding.
+   *
+   * The window is tightened: if the token requests a shorter window than
+   * the current setting, the token wins. If the token requests a longer
+   * window than the current setting the current (relay-set) window is
+   * preserved — the relay's ceiling is not weakened by a permissive
+   * token. Similarly, `honor_jti=true` from the token overrides a
+   * validator that had it off, but a token setting `honor_jti=false`
+   * does NOT relax a validator that had it on.
+   *
+   * This is the intended binding point between token state and DPoP
+   * validation behaviour (audit R-16). Callers who want the exact
+   * on-wire values without a floor should overwrite fields directly.
+   */
+  void overlayCatDpopSettings(const CatDpopSettings& wire) noexcept {
+    if (wire.window_seconds.has_value() && *wire.window_seconds > 0) {
+      const std::chrono::seconds requested{*wire.window_seconds};
+      if (!window.has_value() || requested < *window) {
+        window = requested;
+      }
+    }
+    if (wire.honor_jti.value_or(false)) {
+      // Token demands replay tracking; enable if not already enabled.
+      honor_jti = true;
+    }
   }
 
   /**

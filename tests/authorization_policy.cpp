@@ -464,6 +464,60 @@ TEST_SUITE("AuthorizationPolicyHook — validator wiring") {
     CHECK_FALSE(policy.dpop_seen);
   }
 
+  TEST_CASE("MOQT scopes gate the request when tuple is supplied") {
+    // A token that authorises PUBLISH on namespace "live" must reject a
+    // SUBSCRIBE on "live" — even though the hook has no `catmoqt`
+    // callback, the validator applies the scope check itself when the
+    // caller supplies the full moqt tuple on the request context.
+    auto token = baseToken();
+    std::vector<int> pub{moqt_actions::PUBLISH};
+    MoqtClaims moqt;
+    moqt.addScope(pub, MoqtBinaryMatch::exact("live"), MoqtBinaryMatch::any());
+    token.extended.setMoqtClaims(std::move(moqt));
+
+    CatTokenValidator validator;
+    PolicyContext ctx;
+    ctx.moqt_action = moqt_actions::SUBSCRIBE;
+    std::string ns = "live";
+    std::string track = "audio";
+    ctx.moqt_namespace = ns;
+    ctx.moqt_track = track;
+    CHECK_THROWS_AS(validator.validate(token, ctx), InvalidClaimValueError);
+  }
+
+  TEST_CASE("MOQT scopes admit the request when the tuple is authorised") {
+    auto token = baseToken();
+    std::vector<int> pub{moqt_actions::PUBLISH};
+    MoqtClaims moqt;
+    moqt.addScope(pub, MoqtBinaryMatch::exact("live"), MoqtBinaryMatch::any());
+    token.extended.setMoqtClaims(std::move(moqt));
+
+    CatTokenValidator validator;
+    PolicyContext ctx;
+    ctx.moqt_action = moqt_actions::PUBLISH;
+    std::string ns = "live";
+    std::string track = "audio";
+    ctx.moqt_namespace = ns;
+    ctx.moqt_track = track;
+    CHECK_NOTHROW(validator.validate(token, ctx));
+  }
+
+  TEST_CASE("MOQT scope check is skipped when the tuple is partial") {
+    // Partial context = caller has opted out. If the caller wants "you
+    // MUST hand me the tuple" behaviour they use RequiredPolicyContextFields.
+    auto token = baseToken();
+    std::vector<int> pub{moqt_actions::PUBLISH};
+    MoqtClaims moqt;
+    moqt.addScope(pub, MoqtBinaryMatch::exact("live"), MoqtBinaryMatch::any());
+    token.extended.setMoqtClaims(std::move(moqt));
+
+    CatTokenValidator validator;
+    PolicyContext ctx;
+    ctx.moqt_action = moqt_actions::SUBSCRIBE;  // would fail full check
+    // No namespace/track supplied — check is skipped.
+    CHECK_NOTHROW(validator.validate(token, ctx));
+  }
+
   TEST_CASE("tryValidate surfaces the policy failure via error code") {
     auto token = baseToken();
     token.cat.catgeoiso3166 = std::vector<std::string>{"US"};

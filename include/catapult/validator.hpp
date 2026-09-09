@@ -354,6 +354,14 @@ class CatTokenValidator {
   // consistently across `exp`, `nbf`, and reval checks.
   void validateMoqtRevalidation(const CatToken& token,
                                 int64_t now_epoch_seconds) const;
+
+  // CAT-4-MOQT: enforce that at least one `moqt` scope on the token
+  // authorises the tuple (moqt_action, moqt_namespace, moqt_track)
+  // supplied on the request context. Skips the check when the token has
+  // no scopes or when the context lacks any of the three fields — see
+  // `withRequiredContextFields()` for the way to force population.
+  void validateMoqtScopes(const CatToken& token,
+                          const PolicyContext& context) const;
 };
 
 /**

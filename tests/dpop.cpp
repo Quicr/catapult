@@ -463,3 +463,55 @@ TEST_SUITE("DPoP CWT wire format") {
     CHECK_NOTHROW(DpopProof::deserialize_cwt(tagged_wire));
   }
 }
+
+TEST_SUITE("DpopValidationSettings — CatDpopSettings overlay") {
+  TEST_CASE("Token window shorter than relay ceiling wins") {
+    // Relay baseline caps at 5 min; token demands 30s. The stricter
+    // window (token) must be adopted.
+    DpopValidationSettings settings{std::chrono::seconds{300}};
+    CatDpopSettings wire;
+    wire.window_seconds = 30;
+    settings.overlayCatDpopSettings(wire);
+    CHECK(settings.get_effective_window() == std::chrono::seconds{30});
+  }
+
+  TEST_CASE("Token window longer than relay ceiling does not weaken it") {
+    // The relay's ceiling is a security floor: a permissive token cannot
+    // relax it. Adopting `min(wire, settings)` is deliberate.
+    DpopValidationSettings settings{std::chrono::seconds{30}};
+    CatDpopSettings wire;
+    wire.window_seconds = 3600;
+    settings.overlayCatDpopSettings(wire);
+    CHECK(settings.get_effective_window() == std::chrono::seconds{30});
+  }
+
+  TEST_CASE("Token honor_jti=true enables replay tracking") {
+    DpopValidationSettings settings;
+    settings.honor_jti = false;
+    CatDpopSettings wire;
+    wire.honor_jti = true;
+    settings.overlayCatDpopSettings(wire);
+    CHECK(settings.get_jti_processing());
+  }
+
+  TEST_CASE("Token honor_jti=false does not disable an enabled validator") {
+    // Same asymmetry as the window: only strictening flows from the
+    // wire form. A token cannot say "please skip replay tracking" and
+    // downgrade a validator that has it on.
+    DpopValidationSettings settings;
+    settings.honor_jti = true;
+    CatDpopSettings wire;
+    wire.honor_jti = false;
+    settings.overlayCatDpopSettings(wire);
+    CHECK(settings.get_jti_processing());
+  }
+
+  TEST_CASE("Missing wire fields leave validator settings untouched") {
+    DpopValidationSettings settings{std::chrono::seconds{120}};
+    settings.honor_jti = true;
+    CatDpopSettings wire;  // both fields nullopt
+    settings.overlayCatDpopSettings(wire);
+    CHECK(settings.get_effective_window() == std::chrono::seconds{120});
+    CHECK(settings.get_jti_processing());
+  }
+}
