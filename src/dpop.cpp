@@ -923,6 +923,43 @@ bool DpopProofValidator::validate_proof(
     return false;
   }
 
+  // Algorithm allowlist (RFC 9449 §4.1). Reject non-asymmetric or
+  // otherwise-untrusted `alg` BEFORE dispatching to the signature
+  // verifier so that:
+  //   1. A proof declaring `alg: HS256` (or the sentinel `alg: none`)
+  //      cannot be silently accepted even if a caller wired a matching
+  //      verifier via `set_cwt_verifier` — symmetric algorithms cannot
+  //      demonstrate proof-of-possession.
+  //   2. Attacker-controlled algorithm identifiers never reach the
+  //      key-parsing paths, which limits the attack surface to the
+  //      verified set.
+  // For CWT proofs the identifier lives on the protected header
+  // (`alg_id`); for JWT proofs it is the string `alg`, resolved back to
+  // its COSE identifier here for a single allowlist check that covers
+  // both encodings.
+  int64_t proof_alg_id = 0;
+  if (proof.encoding() == DpopEncoding::CWT) {
+    proof_alg_id = proof.get_header().alg_id;
+  } else {
+    // JWT: only algorithms this build knows how to verify need be
+    // considered — `createAlgorithmFromJWK` currently only handles
+    // ES256, so unknown strings would already fail at verify time. The
+    // string→COSE mapping here is a defence-in-depth layer that will
+    // continue to reject `HS256`/`none` even if that factory grows.
+    const auto& alg_name = proof.get_header().alg;
+    if (alg_name == "ES256") {
+      proof_alg_id = ALG_ES256;
+    }
+    // Anything else stays at 0 and is rejected by the check below.
+  }
+  if (!settings_.is_dpop_algorithm_allowed(proof_alg_id)) {
+    CAT_LOG_WARN(
+        "DPoP proof rejected: alg={} not in the allowlist "
+        "(proof-of-possession requires an asymmetric algorithm)",
+        proof_alg_id);
+    return false;
+  }
+
   // MANDATORY signature verification (CTA-5007-B / CAT-4-MOQT). Fail
   // closed if verification cannot be performed. JWT proofs self-resolve
   // their algorithm from the embedded JWK; CWT proofs require an external

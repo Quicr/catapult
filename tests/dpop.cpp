@@ -515,3 +515,101 @@ TEST_SUITE("DpopValidationSettings — CatDpopSettings overlay") {
     CHECK(settings.get_jti_processing());
   }
 }
+
+TEST_SUITE("DpopValidationSettings — algorithm allowlist") {
+  TEST_CASE("Default allowlist accepts ES256 and only ES256") {
+    // The out-of-box policy MUST be safe: an operator who never touches
+    // set_allowed_dpop_algorithms should still get an asymmetric-only
+    // profile. ES256 is the only algorithm this build's DPoP path knows
+    // how to verify today, so it is also the only one the default lets
+    // through.
+    DpopValidationSettings settings;
+    CHECK(settings.is_dpop_algorithm_allowed(ALG_ES256));
+    // Symmetric algorithm — cannot demonstrate proof-of-possession.
+    CHECK_FALSE(settings.is_dpop_algorithm_allowed(ALG_HMAC256_256));
+    // `alg: none` sentinel and unregistered identifiers.
+    CHECK_FALSE(settings.is_dpop_algorithm_allowed(0));
+    CHECK_FALSE(settings.is_dpop_algorithm_allowed(-99));
+  }
+
+  TEST_CASE("HMAC and `alg: none` stay blocked even when placed in the set") {
+    // Defence-in-depth: an operator who mistakenly whitelists a
+    // symmetric or `none`-equivalent algorithm must still be protected.
+    // is_dpop_algorithm_allowed enforces a hard blocklist ahead of the
+    // configurable allowlist.
+    DpopValidationSettings settings;
+    settings.set_allowed_dpop_algorithms({ALG_ES256, ALG_HMAC256_256, 0});
+    CHECK(settings.is_dpop_algorithm_allowed(ALG_ES256));
+    CHECK_FALSE(settings.is_dpop_algorithm_allowed(ALG_HMAC256_256));
+    CHECK_FALSE(settings.is_dpop_algorithm_allowed(0));
+  }
+
+  TEST_CASE("Custom allowlist narrows the accepted set") {
+    // An operator with a hardware-backed keystore that only speaks a
+    // custom algorithm can restrict the allowlist to that identifier.
+    // ES256 must NOT be silently added back — the caller's policy stands.
+    DpopValidationSettings settings;
+    settings.set_allowed_dpop_algorithms({-8});  // e.g. EdDSA
+    CHECK_FALSE(settings.is_dpop_algorithm_allowed(ALG_ES256));
+    CHECK(settings.is_dpop_algorithm_allowed(-8));
+  }
+
+  TEST_CASE("Empty set restores the built-in default") {
+    // Passing an empty set is the documented way to reset to the built-in
+    // default rather than a way to widen the allowlist to everything.
+    // Confirm that emptying it after previously restricting it brings
+    // ES256 back and continues to reject symmetric algorithms.
+    DpopValidationSettings settings;
+    settings.set_allowed_dpop_algorithms({-8});
+    CHECK_FALSE(settings.is_dpop_algorithm_allowed(ALG_ES256));
+    settings.set_allowed_dpop_algorithms({});
+    CHECK(settings.is_dpop_algorithm_allowed(ALG_ES256));
+    CHECK_FALSE(settings.is_dpop_algorithm_allowed(ALG_HMAC256_256));
+  }
+}
+
+TEST_SUITE("DpopProofValidator — algorithm allowlist enforcement") {
+  TEST_CASE("Well-formed ES256 proof passes the allowlist check") {
+    // Sanity: the default allowlist must not regress the accepting case
+    // from the existing "accepts a well-formed proof" test.
+    auto keys = makeEs256KeyPair();
+    auto expected_uri =
+        moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-alg-ok"});
+
+    DpopValidationSettings settings;
+    settings.set_window(std::chrono::seconds{300});
+    DpopProofValidator validator(settings);
+    validator.set_cwt_verifier(&keys->get_algorithm());
+
+    CHECK(validator.validate_proof(proof, moqt_actions::PUBLISH, expected_uri,
+                                   keys->get_public_key_thumbprint()));
+  }
+
+  TEST_CASE(
+      "Proof whose alg is not in the allowlist is rejected before verify") {
+    // A stricter deployment restricts DPoP to EdDSA. The ES256 proof
+    // must fail closed at the allowlist check — even though the caller
+    // did wire a matching signature verifier, we never dispatch to it.
+    // If enforcement had been done at verify time instead, this test
+    // would happily verify and admit the proof.
+    auto keys = makeEs256KeyPair();
+    auto expected_uri =
+        moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-alg-narrow"});
+
+    DpopValidationSettings settings;
+    settings.set_window(std::chrono::seconds{300});
+    settings.set_allowed_dpop_algorithms({-8});  // EdDSA only
+    DpopProofValidator validator(settings);
+    validator.set_cwt_verifier(&keys->get_algorithm());
+
+    CHECK_FALSE(validator.validate_proof(proof, moqt_actions::PUBLISH,
+                                         expected_uri,
+                                         keys->get_public_key_thumbprint()));
+  }
+}

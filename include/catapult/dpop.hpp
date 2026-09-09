@@ -23,6 +23,8 @@
 #include <string>
 #include <string_view>
 
+#include <unordered_set>
+
 #include "claims.hpp"
 #include "crypto.hpp"
 #include "error.hpp"
@@ -241,6 +243,17 @@ struct DpopValidationSettings {
   std::optional<size_t> jti_cleanup_interval;  ///< How often to run JTI cleanup
   std::vector<int>
       critical_settings;  ///< Critical settings that must be understood
+  // Allowlist of COSE algorithm identifiers accepted for the DPoP proof
+  // header `alg` (RFC 9449 §4.1 requires asymmetric algorithms). Empty ⇒
+  // use the built-in safe default `{ALG_ES256}`. Populating the set
+  // narrows or widens the accepted set — but symmetric algorithms
+  // (`ALG_HMAC256_256`) and the sentinel `0` (representing `alg: none`)
+  // MUST NOT be added: a proof signed with a symmetric key cannot
+  // demonstrate proof-of-possession because the verifier holds the same
+  // secret used to sign it. The allowlist is checked *before* the
+  // signature verifier is invoked so a rogue `alg` cannot even provoke
+  // key-material handling.
+  std::unordered_set<int64_t> allowed_dpop_algorithms;
 
   /**
    * @brief Default constructor with reasonable defaults
@@ -269,6 +282,48 @@ struct DpopValidationSettings {
    * check.
    */
   void set_jti_processing(bool honor) { honor_jti = honor; }
+
+  /**
+   * @brief Replace the DPoP proof algorithm allowlist.
+   *
+   * Passing an empty set restores the built-in default (`{ALG_ES256}`).
+   * The set MUST NOT contain symmetric or `none`-equivalent algorithms;
+   * `is_dpop_algorithm_allowed()` explicitly refuses `ALG_HMAC256_256`
+   * and the sentinel `0` regardless of what the caller placed here, so
+   * misconfiguration cannot silently weaken proof-of-possession.
+   *
+   * The intended way to *widen* the set is to add other asymmetric
+   * identifiers once the underlying `createAlgorithmFromJWK` /
+   * CWT-verifier plumbing gains support for them (RS256, PS256, EdDSA,
+   * etc.). Until then only ES256 will actually verify — the allowlist
+   * is the policy layer, not the algorithm implementation.
+   */
+  void set_allowed_dpop_algorithms(std::unordered_set<int64_t> algs) {
+    allowed_dpop_algorithms = std::move(algs);
+  }
+
+  /**
+   * @brief Check whether an incoming proof's `alg` is permitted.
+   *
+   * A hard blocklist rejects `ALG_HMAC256_256` (symmetric — cannot prove
+   * possession) and `0` (unregistered / the CWT `alg: none` sentinel)
+   * before consulting the allowlist. The remaining algorithms are
+   * accepted only if the configured allowlist (or its default of
+   * `{ALG_ES256}`) contains them.
+   */
+  [[nodiscard]] bool is_dpop_algorithm_allowed(int64_t alg_id) const noexcept {
+    // Hard-blocked identifiers stay blocked even if a caller adds them
+    // to the allowlist by mistake — proof-of-possession semantics
+    // require an asymmetric algorithm.
+    if (alg_id == 0 || alg_id == ALG_HMAC256_256) {
+      return false;
+    }
+    if (allowed_dpop_algorithms.empty()) {
+      return alg_id == ALG_ES256;
+    }
+    return allowed_dpop_algorithms.find(alg_id) !=
+           allowed_dpop_algorithms.end();
+  }
 
   /**
    * @brief Set maximum JTI cache entries for replay protection
