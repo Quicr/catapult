@@ -837,6 +837,19 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
 
   DpopHeader header;
   header.set_encoding(DpopEncoding::JWT);
+  // draft-nandakumar-moq-generic-dpop-proof-00 §3.1 / RFC 9449 §4.2 pin
+  // the JOSE `typ` header on a JWT DPoP proof to `dpop-proof+jwt`. The
+  // deserializer MUST refuse a proof that omits `typ` or carries a
+  // different value — otherwise a JWT-shaped artefact from an unrelated
+  // protocol (an id-token, an access-token, a signed OIDC payload) with
+  // a compatible alg + key would slip through every remaining check.
+  // Read `typ` explicitly rather than accepting the struct's default,
+  // and require the pinned literal.
+  if (!header_json.contains("typ") || !header_json["typ"].is_string() ||
+      header_json["typ"].get<std::string>() != "dpop-proof+jwt") {
+    throw InvalidTokenFormatError{};
+  }
+  header.typ = header_json["typ"].get<std::string>();
   header.alg = header_json.value("alg", "");
   if (header_json.contains("jwk")) {
     header.jwk = header_json["jwk"].dump();

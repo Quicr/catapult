@@ -348,6 +348,80 @@ TEST_SUITE("DPoP CWT wire format") {
         header_b64 + "." + unknown_b64 + "." + sig_b64;
     CHECK_THROWS(DpopProof::deserialize(unknown_wire));
   }
+
+  TEST_CASE("JWT DPoP deserialization rejects a mismatched typ header") {
+    // RFC 9449 §4.2 / draft-nandakumar-moq-generic-dpop-proof-00 §3.1 pin
+    // the JOSE `typ` header on a JWT DPoP proof to `dpop-proof+jwt`. A
+    // header that carries a different value — for example the OIDC
+    // `id-token` type or an unrelated `application/...` string — MUST
+    // be refused before any signature check runs, otherwise a JWT
+    // artefact from an adjacent protocol with compatible alg + key
+    // would slip through the remaining checks.
+    auto keys = makeEs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-jwt-typ-check"}, DpopEncoding::JWT);
+    auto wire = proof.serialize();
+
+    // Split, mutate header JSON, reassemble. We do NOT need to re-sign
+    // because the enforcement is at parse time — the deserializer must
+    // reject before it ever looks at the signature.
+    auto first_dot = wire.find('.');
+    auto second_dot = wire.find('.', first_dot + 1);
+    REQUIRE(first_dot != std::string::npos);
+    REQUIRE(second_dot != std::string::npos);
+    auto header_b64 = wire.substr(0, first_dot);
+    auto payload_b64 = wire.substr(first_dot + 1, second_dot - first_dot - 1);
+    auto sig_b64 = wire.substr(second_dot + 1);
+    auto header_bytes = base64UrlDecode(header_b64);
+    std::string header_json(header_bytes.begin(), header_bytes.end());
+    auto pos = header_json.find("\"typ\":\"dpop-proof+jwt\"");
+    REQUIRE(pos != std::string::npos);
+    header_json.replace(pos, sizeof("\"typ\":\"dpop-proof+jwt\"") - 1,
+                        "\"typ\":\"id-token\"          ");
+    auto mangled_header_b64 = base64UrlEncode(
+        std::vector<uint8_t>(header_json.begin(), header_json.end()));
+    std::string mangled_wire =
+        mangled_header_b64 + "." + payload_b64 + "." + sig_b64;
+    CHECK_THROWS(DpopProof::deserialize(mangled_wire));
+  }
+
+  TEST_CASE("JWT DPoP deserialization rejects a missing typ header") {
+    // A JOSE header that simply omits `typ` MUST be refused: a lenient
+    // parser that accepted absence would let the struct's default value
+    // silently substitute for whatever the issuer intended, defeating
+    // the whole point of the typ pin.
+    auto keys = makeEs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-jwt-typ-missing"}, DpopEncoding::JWT);
+    auto wire = proof.serialize();
+    auto first_dot = wire.find('.');
+    auto second_dot = wire.find('.', first_dot + 1);
+    auto header_b64 = wire.substr(0, first_dot);
+    auto payload_b64 = wire.substr(first_dot + 1, second_dot - first_dot - 1);
+    auto sig_b64 = wire.substr(second_dot + 1);
+    auto header_bytes = base64UrlDecode(header_b64);
+    std::string header_json(header_bytes.begin(), header_bytes.end());
+    // Strip the typ field entirely by replacing `"typ":"dpop-proof+jwt",`
+    // (or the trailing form) with the empty string. We do the leading
+    // form here — the producer's serializer places typ first, so this
+    // covers the round-trip.
+    auto pos = header_json.find("\"typ\":\"dpop-proof+jwt\",");
+    if (pos == std::string::npos) {
+      // Trailing form.
+      pos = header_json.find(",\"typ\":\"dpop-proof+jwt\"");
+      REQUIRE(pos != std::string::npos);
+      header_json.erase(pos, sizeof(",\"typ\":\"dpop-proof+jwt\"") - 1);
+    } else {
+      header_json.erase(pos, sizeof("\"typ\":\"dpop-proof+jwt\",") - 1);
+    }
+    auto stripped_header_b64 = base64UrlEncode(
+        std::vector<uint8_t>(header_json.begin(), header_json.end()));
+    std::string stripped_wire =
+        stripped_header_b64 + "." + payload_b64 + "." + sig_b64;
+    CHECK_THROWS(DpopProof::deserialize(stripped_wire));
+  }
 #endif  // CATAPULT_ENABLE_JSON
 
   TEST_CASE("Missing iat fails is_valid() and is_fresh() — no synthesis") {
