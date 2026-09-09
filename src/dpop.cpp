@@ -599,6 +599,17 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
       if (!pairs && map_size > 0) {
         throw InvalidTokenFormatError{};
       }
+      // The `typ` header MUST be present on a CWT DPoP proof and MUST
+      // equal `"dpop-proof+cwt"` (draft-nandakumar-moq-generic-dpop-proof-00
+      // §3.1). Track presence explicitly rather than relying on the
+      // struct's default value — otherwise a wire form that OMITS `typ`
+      // would be indistinguishable from one that included the expected
+      // string, and an attacker could substitute a different content
+      // type (e.g. `id-token`) or drop the header entirely and still
+      // land on the default. Enforce here so that no downstream caller
+      // needs to know about typ semantics.
+      bool typ_seen = false;
+      std::string wire_typ;
       for (size_t i = 0; i < map_size; ++i) {
         if (!pairs[i].key || !pairs[i].value || !cbor_isa_uint(pairs[i].key)) {
           continue;
@@ -616,8 +627,21 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
           header.cose_key.assign(
               cbor_bytestring_handle(pairs[i].value),
               cbor_bytestring_handle(pairs[i].value) + ck_len);
+        } else if (key == dpop_labels::TYP && cbor_isa_string(pairs[i].value)) {
+          wire_typ.assign(
+              reinterpret_cast<const char*>(cbor_string_handle(pairs[i].value)),
+              cbor_string_length(pairs[i].value));
+          typ_seen = true;
         }
       }
+      if (!typ_seen || wire_typ != "dpop-proof+cwt") {
+        // A wrong or missing `typ` MUST fail closed. Reusing the
+        // signed-input from another CWT-shaped artefact (an id-token,
+        // an OSCORE COSE_Sign1, etc.) with the correct alg + key would
+        // otherwise pass every remaining check.
+        throw InvalidTokenFormatError{};
+      }
+      header.typ = std::move(wire_typ);
     }
   }
 

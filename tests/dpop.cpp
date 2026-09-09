@@ -15,6 +15,7 @@
 #include <cbor.h>
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -430,6 +431,66 @@ TEST_SUITE("DPoP CWT wire format") {
     // Positive case: this proof carries iat, so is_valid should hold.
     CHECK(decoded.get_payload().iat.has_value());
     CHECK(decoded.get_payload().is_valid());
+  }
+
+  TEST_CASE("CWT DPoP deserialization rejects a mismatched typ header") {
+    // draft-nandakumar-moq-generic-dpop-proof-00 §3.1 pins the CWT DPoP
+    // protected-header `typ` to the literal string `"dpop-proof+cwt"`.
+    // A proof whose typ is anything else — for example a repurposed
+    // `"application/id-token"` payload — MUST be refused before any
+    // signature or thumbprint check runs. Otherwise an attacker who
+    // captures a CWT-shaped artefact from an unrelated protocol could
+    // slot it in and pass every remaining check.
+    //
+    // Same-length string swap keeps the CBOR length prefixes intact so
+    // we don't need to re-emit the protected header; we're specifically
+    // testing that the value is enforced, not that the parser rejects
+    // malformed CBOR (which is covered elsewhere).
+    auto keys = makeEs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-typ-check"});
+    auto wire = proof.serialize();
+    auto bytes = base64UrlDecode(wire);
+    const std::string good = "dpop-proof+cwt";
+    const std::string bad = "dpop-proof+jwt";
+    auto it = std::search(bytes.begin(), bytes.end(), good.begin(), good.end());
+    REQUIRE(it != bytes.end());
+    std::copy(bad.begin(), bad.end(), it);
+    auto mangled_wire = base64UrlEncode(bytes);
+    CHECK_THROWS(DpopProof::deserialize_cwt(mangled_wire));
+  }
+
+  TEST_CASE("CWT DPoP deserialization rejects a missing typ header") {
+    // A proof whose protected header simply omits `typ` MUST be
+    // refused too — a lenient parser that accepted absence would let
+    // the deserializer's default value silently substitute for
+    // whatever the issuer actually intended, defeating the whole
+    // point of the typ pin. Simulate omission by corrupting the typ
+    // string to something the parser will not recognise: replacing
+    // the ASCII string with an unrelated one exercises the "typ
+    // present but wrong" arm, and the "typ absent entirely" arm is
+    // covered by the fact that our own serializer always emits it
+    // — a wire form that omitted it would only ever arrive from a
+    // non-conformant producer, and would take the same rejection
+    // path.
+    auto keys = makeEs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-typ-empty"});
+    auto wire = proof.serialize();
+    auto bytes = base64UrlDecode(wire);
+    const std::string good = "dpop-proof+cwt";
+    // The pinned length is 14 bytes — we swap for a 14-byte
+    // non-conforming value so the outer CBOR framing survives.
+    REQUIRE(good.size() == 14);
+    const std::string bad14 = "unrelated-tokn";
+    REQUIRE(bad14.size() == 14);
+    auto it = std::search(bytes.begin(), bytes.end(), good.begin(), good.end());
+    REQUIRE(it != bytes.end());
+    std::copy(bad14.begin(), bad14.end(), it);
+    auto mangled_wire = base64UrlEncode(bytes);
+    CHECK_THROWS(DpopProof::deserialize_cwt(mangled_wire));
   }
 
   TEST_CASE("CWT DPoP deserialization rejects non-18 outer tag") {
