@@ -728,10 +728,13 @@ TEST_SUITE("DPoP CWT wire format") {
   }
 
   TEST_CASE(
-      "DpopProofValidator accepts a jti-less proof when jti processing is off") {
-    // A-02: the fail-closed rule is scoped to `jti_processing == true`.
-    // Callers who explicitly opt out (e.g. they have an out-of-band
-    // replay defence) must still be able to admit proofs that omit jti.
+      "DpopProofValidator rejects a jti-less proof even when jti processing is off") {
+    // RFC 9449 §4.2 and draft-nandakumar-moq-generic-dpop-proof-00 §3.2
+    // both make `jti` a REQUIRED payload claim on the wire, independent
+    // of whether the relay maintains a replay store. `set_jti_processing`
+    // gates the ReplayStore roundtrip only; presence-of-jti is enforced
+    // unconditionally so that turning off replay tracking cannot silently
+    // relax wire compliance.
     auto keys = makeEs256KeyPair();
     auto expected_uri =
         moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
@@ -745,6 +748,37 @@ TEST_SUITE("DPoP CWT wire format") {
     DpopProofValidator validator(settings);
     validator.set_cwt_verifier(&keys->get_algorithm());
 
+    CHECK_FALSE(validator.validate_proof(
+        proof, moqt_actions::PUBLISH, expected_uri,
+        keys->get_public_key_thumbprint()));
+  }
+
+  TEST_CASE(
+      "DpopProofValidator admits a jti-bearing proof without touching the replay store when jti processing is off") {
+    // Sibling to the presence-of-jti test above: when the wire claim is
+    // present, disabling `jti_processing` correctly skips the
+    // ReplayStore roundtrip. Two back-to-back validations of the *same*
+    // proof both succeed, confirming that no replay bookkeeping is
+    // happening under the knob's disabled state.
+    auto keys = makeEs256KeyPair();
+    auto expected_uri =
+        moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-processing-off"});
+    REQUIRE(proof.get_payload().jti.has_value());
+
+    DpopValidationSettings settings;
+    settings.set_window(std::chrono::seconds{300});
+    settings.set_jti_processing(false);
+    DpopProofValidator validator(settings);
+    validator.set_cwt_verifier(&keys->get_algorithm());
+
+    CHECK(validator.validate_proof(
+        proof, moqt_actions::PUBLISH, expected_uri,
+        keys->get_public_key_thumbprint()));
+    // Same jti a second time — if replay tracking were active the store
+    // would reject this; it succeeds because the knob is off.
     CHECK(validator.validate_proof(
         proof, moqt_actions::PUBLISH, expected_uri,
         keys->get_public_key_thumbprint()));

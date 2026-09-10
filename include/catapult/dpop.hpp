@@ -286,14 +286,18 @@ struct DpopValidationSettings {
   void set_window(std::chrono::seconds time_window) { window = time_window; }
 
   /**
-   * @brief Set JTI processing preference.
+   * @brief Set JTI *replay-tracking* preference.
    *
-   * When true (the default) the validator MUST refuse any proof that
-   * omits `jti` — a jti-less proof under jti processing has no stable
-   * replay identifier and would silently bypass the ReplayStore. Set to
-   * false only when the caller has an out-of-band replay defence and
-   * has verified that the wider deployment does not depend on this
-   * check.
+   * This knob controls whether the validator consults the ReplayStore
+   * on `jti` — it does NOT control whether `jti` is required on the
+   * wire. RFC 9449 §4.2 and draft-nandakumar-moq-generic-dpop-proof-00
+   * §3.2 both make `jti` a MUST-be-present claim on the proof payload,
+   * and `validate_proof` enforces that unconditionally: a jti-less
+   * proof is refused even when this knob is `false`. Setting it to
+   * `false` is a legitimate opt-out only for deployments that have an
+   * out-of-band replay defence — for example, a shared cache upstream
+   * of this validator — and want to skip the per-request replay-store
+   * roundtrip without weakening wire compliance.
    */
   void set_jti_processing(bool honor) { honor_jti = honor; }
 

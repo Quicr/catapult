@@ -1131,24 +1131,25 @@ bool DpopProofValidator::validate_proof(
     return false;
   }
 
-  // Check JTI if enabled. All bookkeeping — TOCTOU-safe check-and-record,
-  // size cap, expiry, cross-process sharing — is the replay store's
-  // responsibility. Exhaustion is treated as a replay (fail closed) so a
-  // full store cannot be turned into an admit oracle.
-  //
-  // A-02: when jti_processing is on, absence of `jti` on the wire is a
-  // fatal error, not a "skip the check" path. Previously a proof that
-  // omitted `jti` bypassed the replay store entirely, so an attacker
-  // could replay the same jti-less proof indefinitely (or, more subtly,
-  // a producer could set `jti` once and reuse it — the store would only
-  // see the first sighting). Under jti_processing the proof MUST carry
-  // a jti or be rejected.
+  // `jti` presence is a wire-compliance requirement, not a replay-check
+  // knob. RFC 9449 §4.2 and draft-nandakumar-moq-generic-dpop-proof-00
+  // §3.2 both list `jti` as REQUIRED in the DPoP proof payload; a proof
+  // that omits it is malformed regardless of whether the relay tracks
+  // replays. Enforce presence unconditionally, ahead of the `honor_jti`
+  // branch. Callers who disable replay tracking (e.g. because they run
+  // an out-of-band defence) still see the wire check.
+  if (!proof.get_payload().jti.has_value()) {
+    CAT_LOG_WARN(
+        "DPoP proof rejected: proof payload is missing the required jti claim");
+    return false;
+  }
+
+  // Replay tracking is separable: `honor_jti` (default true) gates whether
+  // the ReplayStore is consulted at all. All bookkeeping — TOCTOU-safe
+  // check-and-record, size cap, expiry, cross-process sharing — is the
+  // store's responsibility. Exhaustion is treated as a replay (fail
+  // closed) so a full store cannot be turned into an admit oracle.
   if (settings_.get_jti_processing()) {
-    if (!proof.get_payload().jti.has_value()) {
-      CAT_LOG_WARN(
-          "DPoP proof rejected: jti processing enabled but proof carries no jti");
-      return false;
-    }
     const auto& jti = proof.get_payload().jti.value();
     auto now = std::chrono::system_clock::now();
     auto result = replay_store_->admit(jti, now,
