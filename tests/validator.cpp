@@ -1176,3 +1176,80 @@ TEST_SUITE("tryValidate — non-throwing hot-path surface") {
         CHECK_THROWS_AS(validator.validate(rebadged), ReplayAttackError);
     }
 }
+
+// Authorization ordering: usage admission is the single write in the
+// pipeline and MUST run after every request-scoped check. If it ran
+// earlier, a token rejected for a request-side reason (policy hook,
+// MOQT scope, revalidation deadline) would still have consumed its
+// one-time `cti`, and the client could never retry with a corrected
+// request. These cases lock in "reject-before-admit" for each failure
+// mode that follows admission in the previous ordering.
+TEST_SUITE("Authorization ordering — usage admission is deferred") {
+    TEST_CASE("Policy rejection does not consume the cti") {
+        auto now = std::chrono::system_clock::now();
+        auto token = CatToken()
+                         .withIssuer("iss")
+                         .withAudience({"aud"})
+                         .withExpiration(now + std::chrono::hours(1))
+                         .withCwtIdString("cti-order-policy")
+                         .withReplayProtection(CatReplayMode::RejectOnReplay);
+        // Attach a claim that forces the policy hook to fire.
+        CatProofOfPossession por;
+        por.probability = 1.0;
+        por.identifier = {0x01, 0x02, 0x03};
+        token.cat.catpor = por;
+
+        InMemoryUsageState hook;
+        RejectingPolicy policy;
+        CatTokenValidator validator;
+        validator.withUsageStateHook(&hook).withAuthorizationPolicy(&policy);
+
+        // First call: policy rejects, so admission must NOT have written.
+        CHECK_THROWS_AS(validator.validate(token), InvalidClaimValueError);
+        CHECK(hook.size() == 0);
+
+        // Swap in a permissive policy — the same cti still admits cleanly,
+        // proving the earlier rejection did not silently consume it.
+        PermissivePolicy permissive;
+        validator.withAuthorizationPolicy(&permissive);
+        REQUIRE_NOTHROW(validator.validate(token));
+        CHECK(hook.size() == 1);
+    }
+
+    TEST_CASE("MOQT scope mismatch does not consume the cti") {
+        auto now = std::chrono::system_clock::now();
+        MoqtClaims moqt;
+        std::vector<int> actions = {moqt_actions::PUBLISH};
+        moqt.addScope(actions, MoqtBinaryMatch::exact("news"),
+                      MoqtBinaryMatch::exact("headlines"));
+
+        auto token = CatToken()
+                         .withIssuer("iss")
+                         .withAudience({"aud"})
+                         .withExpiration(now + std::chrono::hours(1))
+                         .withCwtIdString("cti-order-scope")
+                         .withReplayProtection(CatReplayMode::RejectOnReplay);
+        token.extended.setMoqtClaims(std::move(moqt));
+
+        PolicyContext context;
+        context.moqt_action = moqt_actions::PUBLISH;
+        std::string bad_ns = "weather";  // not authorised
+        std::string good_ns = "news";
+        std::string track = "headlines";
+        context.moqt_namespace = bad_ns;
+        context.moqt_track = track;
+
+        InMemoryUsageState hook;
+        CatTokenValidator validator;
+        validator.withUsageStateHook(&hook);
+
+        CHECK_THROWS_AS(validator.validate(token, context),
+                        InvalidClaimValueError);
+        CHECK(hook.size() == 0);
+
+        // Retry with the authorised namespace — the cti is still fresh.
+        context.moqt_namespace = good_ns;
+        REQUIRE_NOTHROW(validator.validate(token, context));
+        CHECK(hook.size() == 1);
+    }
+}

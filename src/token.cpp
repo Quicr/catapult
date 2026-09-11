@@ -178,11 +178,21 @@ void CatTokenValidator::validate(const CatToken& token,
   }
 
   validateGeographicRestrictions(token);
-  validateUsageLimits(token);
   validateCompositeClaims(token);
   validateAuthorizationPolicy(token, context);
   validateMoqtRevalidation(token, now);
   validateMoqtScopes(token, context);
+
+  // Usage admission runs LAST — any earlier check can reject the token
+  // for reasons that are request-specific (policy hook, MOQT scope,
+  // reval deadline). If admission ran before those checks, a token
+  // rejected for a request-side reason would still have consumed its
+  // one-time `cti`, so the client could never retry with a corrected
+  // request. `UsageStateHook::admit` is the single write in this
+  // pipeline; deferring it until every read-only check has passed is
+  // equivalent to "commit only when everything else succeeded" without
+  // needing a two-phase admission API on the hook.
+  validateUsageLimits(token);
 }
 
 // CAT-4-MOQT (draft-ietf-moq-c4m-01): if `moqt-reval` is present the
