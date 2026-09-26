@@ -425,8 +425,13 @@ struct DpopValidationSettings {
    * does NOT relax a validator that had it on.
    *
    * This is the intended binding point between token state and DPoP
-   * validation behaviour (audit R-16). Callers who want the exact
-   * on-wire values without a floor should overwrite fields directly.
+   * validation behaviour (audit R-16). The library does not call this
+   * automatically — a relay that wants issuer-declared tightening
+   * invokes it explicitly, typically from
+   * `AuthorizationPolicyHook::acceptDpopBinding` against its per-request
+   * settings before the DPoP proof is verified. Callers who want the
+   * exact on-wire values without a floor should overwrite fields
+   * directly.
    */
   void overlayCatDpopSettings(const CatDpopSettings& wire) noexcept {
     if (wire.window_seconds.has_value() && *wire.window_seconds > 0) {

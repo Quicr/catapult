@@ -225,6 +225,14 @@ class AuthorizationPolicyHook {
    * `DpopProofValidator`; the semantic tie between "this token expects a
    * DPoP proof with these parameters" and "the current request came with
    * a matching proof" is deployment-specific and lives here.
+   *
+   * If your integration wants the token's on-wire `catdpop` to tighten
+   * the DPoP validator's window / `honor_jti` for the current request,
+   * call `DpopValidationSettings::overlayCatDpopSettings(settings)` from
+   * this hook against your per-request DPoP settings before the proof
+   * is verified. The overlay is one-way: the token can only *shorten*
+   * the window and only *enable* replay tracking — it can never widen
+   * the window or disable a validator that already has `honor_jti` on.
    */
   virtual bool acceptDpopBinding(const CatDpopSettings& settings,
                                  const PolicyContext& ctx) = 0;
