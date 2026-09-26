@@ -1,5 +1,6 @@
 # Build directories
 build/
+build-*/
 cmake-build-*/
 out/
 
@@ -132,3 +133,28 @@ core.*
 # Local environment files
 .env
 .env.local
+
+# libFuzzer-generated corpus entries (SHA-1 hex names). Reproducible
+# named seeds are tracked; the hex-named files below are run artifacts
+# and grow without bound.
+fuzz/corpus/*/[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]
+
+# libFuzzer diagnostic dumps written at the CWD (slow inputs, crash inputs,
+# OOM inputs, timeout inputs). Reproducible cases graduate into
+# `fuzz/corpus/`; these root-level dumps are transient run artifacts.
+slow-unit-*
+crash-*
+oom-*
+timeout-*
+leak-*
+
+# Audit / analysis scratch. The canonical security invariants live at
+# `docs/security-invariants.md`; ad-hoc audit dumps at the repo root
+# should not be committed.
+/PRODUCTION_READINESS_AUDIT.md
+/SECURITY_AUDIT_*.md
+/SECURITY_AUDIT_*.html
+/analysis.md
+/analysis.html
+/catapult_analysis.md
+/catapult_analysis.html
