@@ -132,6 +132,11 @@ bool IpAllowlistPolicy::acceptProofOfPossession(const CatProofOfPossession&,
   return matches(ctx);
 }
 
+bool IpAllowlistPolicy::acceptDpopBinding(const CatDpopSettings&,
+                                          const PolicyContext& ctx) {
+  return matches(ctx);
+}
+
 bool IpAllowlistPolicy::acceptRequestDirective(std::string_view,
                                                const CatRequestDirective&,
                                                const PolicyContext& ctx) {

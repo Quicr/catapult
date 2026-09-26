@@ -81,13 +81,13 @@ struct IpAllowlistEntry {
  *
  * ## Contract on the accept*() methods
  *
- * Only `acceptProofOfPossession`, `acceptRequestDirective`,
- * `acceptGeoIso3166`, `acceptGeohash`, and `acceptGeoAltitude` are
- * *scoped by the allowlist*: a token that carries any of those claims
- * on a request whose `client_ip` is not on the allowlist is rejected.
- * `acceptDpopBinding` returns `true` unconditionally — DPoP binding is
- * an orthogonal concern, and a separate `DpopBindingPolicy` composed
- * with this one is the intended pattern.
+ * Every `accept*()` method — including `acceptDpopBinding` — is scoped
+ * by the allowlist. The policy models a *global request filter*: a
+ * request whose `client_ip` is not on the allowlist is rejected no
+ * matter which enforcement-gated claim happens to be present. Callers
+ * layer additional requirements (e.g. "and a DPoP proof must be
+ * presented") by composing with another policy via `ChainedPolicy`,
+ * not by expecting this policy to carve out particular claims.
  *
  * ## `client_ip` handling
  *
@@ -124,9 +124,7 @@ class IpAllowlistPolicy final : public AuthorizationPolicyHook {
   bool acceptProofOfPossession(const CatProofOfPossession&,
                                const PolicyContext& ctx) override;
   bool acceptDpopBinding(const CatDpopSettings&,
-                         const PolicyContext&) override {
-    return true;
-  }
+                         const PolicyContext& ctx) override;
   bool acceptRequestDirective(std::string_view, const CatRequestDirective&,
                               const PolicyContext& ctx) override;
   bool acceptGeoIso3166(const std::vector<std::string>&,

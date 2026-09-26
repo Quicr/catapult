@@ -143,6 +143,27 @@ TEST_SUITE("IpAllowlistPolicy — validator integration") {
     PolicyContext ctx;  // client_ip = nullopt
     CHECK_THROWS_AS(validator.validate(token, ctx), GeographicValidationError);
   }
+
+  TEST_CASE("off-allowlist IP rejects a catdpop-only token") {
+    // A token whose only enforcement-gated claim is `catdpop` must
+    // still be rejected when the caller's IP is not on the allowlist.
+    // Regression guard: `acceptDpopBinding` used to return `true`
+    // unconditionally, which silently disabled the IP filter for
+    // requests whose only gated claim was DPoP.
+    auto token = baseToken();
+    CatDpopSettings s;
+    s.window_seconds = 60;
+    token.dpop.catdpop = s;
+
+    IpAllowlistPolicy p({"10.0.0.0/8"});
+    CatTokenValidator validator;
+    validator.withAuthorizationPolicy(&p);
+
+    PolicyContext ctx;
+    std::string_view ip{"192.168.1.1"};
+    ctx.client_ip = ip;
+    CHECK_THROWS_AS(validator.validate(token, ctx), InvalidClaimValueError);
+  }
 }
 
 TEST_SUITE("DpopBindingPolicy") {
@@ -281,16 +302,45 @@ TEST_SUITE("ChainedPolicy") {
       ctx.client_ip = ip_sv;
       CHECK_THROWS_AS(validator.validate(token, ctx), InvalidClaimValueError);
     }
-    // IP out of range + proof present → reject on geo (IP check fires
-    // for the catgeoiso3166 hook).
+    // IP out of range + proof present → reject. Which specific error
+    // wins depends on the validator's claim iteration order (in this
+    // build, catdpop is checked before catgeoiso3166), so we just
+    // assert that some CatError is thrown — the important guarantee
+    // is that a request from an off-list IP does not admit under this
+    // composition regardless of which enforcement-gated claim fires
+    // first.
     {
       DpopPayload proof(0, "", "");
       PolicyContext ctx;
       std::string_view ip_sv{"192.168.1.1"};
       ctx.client_ip = ip_sv;
       ctx.dpop_proof = &proof;
-      CHECK_THROWS_AS(validator.validate(token, ctx),
-                      GeographicValidationError);
+      CHECK_THROWS_AS(validator.validate(token, ctx), CatError);
     }
+  }
+
+  TEST_CASE("IP out of range rejects catdpop-only token via chained policy") {
+    // Same regression guard as the IpAllowlistPolicy suite, but proving
+    // the chained composition also rejects. Before the fix, IpAllowlist
+    // returned true from acceptDpopBinding and this admitted despite an
+    // off-list IP.
+    IpAllowlistPolicy ip({"10.0.0.0/8"});
+    DpopBindingPolicy dpop;
+    ChainedPolicy chain({&ip, &dpop});
+
+    auto token = baseToken();
+    CatDpopSettings s;
+    s.window_seconds = 60;
+    token.dpop.catdpop = s;
+
+    CatTokenValidator validator;
+    validator.withAuthorizationPolicy(&chain);
+
+    DpopPayload proof(0, "", "");
+    PolicyContext ctx;
+    std::string_view ip_sv{"192.168.1.1"};
+    ctx.client_ip = ip_sv;
+    ctx.dpop_proof = &proof;
+    CHECK_THROWS_AS(validator.validate(token, ctx), InvalidClaimValueError);
   }
 }
