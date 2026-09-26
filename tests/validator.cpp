@@ -1122,6 +1122,83 @@ TEST_SUITE("tryValidate — non-throwing hot-path surface") {
         CHECK(result.error() == CatErrorCode::TOKEN_EXPIRED);
     }
 
+    TEST_CASE("intoValidated with context honours MOQT scope enforcement") {
+        // The context-taking overload is the canonical relay entry point:
+        // supplying a request tuple lets a shared validator apply
+        // request-scoped checks that the context-free overload cannot.
+        auto now = std::chrono::system_clock::now();
+        auto token = CatToken()
+                         .withIssuer("iss")
+                         .withAudience({"aud"})
+                         .withExpiration(now + std::chrono::hours(1))
+                         .withCwtIdString("scoped");
+        MoqtClaims moqt;
+        std::vector<int> pub{moqt_actions::PUBLISH};
+        moqt.addScope(pub, MoqtBinaryMatch::exact("live"),
+                      MoqtBinaryMatch::any());
+        token.extended.setMoqtClaims(std::move(moqt));
+
+        CatTokenValidator validator;
+
+        PolicyContext ok;
+        ok.moqt_action = moqt_actions::PUBLISH;
+        std::string live_ns = "live";
+        std::string any_track = "audio";
+        ok.moqt_namespace = live_ns;
+        ok.moqt_track = any_track;
+        REQUIRE_NOTHROW(auto v = validator.intoValidated(token, ok));
+
+        PolicyContext bad;
+        bad.moqt_action = moqt_actions::SUBSCRIBE;
+        bad.moqt_namespace = live_ns;
+        bad.moqt_track = any_track;
+        CHECK_THROWS_AS(validator.intoValidated(token, bad),
+                        InvalidClaimValueError);
+    }
+
+    TEST_CASE("tryIntoValidated with context surfaces MOQT scope failure") {
+        auto now = std::chrono::system_clock::now();
+        auto token = CatToken()
+                         .withIssuer("iss")
+                         .withAudience({"aud"})
+                         .withExpiration(now + std::chrono::hours(1))
+                         .withCwtIdString("scoped-try");
+        MoqtClaims moqt;
+        std::vector<int> pub{moqt_actions::PUBLISH};
+        moqt.addScope(pub, MoqtBinaryMatch::exact("live"),
+                      MoqtBinaryMatch::any());
+        token.extended.setMoqtClaims(std::move(moqt));
+
+        CatTokenValidator validator;
+        PolicyContext bad;
+        bad.moqt_action = moqt_actions::SUBSCRIBE;
+        std::string ns = "live";
+        std::string tr = "audio";
+        bad.moqt_namespace = ns;
+        bad.moqt_track = tr;
+        auto result = validator.tryIntoValidated(token, bad);
+        REQUIRE(result.isError());
+        CHECK(result.error() == CatErrorCode::INVALID_CLAIM_VALUE);
+    }
+
+    TEST_CASE(
+        "intoValidated context-free rejects MOQT-scoped tokens by default") {
+        auto now = std::chrono::system_clock::now();
+        auto token = CatToken()
+                         .withIssuer("iss")
+                         .withAudience({"aud"})
+                         .withExpiration(now + std::chrono::hours(1))
+                         .withCwtIdString("scoped-nocx");
+        MoqtClaims moqt;
+        std::vector<int> pub{moqt_actions::PUBLISH};
+        moqt.addScope(pub, MoqtBinaryMatch::any(), MoqtBinaryMatch::any());
+        token.extended.setMoqtClaims(std::move(moqt));
+
+        CatTokenValidator validator;
+        CHECK_THROWS_AS(validator.intoValidated(token),
+                        MissingRequiredClaimError);
+    }
+
     TEST_CASE("catreplay=None passes without a usage-state hook") {
         // Explicitly opting out of replay enforcement must not require a
         // hook — that would break the "issuer says None" contract.

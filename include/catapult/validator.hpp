@@ -318,9 +318,34 @@ class CatTokenValidator {
    * as `validate()` are thrown; the caller loses the moved-from token, which
    * is the intended contract — an invalid token has no defined content.
    *
+   * The single-argument overload supplies an empty `PolicyContext` and is
+   * only safe when the token cannot carry a context-requiring claim.
+   * Relay code SHOULD prefer the context-taking overload below so a
+   * shared validator applies the same request-side checks it would
+   * apply to `validate(token, context)`.
+   *
    * @throws Various CatError subclasses on validation failure
    */
   [[nodiscard]] ValidatedCatToken intoValidated(CatToken token) const;
+
+  /**
+   * @brief Validate a token with request-side context and consume it into
+   *        an immutable `ValidatedCatToken`.
+   *
+   * Runs the same checks as `validate(token, context)` and, on success,
+   * returns the caller's only handle to the validated claims. This is the
+   * canonical relay admission entry point: the request tuple, DPoP proof,
+   * and session identity supplied on `context` are honoured, and on
+   * success the caller cannot regress the token to mutable state.
+   *
+   * On failure the same exceptions as `validate(token, context)` are
+   * thrown; the moved-from token is destroyed. Callers observe no
+   * partially-validated state.
+   *
+   * @throws Various CatError subclasses on validation failure
+   */
+  [[nodiscard]] ValidatedCatToken intoValidated(
+      CatToken token, const PolicyContext& context) const;
 
   /**
    * @brief Non-throwing companion to `intoValidated`.
@@ -332,6 +357,16 @@ class CatTokenValidator {
    */
   [[nodiscard]] Result<ValidatedCatToken, CatErrorCode> tryIntoValidated(
       CatToken token) const noexcept;
+
+  /**
+   * @brief Non-throwing companion to `intoValidated(token, context)`.
+   *
+   * Same semantics as `tryIntoValidated(token)` except the request
+   * context is forwarded to the authorization-policy hook and MOQT
+   * scope check.
+   */
+  [[nodiscard]] Result<ValidatedCatToken, CatErrorCode> tryIntoValidated(
+      CatToken token, const PolicyContext& context) const noexcept;
 
   /**
    * @brief Validate multiple typed composite claims using CompositeClaimType

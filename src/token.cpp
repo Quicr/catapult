@@ -669,6 +669,12 @@ ValidatedCatToken CatTokenValidator::intoValidated(CatToken token) const {
   return ValidatedCatToken(std::move(token));
 }
 
+ValidatedCatToken CatTokenValidator::intoValidated(
+    CatToken token, const PolicyContext& context) const {
+  validate(token, context);
+  return ValidatedCatToken(std::move(token));
+}
+
 CatErrorCode CatTokenValidator::tryValidate(const CatToken& token) const noexcept {
   return tryValidate(token, PolicyContext{});
 }
@@ -692,6 +698,17 @@ CatErrorCode CatTokenValidator::tryValidate(
 Result<ValidatedCatToken, CatErrorCode>
 CatTokenValidator::tryIntoValidated(CatToken token) const noexcept {
   auto code = tryValidate(token);
+  if (code != CatErrorCode::SUCCESS) {
+    return Result<ValidatedCatToken, CatErrorCode>::error(code);
+  }
+  return Result<ValidatedCatToken, CatErrorCode>::success(
+      ValidatedCatToken(std::move(token)));
+}
+
+Result<ValidatedCatToken, CatErrorCode>
+CatTokenValidator::tryIntoValidated(
+    CatToken token, const PolicyContext& context) const noexcept {
+  auto code = tryValidate(token, context);
   if (code != CatErrorCode::SUCCESS) {
     return Result<ValidatedCatToken, CatErrorCode>::error(code);
   }
