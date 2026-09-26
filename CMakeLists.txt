@@ -510,6 +510,12 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
             examples/fleet_adapter_integration.cpp)
     target_link_libraries(fleet_adapter_integration catapult)
 
+    # CDN-scale load harness. Runs the full CAT+DPoP admission hot path
+    # under an N-worker workload and emits p50/p95/p99 latency + throughput
+    # + a rejection taxonomy. See Gate 8 in the production-readiness plan.
+    add_executable(catapult_load_harness perf/load_harness.cpp)
+    target_link_libraries(catapult_load_harness catapult)
+
     # Performance tests (using Catch2)
     find_package(Catch2 3 QUIET)
     if(Catch2_FOUND)
