@@ -49,9 +49,11 @@ void requireFleetCapableReplayBackend(const ReplayStore& store,
 }
 
 InMemoryReplayStore::InMemoryReplayStore(std::size_t max_entries,
-                                         std::size_t cleanup_every_n_admits)
+                                         std::size_t cleanup_every_n_admits,
+                                         std::size_t max_jti_bytes)
     : cleanup_interval_(cleanup_every_n_admits == 0 ? 1
                                                     : cleanup_every_n_admits) {
+  max_jti_bytes_ = max_jti_bytes == 0 ? 128 : max_jti_bytes;
   const std::size_t effective = max_entries == 0 ? 1 : max_entries;
   // See `InMemoryPolicyCache`: tiny caps fall back to one shard so the
   // combined cap is exactly `max_entries` and per-shard mechanics do
@@ -76,6 +78,13 @@ std::size_t InMemoryReplayStore::shardIndex(
 ReplayAdmitResult InMemoryReplayStore::admit(
     std::string_view jti, std::chrono::system_clock::time_point now,
     std::chrono::seconds window) {
+  // Fail closed on over-cap inputs. Admitting adversarial multi-KB
+  // jtis would grow per-entry memory unboundedly; refusing forces the
+  // caller to surface the anomaly (which is not a legitimate DPoP
+  // proof) rather than the store silently absorbing it.
+  if (jti.size() > max_jti_bytes_) {
+    return ReplayAdmitResult::StoreExhausted;
+  }
   Shard& shard = shards_[shardIndex(jti)];
   std::lock_guard<std::mutex> lock(shard.mu);
 

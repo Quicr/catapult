@@ -272,9 +272,16 @@ class InMemoryUsageState final : public UsageStateHook {
    *   (memory-exhaustion vector).
    * @param cleanup_every_n_admits Run opportunistic purge every N
    *   successful admits. Zero is coerced to 1 (purge on every admit).
+   * @param max_cti_bytes Reject ctis longer than this many bytes at the
+   *   API boundary; over-cap inputs on `admit()` surface as
+   *   `StoreExhausted` (fail closed) and on `revoke()` as
+   *   `StoreExhausted` (revocation refused). Defaults to 128 bytes,
+   *   comfortably above any legitimate CAT `cti` (RFC 8392 §3.1.7).
+   *   Zero is coerced to the default.
    */
   explicit InMemoryUsageState(std::size_t max_entries = 1'000'000,
-                              std::size_t cleanup_every_n_admits = 10'000);
+                              std::size_t cleanup_every_n_admits = 10'000,
+                              std::size_t max_cti_bytes = 128);
 
   UsageAdmitResult admit(
       std::string_view cti, CatReplayMode mode,
@@ -336,6 +343,7 @@ class InMemoryUsageState final : public UsageStateHook {
   // smaller than the shard count, so the combined cap is exactly
   // `max_entries`.
   std::size_t active_shards_ = kShardCount;
+  std::size_t max_cti_bytes_ = 128;
 
   std::size_t shardIndex(std::string_view cti) const noexcept;
 };

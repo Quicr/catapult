@@ -197,6 +197,44 @@ TEST_SUITE("PolicyCacheKey") {
   }
 }
 
+TEST_SUITE("InMemoryPolicyCache digest byte cap") {
+  TEST_CASE("Over-cap digest on store is silently dropped") {
+    // Attacker-controlled multi-KB digests must not grow per-entry
+    // memory unboundedly. `store()` returns without recording.
+    InMemoryPolicyCache cache(1024, /*max_digest_bytes=*/32);
+    auto now = Clock::now();
+    std::string oversize(64, 'X');
+    cache.store(oversize, allowFor(60s, now), now);
+    CHECK(cache.size() == 0);
+  }
+
+  TEST_CASE("Over-cap digest on lookup is a miss") {
+    InMemoryPolicyCache cache(1024, /*max_digest_bytes=*/32);
+    auto now = Clock::now();
+    std::string oversize(64, 'X');
+    CHECK(!cache.lookup(oversize, now).has_value());
+  }
+
+  TEST_CASE("At-cap digest is accepted") {
+    // Boundary: exactly `max_digest_bytes` must still round-trip.
+    InMemoryPolicyCache cache(1024, /*max_digest_bytes=*/32);
+    auto now = Clock::now();
+    std::string exact(32, 'Y');
+    cache.store(exact, allowFor(60s, now), now);
+    CHECK(cache.lookup(exact, now).has_value());
+  }
+
+  TEST_CASE("Zero max_digest_bytes coerces to the default") {
+    // A caller that default-init'd with zero still gets a sane cap
+    // rather than a store that refuses every insertion.
+    InMemoryPolicyCache cache(1024, /*max_digest_bytes=*/0);
+    auto now = Clock::now();
+    std::string typical(32, 'Z');
+    cache.store(typical, allowFor(60s, now), now);
+    CHECK(cache.lookup(typical, now).has_value());
+  }
+}
+
 TEST_SUITE("InMemoryPolicyCache fixed-digest fast path") {
   TEST_CASE("Store and lookup roundtrip via PolicyCacheDigest") {
     InMemoryPolicyCache cache;

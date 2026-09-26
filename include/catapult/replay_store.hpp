@@ -167,6 +167,11 @@ class InMemoryReplayStore final : public ReplayStore {
    * @param cleanup_every_n_admits Run opportunistic purge every N successful
    *   admits. Must be positive; the constructor coerces zero to 1 (i.e.
    *   purge on every admit) rather than dividing by zero at runtime.
+   * @param max_jti_bytes Reject jtis longer than this many bytes at the
+   *   API boundary; over-cap inputs surface as `StoreExhausted` (fail
+   *   closed) rather than a silent admit. Defaults to 128 bytes,
+   *   comfortably above any practical DPoP jti (which is typically
+   *   16-32 bytes of base64url). Zero is coerced to the default.
    *
    * Internally sharded (fixed 16 shards keyed on the jti hash). Each
    * shard has its own mutex, map, and cleanup counter; the cap is split
@@ -174,7 +179,8 @@ class InMemoryReplayStore final : public ReplayStore {
    * store.
    */
   explicit InMemoryReplayStore(std::size_t max_entries = 1'000'000,
-                               std::size_t cleanup_every_n_admits = 10'000);
+                               std::size_t cleanup_every_n_admits = 10'000,
+                               std::size_t max_jti_bytes = 128);
 
   ReplayAdmitResult admit(std::string_view jti,
                           std::chrono::system_clock::time_point now,
@@ -224,6 +230,7 @@ class InMemoryReplayStore final : public ReplayStore {
   // slices are used when `max_entries` is smaller than the shard count,
   // so the combined cap is exactly `max_entries`.
   std::size_t active_shards_ = kShardCount;
+  std::size_t max_jti_bytes_ = 128;
 
   std::size_t shardIndex(std::string_view jti) const noexcept;
 };

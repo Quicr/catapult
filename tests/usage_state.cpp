@@ -383,6 +383,36 @@ TEST_SUITE("InMemoryUsageState") {
     CHECK(store.admit("a", CatReplayMode::RejectOnReplay, now + 2s,
                       now + 1h) == UsageAdmitResult::Revoked);
   }
+
+  TEST_CASE("Over-cap cti on admit fails closed as StoreExhausted") {
+    // The validator maps StoreExhausted → ReplayAttackError, so this
+    // is fail-closed: an adversarial multi-KB cti neither grows memory
+    // nor is silently admitted.
+    InMemoryUsageState store{1024, 100, /*max_cti_bytes=*/32};
+    auto now = Clock::now();
+    std::string oversize(64, 'X');
+    CHECK(store.admit(oversize, CatReplayMode::RejectOnReplay, now,
+                      now + 1h) == UsageAdmitResult::StoreExhausted);
+    CHECK(store.size() == 0);
+  }
+
+  TEST_CASE("Over-cap cti on revoke fails closed as StoreExhausted") {
+    // Refusing revoke of an oversize cti prevents an operator flow
+    // that loops adversarial inputs through the write path from
+    // growing memory. The revocation is not recorded.
+    InMemoryUsageState store{1024, 100, /*max_cti_bytes=*/32};
+    std::string oversize(64, 'X');
+    CHECK(store.revoke(oversize) == RevokeResult::StoreExhausted);
+    CHECK(store.size() == 0);
+  }
+
+  TEST_CASE("At-cap cti is accepted") {
+    InMemoryUsageState store{1024, 100, /*max_cti_bytes=*/32};
+    auto now = Clock::now();
+    std::string exact(32, 'Y');
+    CHECK(store.admit(exact, CatReplayMode::RejectOnReplay, now,
+                      now + 1h) == UsageAdmitResult::Admitted);
+  }
 }
 
 namespace {

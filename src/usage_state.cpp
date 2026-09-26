@@ -45,9 +45,11 @@ void requireFleetCapableUsageBackend(const UsageStateHook& hook,
 }
 
 InMemoryUsageState::InMemoryUsageState(std::size_t max_entries,
-                                       std::size_t cleanup_every_n_admits)
+                                       std::size_t cleanup_every_n_admits,
+                                       std::size_t max_cti_bytes)
     : cleanup_interval_(cleanup_every_n_admits == 0 ? 1
                                                     : cleanup_every_n_admits) {
+  max_cti_bytes_ = max_cti_bytes == 0 ? 128 : max_cti_bytes;
   const std::size_t effective = max_entries == 0 ? 1 : max_entries;
   // See `InMemoryPolicyCache`: tiny caps fall back to one shard so the
   // combined cap is exactly `max_entries` and per-shard mechanics do
@@ -73,6 +75,12 @@ UsageAdmitResult InMemoryUsageState::admit(
     std::string_view cti, CatReplayMode mode,
     std::chrono::system_clock::time_point now,
     std::optional<std::chrono::system_clock::time_point> expiry) {
+  // Fail closed on over-cap cti. The validator treats StoreExhausted as
+  // a replay-attack signal, so refusing admits of oversize identifiers
+  // both bounds memory and surfaces the anomaly.
+  if (cti.size() > max_cti_bytes_) {
+    return UsageAdmitResult::StoreExhausted;
+  }
   Shard& shard = shards_[shardIndex(cti)];
   std::lock_guard<std::mutex> lock(shard.mu);
 
@@ -142,6 +150,12 @@ UsageAdmitResult InMemoryUsageState::admit(
 }
 
 RevokeResult InMemoryUsageState::revoke(std::string_view cti) {
+  // Refuse over-cap revocations: an operator explicitly recording bad
+  // ctis should not be able to blow memory by looping oversize inputs
+  // through this path. `StoreExhausted` surfaces the refusal.
+  if (cti.size() > max_cti_bytes_) {
+    return RevokeResult::StoreExhausted;
+  }
   Shard& shard = shards_[shardIndex(cti)];
   std::lock_guard<std::mutex> lock(shard.mu);
   const std::string key(cti);

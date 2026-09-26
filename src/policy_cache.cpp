@@ -85,12 +85,16 @@ void PolicyCache::store(const PolicyCacheDigest& digest,
         decision, now);
 }
 
-InMemoryPolicyCache::InMemoryPolicyCache(std::size_t max_entries) {
+InMemoryPolicyCache::InMemoryPolicyCache(std::size_t max_entries,
+                                         std::size_t max_digest_bytes) {
   if (max_entries == 0) {
     throw std::invalid_argument(
         "InMemoryPolicyCache: max_entries must be positive; an unbounded "
         "cache is a memory-exhaustion vector");
   }
+  // Zero is coerced rather than rejected so the parameter can be added
+  // without breaking callers who default-construct with zero-init macros.
+  max_digest_bytes_ = max_digest_bytes == 0 ? 128 : max_digest_bytes;
   // When `max_entries` is smaller than `kShardCount`, fall back to a
   // single shard. Splitting a tiny cap across many shards means each
   // shard would hold at most one entry, which turns per-shard LRU into
@@ -120,6 +124,14 @@ std::size_t InMemoryPolicyCache::shardIndex(
 
 std::optional<AuthorizationDecision> InMemoryPolicyCache::lookup(
     std::string_view digest, std::chrono::system_clock::time_point now) {
+  // Over-cap digests can never be present because `store()` refuses to
+  // insert them. Treating them as a miss here matches the "cache off
+  // is always safe" invariant — the caller falls through to fresh
+  // validation instead of the cache attempting to hash unbounded
+  // adversarial input.
+  if (digest.size() > max_digest_bytes_) {
+    return std::nullopt;
+  }
   Shard& shard = shards_[shardIndex(digest)];
   std::lock_guard<std::mutex> lock(shard.mu);
   // Transparent `find`: no `std::string` construction for the lookup
@@ -144,6 +156,13 @@ std::optional<AuthorizationDecision> InMemoryPolicyCache::lookup(
 void InMemoryPolicyCache::store(std::string_view digest,
                                 const AuthorizationDecision& decision,
                                 std::chrono::system_clock::time_point now) {
+  // Silently drop over-cap digests: preserving them would mean copying
+  // adversarial bytes into a per-entry `std::string`, and the value
+  // that would be recorded is unreachable anyway (`lookup()` returns
+  // early on the same check).
+  if (digest.size() > max_digest_bytes_) {
+    return;
+  }
   Shard& shard = shards_[shardIndex(digest)];
   std::lock_guard<std::mutex> lock(shard.mu);
   // Refuse to record an already-stale entry: nothing downstream would

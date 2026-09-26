@@ -313,6 +313,15 @@ class InMemoryPolicyCache final : public PolicyCache {
    * @param max_entries Hard cap on live entries. Zero is rejected: an
    *   unbounded decision cache is a memory-exhaustion vector when the
    *   digest space is attacker-controlled.
+   * @param max_digest_bytes Reject digests longer than this many bytes
+   *   at the API boundary. Defaults to 128 bytes, comfortably above
+   *   any practical cryptographic digest (SHA-512 = 64, and the
+   *   `PolicyCacheKey` composed form adds length prefixes and a
+   *   generation) while capping total memory per entry regardless of
+   *   caller behaviour. Zero is coerced to the default. `store()`
+   *   silently drops over-cap inputs; `lookup()` treats them as a
+   *   miss — either behaviour is safer than allocating an unbounded
+   *   key based on adversarial input.
    *
    * The cache is internally sharded (up to 16 shards, chosen by the low
    * bits of the digest hash) so that lookups from different threads
@@ -324,7 +333,8 @@ class InMemoryPolicyCache final : public PolicyCache {
    * preserved exactly and LRU eviction behaves globally. Set
    * `max_entries >= 16` in production to get the concurrency benefit.
    */
-  explicit InMemoryPolicyCache(std::size_t max_entries = 100'000);
+  explicit InMemoryPolicyCache(std::size_t max_entries = 100'000,
+                               std::size_t max_digest_bytes = 128);
 
   using PolicyCache::lookup;
   using PolicyCache::store;
@@ -419,6 +429,7 @@ class InMemoryPolicyCache final : public PolicyCache {
   // We instead route only to the first `active_shards_` slices so the
   // combined cap is exactly `max_entries` even for tiny stores.
   std::size_t active_shards_ = kShardCount;
+  std::size_t max_digest_bytes_ = 128;
 
   std::size_t shardIndex(std::string_view digest) const noexcept;
 };

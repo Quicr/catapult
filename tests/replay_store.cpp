@@ -103,6 +103,25 @@ TEST_SUITE("InMemoryReplayStore") {
     CHECK(store.admit("y", now, 300s) == ReplayAdmitResult::StoreExhausted);
   }
 
+  TEST_CASE("Over-cap jti fails closed as StoreExhausted") {
+    // Fail-closed semantics: an adversarial multi-KB jti must not
+    // grow per-entry memory. Refusing surfaces the anomaly to the
+    // validator, which treats StoreExhausted as a replay signal.
+    InMemoryReplayStore store(1024, 100, /*max_jti_bytes=*/32);
+    auto now = Clock::now();
+    std::string oversize(64, 'X');
+    CHECK(store.admit(oversize, now, 300s) ==
+          ReplayAdmitResult::StoreExhausted);
+    CHECK(store.size() == 0);
+  }
+
+  TEST_CASE("At-cap jti is admitted") {
+    InMemoryReplayStore store(1024, 100, /*max_jti_bytes=*/32);
+    auto now = Clock::now();
+    std::string exact(32, 'Y');
+    CHECK(store.admit(exact, now, 300s) == ReplayAdmitResult::Admitted);
+  }
+
   TEST_CASE("purgeExpired drops expired entries") {
     InMemoryReplayStore store;
     auto t0 = Clock::now();
