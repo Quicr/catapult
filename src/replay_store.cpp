@@ -50,16 +50,37 @@ void requireFleetCapableReplayBackend(const ReplayStore& store,
 
 InMemoryReplayStore::InMemoryReplayStore(std::size_t max_entries,
                                          std::size_t cleanup_every_n_admits)
-    : max_entries_(max_entries == 0 ? 1 : max_entries),
-      cleanup_interval_(
-          cleanup_every_n_admits == 0 ? 1 : cleanup_every_n_admits) {}
+    : cleanup_interval_(cleanup_every_n_admits == 0 ? 1
+                                                    : cleanup_every_n_admits) {
+  const std::size_t effective = max_entries == 0 ? 1 : max_entries;
+  // See `InMemoryPolicyCache`: tiny caps fall back to one shard so the
+  // combined cap is exactly `max_entries` and per-shard mechanics do
+  // not diverge from a caller's mental model of a single bounded store.
+  active_shards_ = effective < kShardCount ? 1 : kShardCount;
+  const std::size_t per_shard = effective / active_shards_;
+  const std::size_t remainder = effective % active_shards_;
+  for (std::size_t i = 0; i < kShardCount; ++i) {
+    if (i < active_shards_) {
+      shards_[i].max_entries = per_shard + (i < remainder ? 1 : 0);
+    } else {
+      shards_[i].max_entries = 0;
+    }
+  }
+}
+
+std::size_t InMemoryReplayStore::shardIndex(
+    std::string_view jti) const noexcept {
+  return std::hash<std::string_view>{}(jti) % active_shards_;
+}
 
 ReplayAdmitResult InMemoryReplayStore::admit(
     std::string_view jti, std::chrono::system_clock::time_point now,
     std::chrono::seconds window) {
-  std::lock_guard<std::mutex> lock(mu_);
+  Shard& shard = shards_[shardIndex(jti)];
+  std::lock_guard<std::mutex> lock(shard.mu);
 
-  if (auto it = entries_.find(std::string(jti)); it != entries_.end()) {
+  if (auto it = shard.entries.find(std::string(jti));
+      it != shard.entries.end()) {
     if (now - it->second < window) {
       return ReplayAdmitResult::Replay;
     }
@@ -70,21 +91,21 @@ ReplayAdmitResult InMemoryReplayStore::admit(
     return ReplayAdmitResult::Admitted;
   }
 
-  // Fresh jti. Enforce the size cap BEFORE inserting so an exhausted
-  // store cannot be tricked into overshooting `max_entries_` by a single
+  // Fresh jti. Enforce the per-shard cap BEFORE inserting so an
+  // exhausted shard cannot be tricked into overshooting by a single
   // slot on the mutating path.
-  if (entries_.size() >= max_entries_) {
-    purgeExpiredLocked(now, window);
-    if (entries_.size() >= max_entries_) {
+  if (shard.entries.size() >= shard.max_entries) {
+    shard.purgeExpiredLocked(now, window);
+    if (shard.entries.size() >= shard.max_entries) {
       return ReplayAdmitResult::StoreExhausted;
     }
   }
 
-  entries_.emplace(std::string(jti), now);
-  ++admits_since_cleanup_;
-  if (admits_since_cleanup_ >= cleanup_interval_) {
-    admits_since_cleanup_ = 0;
-    purgeExpiredLocked(now, window);
+  shard.entries.emplace(std::string(jti), now);
+  ++shard.admits_since_cleanup;
+  if (shard.admits_since_cleanup >= cleanup_interval_) {
+    shard.admits_since_cleanup = 0;
+    shard.purgeExpiredLocked(now, window);
   }
   return ReplayAdmitResult::Admitted;
 }
@@ -92,21 +113,27 @@ ReplayAdmitResult InMemoryReplayStore::admit(
 void InMemoryReplayStore::purgeExpired(
     std::chrono::system_clock::time_point now,
     std::chrono::seconds window) {
-  std::lock_guard<std::mutex> lock(mu_);
-  purgeExpiredLocked(now, window);
+  for (auto& shard : shards_) {
+    std::lock_guard<std::mutex> lock(shard.mu);
+    shard.purgeExpiredLocked(now, window);
+  }
 }
 
 std::size_t InMemoryReplayStore::size() const {
-  std::lock_guard<std::mutex> lock(mu_);
-  return entries_.size();
+  std::size_t total = 0;
+  for (const auto& shard : shards_) {
+    std::lock_guard<std::mutex> lock(shard.mu);
+    total += shard.entries.size();
+  }
+  return total;
 }
 
-void InMemoryReplayStore::purgeExpiredLocked(
+void InMemoryReplayStore::Shard::purgeExpiredLocked(
     std::chrono::system_clock::time_point now,
     std::chrono::seconds window) {
-  for (auto it = entries_.begin(); it != entries_.end();) {
+  for (auto it = entries.begin(); it != entries.end();) {
     if (now - it->second > window) {
-      it = entries_.erase(it);
+      it = entries.erase(it);
     } else {
       ++it;
     }

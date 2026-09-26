@@ -258,6 +258,16 @@ class InMemoryPolicyCache final : public PolicyCache {
    * @param max_entries Hard cap on live entries. Zero is rejected: an
    *   unbounded decision cache is a memory-exhaustion vector when the
    *   digest space is attacker-controlled.
+   *
+   * The cache is internally sharded (up to 16 shards, chosen by the low
+   * bits of the digest hash) so that lookups from different threads
+   * contend on distinct mutexes when their digests fall in different
+   * shards. `max_entries` is the *combined* cap across shards; each
+   * shard gets an equal slice (with any remainder distributed to the
+   * first shards). When `max_entries` is smaller than the shard count
+   * the cache falls back to a single shard so the combined cap is
+   * preserved exactly and LRU eviction behaves globally. Set
+   * `max_entries >= 16` in production to get the concurrency benefit.
    */
   explicit InMemoryPolicyCache(std::size_t max_entries = 100'000);
 
@@ -281,13 +291,28 @@ class InMemoryPolicyCache final : public PolicyCache {
   };
   using EntryList = std::list<Entry>;
 
-  mutable std::mutex mu_;
-  EntryList entries_;
-  std::unordered_map<std::string, EntryList::iterator> index_;
-  const std::size_t max_entries_;
+  static constexpr std::size_t kShardCount = 16;
 
-  void touchLocked(EntryList::iterator it);
-  void evictExpiredLocked(std::chrono::system_clock::time_point now);
+  struct Shard {
+    mutable std::mutex mu;
+    EntryList entries;
+    std::unordered_map<std::string, EntryList::iterator> index;
+    std::size_t max_entries = 0;
+
+    void touchLocked(EntryList::iterator it);
+    void evictExpiredLocked(std::chrono::system_clock::time_point now);
+  };
+
+  mutable Shard shards_[kShardCount];
+  // Effective shard count. When `max_entries < kShardCount`, splitting
+  // across all 16 slices would either leave some shards with zero
+  // capacity (a black hole for keys hashing to them) or, after
+  // coerce-to-one, inflate the total cap above the caller's request.
+  // We instead route only to the first `active_shards_` slices so the
+  // combined cap is exactly `max_entries` even for tiny stores.
+  std::size_t active_shards_ = kShardCount;
+
+  std::size_t shardIndex(std::string_view digest) const noexcept;
 };
 
 }  // namespace catapult

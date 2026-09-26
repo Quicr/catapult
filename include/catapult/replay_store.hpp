@@ -167,6 +167,11 @@ class InMemoryReplayStore final : public ReplayStore {
    * @param cleanup_every_n_admits Run opportunistic purge every N successful
    *   admits. Must be positive; the constructor coerces zero to 1 (i.e.
    *   purge on every admit) rather than dividing by zero at runtime.
+   *
+   * Internally sharded (fixed 16 shards keyed on the jti hash). Each
+   * shard has its own mutex, map, and cleanup counter; the cap is split
+   * evenly across shards so `max_entries` is preserved across the whole
+   * store.
    */
   explicit InMemoryReplayStore(std::size_t max_entries = 1'000'000,
                                std::size_t cleanup_every_n_admits = 10'000);
@@ -191,15 +196,27 @@ class InMemoryReplayStore final : public ReplayStore {
   }
 
  private:
-  mutable std::mutex mu_;
-  std::unordered_map<std::string, std::chrono::system_clock::time_point>
-      entries_;
-  std::size_t admits_since_cleanup_{0};
-  const std::size_t max_entries_;
-  const std::size_t cleanup_interval_;
+  static constexpr std::size_t kShardCount = 16;
 
-  void purgeExpiredLocked(std::chrono::system_clock::time_point now,
-                          std::chrono::seconds window);
+  struct Shard {
+    mutable std::mutex mu;
+    std::unordered_map<std::string, std::chrono::system_clock::time_point>
+        entries;
+    std::size_t admits_since_cleanup = 0;
+    std::size_t max_entries = 0;
+
+    void purgeExpiredLocked(std::chrono::system_clock::time_point now,
+                            std::chrono::seconds window);
+  };
+
+  mutable Shard shards_[kShardCount];
+  const std::size_t cleanup_interval_;
+  // See `InMemoryPolicyCache::active_shards_`: fewer than `kShardCount`
+  // slices are used when `max_entries` is smaller than the shard count,
+  // so the combined cap is exactly `max_entries`.
+  std::size_t active_shards_ = kShardCount;
+
+  std::size_t shardIndex(std::string_view jti) const noexcept;
 };
 
 }  // namespace catapult

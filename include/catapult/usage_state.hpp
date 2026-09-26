@@ -287,7 +287,11 @@ class InMemoryUsageState final : public UsageStateHook {
 
   std::size_t size() const override;
 
-  std::size_t capacity() const override { return max_entries_; }
+  std::size_t capacity() const override {
+    std::size_t total = 0;
+    for (const auto& shard : shards_) total += shard.max_entries;
+    return total;
+  }
 
   std::size_t exhaustion_events() const override;
 
@@ -307,20 +311,28 @@ class InMemoryUsageState final : public UsageStateHook {
     std::optional<std::chrono::system_clock::time_point> expiry;
   };
 
-  mutable std::mutex mu_;
-  std::unordered_map<std::string, Entry> admitted_;
-  std::unordered_set<std::string> revoked_;
-  std::size_t admits_since_cleanup_{0};
-  std::size_t exhaustion_events_{0};
-  const std::size_t max_entries_;
-  const std::size_t cleanup_interval_;
+  static constexpr std::size_t kShardCount = 16;
 
-  void purgeExpiredLocked(std::chrono::system_clock::time_point now);
-  // Insert `key` into the revoked set. Returns `StoreExhausted` if the
-  // store is at capacity and no admitted slot could be reclaimed —
-  // older revocations are preserved rather than evicted. Caller must
-  // hold `mu_`.
-  RevokeResult insertRevokedLocked(const std::string& key);
+  struct Shard {
+    mutable std::mutex mu;
+    std::unordered_map<std::string, Entry> admitted;
+    std::unordered_set<std::string> revoked;
+    std::size_t admits_since_cleanup = 0;
+    std::size_t exhaustion_events = 0;
+    std::size_t max_entries = 0;
+
+    void purgeExpiredLocked(std::chrono::system_clock::time_point now);
+    RevokeResult insertRevokedLocked(const std::string& key);
+  };
+
+  mutable Shard shards_[kShardCount];
+  const std::size_t cleanup_interval_;
+  // Fewer than `kShardCount` slices are used when `max_entries` is
+  // smaller than the shard count, so the combined cap is exactly
+  // `max_entries`.
+  std::size_t active_shards_ = kShardCount;
+
+  std::size_t shardIndex(std::string_view cti) const noexcept;
 };
 
 }  // namespace catapult

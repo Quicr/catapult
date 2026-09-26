@@ -46,26 +46,46 @@ void requireFleetCapableUsageBackend(const UsageStateHook& hook,
 
 InMemoryUsageState::InMemoryUsageState(std::size_t max_entries,
                                        std::size_t cleanup_every_n_admits)
-    : max_entries_(max_entries == 0 ? 1 : max_entries),
-      cleanup_interval_(
-          cleanup_every_n_admits == 0 ? 1 : cleanup_every_n_admits) {}
+    : cleanup_interval_(cleanup_every_n_admits == 0 ? 1
+                                                    : cleanup_every_n_admits) {
+  const std::size_t effective = max_entries == 0 ? 1 : max_entries;
+  // See `InMemoryPolicyCache`: tiny caps fall back to one shard so the
+  // combined cap is exactly `max_entries` and per-shard mechanics do
+  // not diverge from a caller's mental model of a single bounded store.
+  active_shards_ = effective < kShardCount ? 1 : kShardCount;
+  const std::size_t per_shard = effective / active_shards_;
+  const std::size_t remainder = effective % active_shards_;
+  for (std::size_t i = 0; i < kShardCount; ++i) {
+    if (i < active_shards_) {
+      shards_[i].max_entries = per_shard + (i < remainder ? 1 : 0);
+    } else {
+      shards_[i].max_entries = 0;
+    }
+  }
+}
+
+std::size_t InMemoryUsageState::shardIndex(
+    std::string_view cti) const noexcept {
+  return std::hash<std::string_view>{}(cti) % active_shards_;
+}
 
 UsageAdmitResult InMemoryUsageState::admit(
     std::string_view cti, CatReplayMode mode,
     std::chrono::system_clock::time_point now,
     std::optional<std::chrono::system_clock::time_point> expiry) {
-  std::lock_guard<std::mutex> lock(mu_);
+  Shard& shard = shards_[shardIndex(cti)];
+  std::lock_guard<std::mutex> lock(shard.mu);
 
   const std::string key(cti);
 
   // Revoked entries take precedence over the admitted map — a cti moved
   // to the revoked set must never round-trip back to `Admitted`, even if
   // an `admit()` from a stale path arrives with a still-valid expiry.
-  if (revoked_.find(key) != revoked_.end()) {
+  if (shard.revoked.find(key) != shard.revoked.end()) {
     return UsageAdmitResult::Revoked;
   }
 
-  if (auto it = admitted_.find(key); it != admitted_.end()) {
+  if (auto it = shard.admitted.find(key); it != shard.admitted.end()) {
     // Prior sighting exists. If its expiry is set and has passed, we may
     // reclaim the slot and readmit — the earlier grant is no longer live,
     // so a new presentation of the same cti after `exp` is not a replay
@@ -83,95 +103,107 @@ UsageAdmitResult InMemoryUsageState::admit(
     // lifetime. Because we're transferring one entry across sets, no
     // net capacity change happens.
     if (mode == CatReplayMode::RevokeOnReplay) {
-      admitted_.erase(it);
+      shard.admitted.erase(it);
       // Slot transfer: we just freed one admitted slot, so insert cannot
       // exhaust unless another thread raced in between — impossible while
-      // we hold `mu_`. The return value is therefore always `Accepted`.
-      (void)insertRevokedLocked(key);
+      // we hold the shard's mutex. Return is always `Accepted`.
+      (void)shard.insertRevokedLocked(key);
       return UsageAdmitResult::Revoked;
     }
     return UsageAdmitResult::Replay;
   }
 
-  // Fresh cti. Enforce the total-store cap BEFORE inserting so an
-  // exhausted store cannot be tricked into overshooting `max_entries_`
-  // by a single slot on the mutating path. Cap covers both admitted +
-  // revoked entries: a revocation-heavy workload must not silently
-  // starve admissions or vice-versa.
-  auto total = [&]() { return admitted_.size() + revoked_.size(); };
-  if (total() >= max_entries_) {
-    purgeExpiredLocked(now);
-    if (total() >= max_entries_) {
-      ++exhaustion_events_;
+  // Fresh cti. Enforce the per-shard cap BEFORE inserting so an
+  // exhausted shard cannot be tricked into overshooting by a single
+  // slot on the mutating path. Cap covers both admitted + revoked
+  // entries within the shard.
+  auto shard_total = [&]() {
+    return shard.admitted.size() + shard.revoked.size();
+  };
+  if (shard_total() >= shard.max_entries) {
+    shard.purgeExpiredLocked(now);
+    if (shard_total() >= shard.max_entries) {
+      ++shard.exhaustion_events;
       return UsageAdmitResult::StoreExhausted;
     }
   }
 
-  admitted_.emplace(key, Entry{expiry});
-  ++admits_since_cleanup_;
-  if (admits_since_cleanup_ >= cleanup_interval_) {
-    admits_since_cleanup_ = 0;
-    purgeExpiredLocked(now);
+  shard.admitted.emplace(key, Entry{expiry});
+  ++shard.admits_since_cleanup;
+  if (shard.admits_since_cleanup >= cleanup_interval_) {
+    shard.admits_since_cleanup = 0;
+    shard.purgeExpiredLocked(now);
   }
   return UsageAdmitResult::Admitted;
 }
 
 RevokeResult InMemoryUsageState::revoke(std::string_view cti) {
-  std::lock_guard<std::mutex> lock(mu_);
+  Shard& shard = shards_[shardIndex(cti)];
+  std::lock_guard<std::mutex> lock(shard.mu);
   const std::string key(cti);
   // Erase any prior admission first: doing so releases one slot before
   // insertRevokedLocked runs the cap check, which is what allows an
   // already-admitted cti to always be revokable regardless of store fill.
-  admitted_.erase(key);
-  return insertRevokedLocked(key);
+  shard.admitted.erase(key);
+  return shard.insertRevokedLocked(key);
 }
 
 void InMemoryUsageState::purgeExpired(
     std::chrono::system_clock::time_point now) {
-  std::lock_guard<std::mutex> lock(mu_);
-  purgeExpiredLocked(now);
+  for (auto& shard : shards_) {
+    std::lock_guard<std::mutex> lock(shard.mu);
+    shard.purgeExpiredLocked(now);
+  }
 }
 
 std::size_t InMemoryUsageState::size() const {
-  std::lock_guard<std::mutex> lock(mu_);
-  return admitted_.size() + revoked_.size();
+  std::size_t total = 0;
+  for (const auto& shard : shards_) {
+    std::lock_guard<std::mutex> lock(shard.mu);
+    total += shard.admitted.size() + shard.revoked.size();
+  }
+  return total;
 }
 
 std::size_t InMemoryUsageState::exhaustion_events() const {
-  std::lock_guard<std::mutex> lock(mu_);
-  return exhaustion_events_;
+  std::size_t total = 0;
+  for (const auto& shard : shards_) {
+    std::lock_guard<std::mutex> lock(shard.mu);
+    total += shard.exhaustion_events;
+  }
+  return total;
 }
 
-void InMemoryUsageState::purgeExpiredLocked(
+void InMemoryUsageState::Shard::purgeExpiredLocked(
     std::chrono::system_clock::time_point now) {
-  for (auto it = admitted_.begin(); it != admitted_.end();) {
+  for (auto it = admitted.begin(); it != admitted.end();) {
     if (it->second.expiry.has_value() && now >= *it->second.expiry) {
-      it = admitted_.erase(it);
+      it = admitted.erase(it);
     } else {
       ++it;
     }
   }
 }
 
-RevokeResult InMemoryUsageState::insertRevokedLocked(const std::string& key) {
+RevokeResult InMemoryUsageState::Shard::insertRevokedLocked(
+    const std::string& key) {
   // Idempotent: re-revoking an already-revoked cti is a no-op that reports
   // success. The cti is (still) recorded as revoked, which is the outcome
   // the caller asked for.
-  if (revoked_.find(key) != revoked_.end()) {
+  if (revoked.find(key) != revoked.end()) {
     return RevokeResult::Accepted;
   }
 
-  // Enforce the combined cap. When we cannot fit the new revocation we
-  // refuse it and leave the store untouched: silently evicting an older
+  // Enforce the shard cap. When we cannot fit the new revocation we
+  // refuse it and leave the shard untouched: silently evicting an older
   // revocation would forget operator intent that was already committed,
-  // which is a more dangerous failure than surfacing exhaustion. Callers
-  // are documented to treat StoreExhausted as a hard failure.
-  if (admitted_.size() + revoked_.size() >= max_entries_) {
-    ++exhaustion_events_;
+  // which is a more dangerous failure than surfacing exhaustion.
+  if (admitted.size() + revoked.size() >= max_entries) {
+    ++exhaustion_events;
     return RevokeResult::StoreExhausted;
   }
 
-  revoked_.insert(key);
+  revoked.insert(key);
   return RevokeResult::Accepted;
 }
 
