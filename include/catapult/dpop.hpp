@@ -679,7 +679,11 @@ namespace detail {
   };
   std::string out;
   out.reserve(v.size());
-  for (unsigned char c : v) {
+  for (char raw : v) {
+    // `std::string_view::value_type` is `char`; `is_unreserved` and the
+    // hex-lookup arithmetic below both require an unsigned byte to avoid
+    // implementation-defined behaviour on negative `char` values.
+    const auto c = static_cast<unsigned char>(raw);
     if (is_unreserved(c)) {
       out.push_back(static_cast<char>(c));
     } else {
