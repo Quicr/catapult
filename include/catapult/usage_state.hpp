@@ -36,12 +36,14 @@
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "claims.hpp"
+#include "store_capabilities.hpp"
 
 namespace catapult {
 
@@ -189,7 +191,35 @@ class UsageStateHook {
    * Default is 0 for backends that don't yet track this.
    */
   virtual std::size_t exhaustion_events() const { return 0; }
+
+  /**
+   * @brief Report what atomicity / durability / scope this backend
+   *        actually provides.
+   *
+   * See `ReplayStore::capabilities()` for rationale. `RevokeOnReplay`
+   * additionally requires `StoreDurability::Persistent`: a revocation
+   * that vanishes on process restart re-admits a token an operator has
+   * already marked bad. `requireFleetCapableUsageBackend()` refuses to
+   * boot such a configuration.
+   */
+  virtual StoreCapabilities capabilities() const {
+    return StoreCapabilities{StoreAtomicity::PerProcess,
+                             StoreDurability::Ephemeral,
+                             StoreScope::SingleNode, "unspecified"};
+  }
 };
+
+/**
+ * @brief Enforce that `hook` meets `requirements` at startup.
+ *
+ * Same shape as `requireFleetCapableReplayBackend`; throws
+ * `InsufficientBackendCapabilitiesError` (declared in `replay_store.hpp`,
+ * re-used here so operator error handling can be uniform) when the
+ * reported capabilities are too weak.
+ */
+void requireFleetCapableUsageBackend(
+    const UsageStateHook& hook,
+    FleetRequirements requirements = FleetRequirements{});
 
 /**
  * @brief In-process usage-state store backed by mutex-guarded hash tables.
@@ -242,6 +272,15 @@ class InMemoryUsageState final : public UsageStateHook {
   std::size_t capacity() const override { return max_entries_; }
 
   std::size_t exhaustion_events() const override;
+
+  StoreCapabilities capabilities() const override {
+    // Same rationale as `InMemoryReplayStore`: per-process atomic,
+    // ephemeral, single-node. Fleet-wide `catreplay` enforcement
+    // requires an external adapter.
+    return StoreCapabilities{StoreAtomicity::PerProcess,
+                             StoreDurability::Ephemeral,
+                             StoreScope::SingleNode, "in-memory"};
+  }
 
  private:
   struct Entry {

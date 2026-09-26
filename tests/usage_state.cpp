@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "catapult/claims.hpp"
+#include "catapult/replay_store.hpp"
 #include "catapult/usage_state.hpp"
 
 using namespace catapult;
@@ -381,5 +382,87 @@ TEST_SUITE("InMemoryUsageState") {
     // "a" is now in the revoked set and MUST stay there.
     CHECK(store.admit("a", CatReplayMode::RejectOnReplay, now + 2s,
                       now + 1h) == UsageAdmitResult::Revoked);
+  }
+}
+
+namespace {
+
+class FleetCapableUsageState final : public UsageStateHook {
+ public:
+  UsageAdmitResult admit(std::string_view, CatReplayMode, Clock::time_point,
+                         std::optional<Clock::time_point>) override {
+    return UsageAdmitResult::Admitted;
+  }
+  RevokeResult revoke(std::string_view) override {
+    return RevokeResult::Accepted;
+  }
+  void purgeExpired(Clock::time_point) override {}
+  std::size_t size() const override { return 0; }
+  StoreCapabilities capabilities() const override {
+    return StoreCapabilities{StoreAtomicity::ClusterWide,
+                             StoreDurability::Persistent,
+                             StoreScope::FleetWide, "mock-cluster"};
+  }
+};
+
+}  // namespace
+
+TEST_SUITE("UsageStateHook fleet-capability gate") {
+  TEST_CASE("In-memory default is refused by the default fleet requirements") {
+    InMemoryUsageState store;
+    CHECK_THROWS_AS(requireFleetCapableUsageBackend(store),
+                    InsufficientBackendCapabilitiesError);
+  }
+
+  TEST_CASE("Fleet-capable backend passes the gate") {
+    FleetCapableUsageState store;
+    CHECK_NOTHROW(requireFleetCapableUsageBackend(store));
+  }
+
+  TEST_CASE(
+      "Persistent requirement guards RevokeOnReplay against ephemeral state") {
+    // A backend that provides cluster atomicity + fleet scope but loses
+    // state on restart is dangerous for RevokeOnReplay: a revoked cti
+    // must remain revoked across the entire attack window.
+    class ClusterButEphemeral final : public UsageStateHook {
+     public:
+      UsageAdmitResult admit(std::string_view, CatReplayMode,
+                             Clock::time_point,
+                             std::optional<Clock::time_point>) override {
+        return UsageAdmitResult::Admitted;
+      }
+      RevokeResult revoke(std::string_view) override {
+        return RevokeResult::Accepted;
+      }
+      void purgeExpired(Clock::time_point) override {}
+      std::size_t size() const override { return 0; }
+      StoreCapabilities capabilities() const override {
+        return StoreCapabilities{StoreAtomicity::ClusterWide,
+                                 StoreDurability::Ephemeral,
+                                 StoreScope::FleetWide, "cluster-cache"};
+      }
+    };
+    ClusterButEphemeral store;
+    CHECK_THROWS_AS(requireFleetCapableUsageBackend(store),
+                    InsufficientBackendCapabilitiesError);
+  }
+
+  TEST_CASE("Default capabilities() on a hand-rolled adapter fails closed") {
+    class ForgetfulAdapter final : public UsageStateHook {
+     public:
+      UsageAdmitResult admit(std::string_view, CatReplayMode,
+                             Clock::time_point,
+                             std::optional<Clock::time_point>) override {
+        return UsageAdmitResult::Admitted;
+      }
+      RevokeResult revoke(std::string_view) override {
+        return RevokeResult::Accepted;
+      }
+      void purgeExpired(Clock::time_point) override {}
+      std::size_t size() const override { return 0; }
+    };
+    ForgetfulAdapter adapter;
+    CHECK_THROWS_AS(requireFleetCapableUsageBackend(adapter),
+                    InsufficientBackendCapabilitiesError);
   }
 }

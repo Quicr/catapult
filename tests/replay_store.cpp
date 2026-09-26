@@ -153,3 +153,81 @@ TEST_SUITE("ReplayStore plugin surface") {
     CHECK(store->admit_calls == 2);
   }
 }
+
+namespace {
+
+class FleetCapableReplayStore final : public ReplayStore {
+ public:
+  ReplayAdmitResult admit(std::string_view, Clock::time_point,
+                          std::chrono::seconds) override {
+    return ReplayAdmitResult::Admitted;
+  }
+  void purgeExpired(Clock::time_point, std::chrono::seconds) override {}
+  std::size_t size() const override { return 0; }
+  StoreCapabilities capabilities() const override {
+    return StoreCapabilities{StoreAtomicity::ClusterWide,
+                             StoreDurability::Persistent,
+                             StoreScope::FleetWide, "mock-cluster"};
+  }
+};
+
+}  // namespace
+
+TEST_SUITE("ReplayStore fleet-capability gate") {
+  TEST_CASE("In-memory default is refused by the default fleet requirements") {
+    // FC-4: a production deployment declaring fleet-wide replay
+    // guarantees must not boot against the process-local default.
+    InMemoryReplayStore store;
+    CHECK_THROWS_AS(requireFleetCapableReplayBackend(store),
+                    InsufficientBackendCapabilitiesError);
+  }
+
+  TEST_CASE("Fleet-capable backend passes the same gate") {
+    FleetCapableReplayStore store;
+    CHECK_NOTHROW(requireFleetCapableReplayBackend(store));
+  }
+
+  TEST_CASE("Operator can relax individual requirements") {
+    // A deployment that has consciously accepted single-node scope
+    // (e.g. a single-relay demo) can relax the gate. That decision
+    // must be explicit — the default is "everything required".
+    InMemoryReplayStore store;
+    FleetRequirements relaxed{
+        /*require_cluster_atomicity=*/false,
+        /*require_persistent=*/false,
+        /*require_fleet_scope=*/false,
+    };
+    CHECK_NOTHROW(requireFleetCapableReplayBackend(store, relaxed));
+  }
+
+  TEST_CASE("Error names the reported backend so mismatch is diagnosable") {
+    // "Wrong adapter wired" vs "adapter reports the wrong level" is a
+    // distinction operators need at startup. Include the backend name.
+    InMemoryReplayStore store;
+    try {
+      requireFleetCapableReplayBackend(store);
+      FAIL("expected InsufficientBackendCapabilitiesError");
+    } catch (const InsufficientBackendCapabilitiesError& e) {
+      const std::string msg = e.what();
+      CHECK(msg.find("in-memory") != std::string::npos);
+    }
+  }
+
+  TEST_CASE("Default capabilities() on a hand-rolled adapter fails closed") {
+    // If an operator writes a custom adapter and forgets to override
+    // capabilities(), it MUST NOT be silently treated as fleet-capable.
+    // The base default is pessimistic.
+    class ForgetfulAdapter final : public ReplayStore {
+     public:
+      ReplayAdmitResult admit(std::string_view, Clock::time_point,
+                              std::chrono::seconds) override {
+        return ReplayAdmitResult::Admitted;
+      }
+      void purgeExpired(Clock::time_point, std::chrono::seconds) override {}
+      std::size_t size() const override { return 0; }
+    };
+    ForgetfulAdapter adapter;
+    CHECK_THROWS_AS(requireFleetCapableReplayBackend(adapter),
+                    InsufficientBackendCapabilitiesError);
+  }
+}

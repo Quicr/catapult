@@ -1,6 +1,52 @@
 #include "catapult/replay_store.hpp"
 
+#include <sstream>
+
 namespace catapult {
+
+namespace {
+
+const char* atomicityLabel(StoreAtomicity a) {
+  return a == StoreAtomicity::ClusterWide ? "cluster-wide" : "per-process";
+}
+const char* durabilityLabel(StoreDurability d) {
+  return d == StoreDurability::Persistent ? "persistent" : "ephemeral";
+}
+const char* scopeLabel(StoreScope s) {
+  return s == StoreScope::FleetWide ? "fleet-wide" : "single-node";
+}
+
+std::string capabilitiesMessage(const char* subject,
+                                const StoreCapabilities& caps) {
+  std::ostringstream os;
+  os << subject << " backend '"
+     << (caps.backend_name.empty() ? "unspecified" : caps.backend_name)
+     << "' does not meet the deployment's declared fleet-wide "
+        "requirements (atomicity="
+     << atomicityLabel(caps.atomicity)
+     << ", durability=" << durabilityLabel(caps.durability)
+     << ", scope=" << scopeLabel(caps.scope)
+     << "). Wire a distributed adapter or explicitly relax the "
+        "requirement — see FC-4 in docs/security-invariants.md.";
+  return os.str();
+}
+
+}  // namespace
+
+void requireFleetCapableReplayBackend(const ReplayStore& store,
+                                      FleetRequirements requirements) {
+  const auto caps = store.capabilities();
+  const bool ok = (!requirements.require_cluster_atomicity ||
+                   caps.atomicity == StoreAtomicity::ClusterWide) &&
+                  (!requirements.require_persistent ||
+                   caps.durability == StoreDurability::Persistent) &&
+                  (!requirements.require_fleet_scope ||
+                   caps.scope == StoreScope::FleetWide);
+  if (!ok) {
+    throw InsufficientBackendCapabilitiesError(
+        capabilitiesMessage("Replay", caps));
+  }
+}
 
 InMemoryReplayStore::InMemoryReplayStore(std::size_t max_entries,
                                          std::size_t cleanup_every_n_admits)

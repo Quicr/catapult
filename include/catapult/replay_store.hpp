@@ -15,9 +15,12 @@
 #include <chrono>
 #include <cstddef>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+
+#include "store_capabilities.hpp"
 
 namespace catapult {
 
@@ -76,7 +79,57 @@ class ReplayStore {
    * @brief Current number of tracked entries (best-effort snapshot).
    */
   virtual std::size_t size() const = 0;
+
+  /**
+   * @brief Report what atomicity / durability / scope this backend
+   *        actually provides.
+   *
+   * The `admit()` signature alone cannot express whether the check is
+   * cluster-atomic, whether state survives restart, or whether the
+   * store is shared across relay instances. Operators use
+   * `requireFleetCapableReplayBackend()` at startup to refuse a backend
+   * whose reported capabilities are weaker than the deployment's
+   * declared guarantee (see FC-4 in `docs/security-invariants.md`).
+   *
+   * The default returns the pessimistic in-process record so a
+   * hand-rolled adapter that forgets to override is treated as
+   * single-node and rejected by any fleet-wide check.
+   */
+  virtual StoreCapabilities capabilities() const {
+    return StoreCapabilities{StoreAtomicity::PerProcess,
+                             StoreDurability::Ephemeral,
+                             StoreScope::SingleNode, "unspecified"};
+  }
 };
+
+/**
+ * @brief Thrown by `requireFleetCapableReplayBackend()` at startup when a
+ *        deployment declares fleet-wide replay guarantees but is wired
+ *        against a backend that cannot deliver them.
+ *
+ * This is a *configuration* error surfaced before the first request is
+ * served, not an admission-time failure. Operators handle it by wiring
+ * an appropriate adapter or by explicitly disabling the guarantee (and
+ * documenting that decision on the deployment).
+ */
+class InsufficientBackendCapabilitiesError : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
+};
+
+/**
+ * @brief Enforce that `store` meets `requirements` at startup.
+ *
+ * Throws `InsufficientBackendCapabilitiesError` when any required
+ * capability is missing. The error message names the reported backend
+ * so an operator can tell "wrong adapter wired" from "adapter reports
+ * the wrong level" at a glance.
+ *
+ * Idempotent and cheap; call once per validator wire-up.
+ */
+void requireFleetCapableReplayBackend(
+    const ReplayStore& store,
+    FleetRequirements requirements = FleetRequirements{});
 
 /**
  * @brief In-process replay store backed by a mutex-guarded hash map.
@@ -108,6 +161,16 @@ class InMemoryReplayStore final : public ReplayStore {
                     std::chrono::seconds window) override;
 
   std::size_t size() const override;
+
+  StoreCapabilities capabilities() const override {
+    // In-tree in-memory: atomic within this process (mutex-guarded),
+    // ephemeral (map dies with the process), single-node (each replica
+    // has its own map). No fleet-wide guarantee whatsoever — that is
+    // what `requireFleetCapableReplayBackend` exists to catch.
+    return StoreCapabilities{StoreAtomicity::PerProcess,
+                             StoreDurability::Ephemeral,
+                             StoreScope::SingleNode, "in-memory"};
+  }
 
  private:
   mutable std::mutex mu_;
