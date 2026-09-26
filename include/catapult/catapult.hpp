@@ -14,6 +14,7 @@
 #include "crypto.hpp"
 #include "cwt.hpp"
 #include "error.hpp"
+#include "reference_policies.hpp"
 #include "token.hpp"
 #include "validator.hpp"
 

@@ -81,6 +81,7 @@ set(CATAPULT_SOURCES
     src/moqt_claims.cpp
     src/parse_limits.cpp
     src/policy_cache.cpp
+    src/reference_policies.cpp
     src/replay_store.cpp
     src/strict_cbor.cpp
     src/token.cpp
@@ -400,6 +401,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         tests/moqt_claims.cpp
         tests/parse_limits.cpp
         tests/policy_cache.cpp
+        tests/reference_policies.cpp
         tests/replay_store.cpp
         tests/revalidation_callback.cpp
         tests/uri_catu.cpp
