@@ -2590,17 +2590,28 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
 
 Cwt Cwt::validateCwtBase64(const std::string& encodedCwt,
                            const CryptographicAlgorithm& algorithm) {
+  return validateCwtBase64(encodedCwt, algorithm, ParseLimits::defaults());
+}
+
+Cwt Cwt::validateCwtBase64(const std::string& encodedCwt,
+                           const CryptographicAlgorithm& algorithm,
+                           const ParseLimits& limits) {
+  // Refuse a caller configuration that would loosen the compiled ceiling
+  // or disable a check outright. Enforced before we look at input bytes
+  // so a misconfiguration surfaces as a configuration error, not as an
+  // input-format error.
+  validateParseLimits(limits);
   // CTA-5007-B §4.3.1: reject oversized encoded CATs before spending any
   // base64 or CBOR allocation on attacker-controlled input.
-  if (encodedCwt.size() > internal::kMaxEncodedTokenBytes) {
-    CAT_LOG_ERROR("Encoded CWT exceeds CTA-5007-B recommended maximum ({} > {})",
-                  encodedCwt.size(), internal::kMaxEncodedTokenBytes);
+  if (encodedCwt.size() > limits.max_encoded_token_bytes) {
+    CAT_LOG_ERROR("Encoded CWT exceeds configured maximum ({} > {})",
+                  encodedCwt.size(), limits.max_encoded_token_bytes);
     throw InvalidTokenFormatError();
   }
   auto cwtBytes = base64UrlDecode(encodedCwt);
-  if (cwtBytes.size() > internal::kMaxDecodedCborBytes) {
-    CAT_LOG_ERROR("Decoded CWT exceeds internal ceiling ({} > {} bytes)",
-                  cwtBytes.size(), internal::kMaxDecodedCborBytes);
+  if (cwtBytes.size() > limits.max_decoded_cbor_bytes) {
+    CAT_LOG_ERROR("Decoded CWT exceeds configured ceiling ({} > {} bytes)",
+                  cwtBytes.size(), limits.max_decoded_cbor_bytes);
     throw InvalidTokenFormatError();
   }
   return validateCwt(cwtBytes, algorithm);
@@ -2619,15 +2630,22 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
 
 Cwt Cwt::validateCwtBase64(const std::string& encodedCwt,
                            const KeyResolver& resolver) {
-  if (encodedCwt.size() > internal::kMaxEncodedTokenBytes) {
-    CAT_LOG_ERROR("Encoded CWT exceeds CTA-5007-B recommended maximum ({} > {})",
-                  encodedCwt.size(), internal::kMaxEncodedTokenBytes);
+  return validateCwtBase64(encodedCwt, resolver, ParseLimits::defaults());
+}
+
+Cwt Cwt::validateCwtBase64(const std::string& encodedCwt,
+                           const KeyResolver& resolver,
+                           const ParseLimits& limits) {
+  validateParseLimits(limits);
+  if (encodedCwt.size() > limits.max_encoded_token_bytes) {
+    CAT_LOG_ERROR("Encoded CWT exceeds configured maximum ({} > {})",
+                  encodedCwt.size(), limits.max_encoded_token_bytes);
     throw InvalidTokenFormatError();
   }
   auto cwtBytes = base64UrlDecode(encodedCwt);
-  if (cwtBytes.size() > internal::kMaxDecodedCborBytes) {
-    CAT_LOG_ERROR("Decoded CWT exceeds internal ceiling ({} > {} bytes)",
-                  cwtBytes.size(), internal::kMaxDecodedCborBytes);
+  if (cwtBytes.size() > limits.max_decoded_cbor_bytes) {
+    CAT_LOG_ERROR("Decoded CWT exceeds configured ceiling ({} > {} bytes)",
+                  cwtBytes.size(), limits.max_decoded_cbor_bytes);
     throw InvalidTokenFormatError();
   }
   return validateCwt(cwtBytes, resolver);

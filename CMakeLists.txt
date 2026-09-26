@@ -76,6 +76,7 @@ set(CATAPULT_SOURCES
     src/error.cpp
     src/key_resolver.cpp
     src/moqt_claims.cpp
+    src/parse_limits.cpp
     src/policy_cache.cpp
     src/replay_store.cpp
     src/strict_cbor.cpp

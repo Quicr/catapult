@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "error.hpp"
+#include "parse_limits.hpp"
 #include "token.hpp"
 
 // Forward declarations for CBOR types
@@ -237,12 +238,34 @@ class Cwt {
                                const class CryptographicAlgorithm& algorithm);
 
   /**
+   * @brief Validate a base64url-encoded CWT string with caller-supplied
+   *        parse limits.
+   *
+   * Same contract as the default overload; the limits are validated (see
+   * `parse_limits.hpp`) before any parse work runs. Callers pass a
+   * tightened `ParseLimits` when their transport layer already enforces
+   * smaller ceilings — the library never runs a limit looser than the
+   * default. See FC-9 in `docs/security-invariants.md`.
+   */
+  static Cwt validateCwtBase64(const std::string& encodedCwt,
+                               const class CryptographicAlgorithm& algorithm,
+                               const ParseLimits& limits);
+
+  /**
    * @brief Validate a base64url-encoded CWT string with a KeyResolver.
    *
    * Convenience overload; see the raw-bytes variant for contract details.
    */
   static Cwt validateCwtBase64(const std::string& encodedCwt,
                                const class KeyResolver& resolver);
+
+  /**
+   * @brief Validate a base64url-encoded CWT string with a KeyResolver
+   *        and caller-supplied parse limits.
+   */
+  static Cwt validateCwtBase64(const std::string& encodedCwt,
+                               const class KeyResolver& resolver,
+                               const ParseLimits& limits);
 
   /**
    * @brief Validate a base64url-encoded multi-signed CWT
