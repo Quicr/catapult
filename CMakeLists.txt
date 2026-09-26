@@ -75,6 +75,7 @@ set(CATAPULT_SOURCES
     src/dpop.cpp
     src/error.cpp
     src/key_resolver.cpp
+    src/logging.cpp
     src/moqt_claims.cpp
     src/parse_limits.cpp
     src/policy_cache.cpp
@@ -176,32 +177,15 @@ set_target_properties(catapult PROPERTIES
     SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
-# Add spdlog if logging is enabled
+# Logging.
+#
+# The library owns only the log-sink seam (LogSink + CAT_LOG_* macros).
+# Embedders wire their own logger by installing a sink at startup. The
+# core catapult archive therefore does not depend on spdlog — that
+# dependency is now optional and only pulled in when a build asks for
+# the spdlog adapter. Rationale is in include/catapult/logging.hpp.
 if(ENABLE_LOGGING)
-    # Add spdlog as submodule if not already added. Its defaults for
-    # tests/bench/example/install/shared already resolve to OFF via
-    # SPDLOG_MASTER_PROJECT, but pin them explicitly so a parent build or
-    # a future upstream default cannot silently reintroduce those targets.
-    if(NOT TARGET spdlog::spdlog)
-        set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
-        add_subdirectory(external/spdlog EXCLUDE_FROM_ALL)
-    endif()
-    # spdlog is used only from library .cpp files (via logging.hpp macros that
-    # expand to nothing when ENABLE_LOGGING is off at compile time). Bundle
-    # its object files into libcatapult the same way we do for libcbor so the
-    # installed archive is self-contained and consumers do not need spdlog on
-    # their include or link path.
-    target_sources(catapult PRIVATE $<TARGET_OBJECTS:spdlog>)
-    target_include_directories(catapult PRIVATE
-        $<BUILD_INTERFACE:$<TARGET_PROPERTY:spdlog,INCLUDE_DIRECTORIES>>
-    )
-    target_compile_definitions(catapult PRIVATE
-        $<TARGET_PROPERTY:spdlog,INTERFACE_COMPILE_DEFINITIONS>
-    )
+    target_compile_definitions(catapult PUBLIC ENABLE_LOGGING)
 endif()
 
 # Set compiler flags with enhanced security and warnings
@@ -283,9 +267,9 @@ if(CATAPULT_ENABLE_TSAN)
     target_link_options(catapult PUBLIC ${CATAPULT_TSAN_FLAGS})
 endif()
 
-if(ENABLE_LOGGING)
-    target_compile_definitions(catapult PRIVATE ENABLE_LOGGING)
-endif()
+# ENABLE_LOGGING propagation moved into the LogSink block above and made
+# PUBLIC so consumers including <catapult/logging.hpp> see the macros
+# expand.
 
 # ---------------------------------------------------------------------------
 # Install & package-config
@@ -295,10 +279,10 @@ endif()
 # catapult via add_subdirectory() can opt out and avoid dragging our
 # artefacts into its own `cmake --install` output.
 #
-# Vendored submodules (cbor, spdlog, nlohmann_json) are pinned upstream to
-# NOT emit install rules (see the CACHE FORCE lines above), so the install
+# Vendored submodules (cbor, nlohmann_json) are pinned upstream to NOT
+# emit install rules (see the CACHE FORCE lines above), so the install
 # set covers only catapult's own headers and the archive built here — a
-# consumer is expected to bring their own OpenSSL / cbor / spdlog via
+# consumer is expected to bring their own OpenSSL / cbor via
 # `find_package` if needed. The generated package config declares
 # `find_dependency(OpenSSL REQUIRED)` explicitly for that reason.
 if(CATAPULT_INSTALL AND CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
@@ -376,16 +360,8 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         add_subdirectory(external/doctest EXCLUDE_FROM_ALL)
     endif()
 
-    # Add spdlog if logging is enabled and not already added. Guards match
-    # the earlier block; both may run depending on how catapult is embedded.
-    if(ENABLE_LOGGING AND NOT TARGET spdlog::spdlog)
-        set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
-        add_subdirectory(external/spdlog EXCLUDE_FROM_ALL)
-    endif()
+    # spdlog is no longer a build dependency of tests. Tests use the
+    # LogSink seam directly; there is nothing to bring in here.
 
     # Find Google Benchmark
     find_package(benchmark QUIET)
@@ -500,17 +476,10 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
             examples/cat_cwt_per_signature_example.cpp
     )
 
-    # In-tree examples need spdlog headers when they include
-    # `catapult/logging.hpp` under `ENABLE_LOGGING`. That header propagates
-    # spdlog through the preprocessor; the library keeps spdlog off its
-    # PUBLIC include path so installed consumers do not pick it up, but
-    # in-tree examples can borrow it via the spdlog::spdlog target.
+    # Examples link against catapult only. `ENABLE_LOGGING` propagates
+    # as a PUBLIC compile definition from libcatapult, so the CAT_LOG_*
+    # macros expand correctly here without any per-target wiring.
     target_link_libraries(cat_cwt_per_signature_example catapult)
-
-    if(ENABLE_LOGGING)
-        target_compile_definitions(cat_cwt_per_signature_example PRIVATE ENABLE_LOGGING)
-        target_link_libraries(cat_cwt_per_signature_example spdlog::spdlog)
-    endif()
 
     add_executable(cat_cwt_crypto
             examples/cat_cwt_crypto.cpp
