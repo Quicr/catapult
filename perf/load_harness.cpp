@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -49,6 +50,7 @@
 #include <sys/resource.h>
 
 #include "catapult/catapult.hpp"
+#include "catapult/metrics.hpp"
 
 using namespace catapult;
 using namespace std::chrono_literals;
@@ -181,10 +183,58 @@ PermissivePolicy& permissivePolicy() {
   return p;
 }
 
+// A trivial in-process metrics sink that tallies every event by name.
+// Installed once at startup so the harness can prove that the
+// `CAT_METRIC_*` instrumentation actually fires from the admission
+// hot path, and print an operator-eye-view summary at the end.
+class CountingMetricsSink final : public metrics::MetricsSink {
+ public:
+  void increment(std::string_view name, uint64_t by) noexcept override {
+    std::lock_guard<std::mutex> lock(mu_);
+    counters_[std::string(name)] += by;
+  }
+  void observe(std::string_view name, uint64_t value_ns) noexcept override {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto& h = histograms_[std::string(name)];
+    h.count += 1;
+    h.sum_ns += value_ns;
+  }
+  void gauge(std::string_view name, int64_t value) noexcept override {
+    std::lock_guard<std::mutex> lock(mu_);
+    gauges_[std::string(name)] = value;
+  }
+
+  struct HistoSnapshot {
+    uint64_t count = 0;
+    uint64_t sum_ns = 0;
+  };
+
+  std::map<std::string, uint64_t> countersSnapshot() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return counters_;
+  }
+  std::map<std::string, HistoSnapshot> histogramsSnapshot() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return histograms_;
+  }
+
+ private:
+  std::mutex mu_;
+  std::map<std::string, uint64_t> counters_;
+  std::map<std::string, HistoSnapshot> histograms_;
+  std::map<std::string, int64_t> gauges_;
+};
+
 }  // namespace
 
 int main(int argc, char** argv) {
   Config cfg = parseArgs(argc, argv);
+
+  // Install a counting metrics sink up front so setup + worker paths
+  // both feed it. When ENABLE_METRICS is off at compile time the
+  // instrumentation compiles out and this sink stays silent.
+  auto metrics_sink = std::make_shared<CountingMetricsSink>();
+  metrics::setMetricsSink(metrics_sink);
 
   // --- Setup: issuer key, per-flow CWTs, DPoP key pairs. -------------------
   const std::string relay_endpoint = "relay.moqt-cdn.example.com:4433";
@@ -415,6 +465,9 @@ int main(int argc, char** argv) {
   double ops_per_s = static_cast<double>(total_ops.load()) / elapsed_s;
   long rss_kb = peakRssKb();
 
+  auto counters = metrics_sink->countersSnapshot();
+  auto histograms = metrics_sink->histogramsSnapshot();
+
   // --- Report. -------------------------------------------------------------
   if (cfg.pretty) {
     std::printf("=== catapult load harness ===\n");
@@ -436,6 +489,21 @@ int main(int argc, char** argv) {
     std::printf("reject.replay   : %ld\n", total_replay);
     std::printf("reject.signature: %ld\n", total_sig);
     std::printf("reject.other    : %ld\n", total_other);
+    if (!counters.empty() || !histograms.empty()) {
+      std::printf("--- metrics sink ---\n");
+      for (const auto& [name, value] : counters) {
+        std::printf("counter %-45s %llu\n", name.c_str(),
+                    static_cast<unsigned long long>(value));
+      }
+      for (const auto& [name, h] : histograms) {
+        double mean_ns =
+            h.count == 0
+                ? 0.0
+                : static_cast<double>(h.sum_ns) / static_cast<double>(h.count);
+        std::printf("histo   %-45s count=%llu mean=%.0fns\n", name.c_str(),
+                    static_cast<unsigned long long>(h.count), mean_ns);
+      }
+    }
   } else {
     std::printf(
         "{\"threads\":%d,\"flows\":%d,\"iterations_per_thread\":%ld,"
@@ -443,7 +511,7 @@ int main(int argc, char** argv) {
         "\"latency_ns\":{\"p50\":%llu,\"p95\":%llu,\"p99\":%llu,\"max\":%llu},"
         "\"peak_rss_kb\":%ld,"
         "\"allow\":%ld,\"reject\":{\"expired\":%ld,\"replay\":%ld,"
-        "\"signature\":%ld,\"other\":%ld}}\n",
+        "\"signature\":%ld,\"other\":%ld},",
         cfg.threads, cfg.flows, cfg.iterations_per_thread, elapsed_s,
         total_ops.load(), ops_per_s,
         static_cast<unsigned long long>(p50),
@@ -451,7 +519,25 @@ int main(int argc, char** argv) {
         static_cast<unsigned long long>(p99),
         static_cast<unsigned long long>(pmax), rss_kb, total_allow, total_exp,
         total_replay, total_sig, total_other);
+    std::printf("\"metrics\":{\"counters\":{");
+    bool first = true;
+    for (const auto& [name, value] : counters) {
+      std::printf("%s\"%s\":%llu", first ? "" : ",", name.c_str(),
+                  static_cast<unsigned long long>(value));
+      first = false;
+    }
+    std::printf("},\"histograms\":{");
+    first = true;
+    for (const auto& [name, h] : histograms) {
+      std::printf("%s\"%s\":{\"count\":%llu,\"sum_ns\":%llu}",
+                  first ? "" : ",", name.c_str(),
+                  static_cast<unsigned long long>(h.count),
+                  static_cast<unsigned long long>(h.sum_ns));
+      first = false;
+    }
+    std::printf("}}}\n");
   }
 
+  metrics::setMetricsSink(nullptr);
   return 0;
 }

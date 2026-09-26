@@ -11,6 +11,7 @@
 #include "catapult/internal/parse_limits.hpp"
 #include "catapult/internal/safe_arith.hpp"
 #include "catapult/logging.hpp"
+#include "catapult/metrics.hpp"
 // This translation unit defines the legacy JWT-shaped API when the build
 // option is enabled; opt into the acknowledgement macro so the
 // declarations in validator.hpp are visible here.
@@ -661,18 +662,67 @@ void CatTokenValidator::validateCompositeClaims(const CatToken& token) const {
   }
 }
 
+namespace {
+
+// Map a thrown `CatError` (or unknown) to the metric-name for the
+// admission-outcome counter. Kept next to the intoValidated wrappers so
+// a new reject class shows up in both the exception hierarchy and the
+// metric taxonomy in the same diff.
+const char* rejectMetricFor(CatErrorCode code) noexcept {
+  using namespace ::catapult::metrics::names;
+  switch (code) {
+    case CatErrorCode::TOKEN_EXPIRED:
+      return kAdmissionRejectExpired;
+    case CatErrorCode::TOKEN_NOT_YET_VALID:
+      return kAdmissionRejectNotYetValid;
+    case CatErrorCode::INVALID_ISSUER:
+      return kAdmissionRejectIssuer;
+    case CatErrorCode::INVALID_AUDIENCE:
+      return kAdmissionRejectAudience;
+    case CatErrorCode::USAGE_LIMIT_EXCEEDED:
+      return kAdmissionRejectUsage;
+    case CatErrorCode::REPLAY_ATTACK_DETECTED:
+      return kAdmissionRejectReplay;
+    default:
+      // Everything else — missing/invalid claim, unsupported alg, crypto
+      // errors, policy-hook rejection — collapses to `reject.other`.
+      // Split further when a specific class earns operator attention.
+      return kAdmissionRejectOther;
+  }
+}
+
+}  // namespace
+
 ValidatedCatToken CatTokenValidator::intoValidated(CatToken token) const {
-  // Run every semantic check first. If validate() throws, `token` is
-  // destroyed with the exception and no ValidatedCatToken is produced —
-  // callers cannot observe partially-validated state.
-  validate(token);
-  return ValidatedCatToken(std::move(token));
+  return intoValidated(std::move(token), PolicyContext{});
 }
 
 ValidatedCatToken CatTokenValidator::intoValidated(
     CatToken token, const PolicyContext& context) const {
-  validate(token, context);
-  return ValidatedCatToken(std::move(token));
+  auto t0 = std::chrono::steady_clock::now();
+  try {
+    validate(token, context);
+    auto t1 = std::chrono::steady_clock::now();
+    CAT_METRIC_INC(::catapult::metrics::names::kAdmissionAllow);
+    CAT_METRIC_OBSERVE_NS(
+        ::catapult::metrics::names::kAdmissionLatencyNs,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+    return ValidatedCatToken(std::move(token));
+  } catch (const CatError& e) {
+    auto t1 = std::chrono::steady_clock::now();
+    CAT_METRIC_INC(rejectMetricFor(e.errorCode()));
+    CAT_METRIC_OBSERVE_NS(
+        ::catapult::metrics::names::kAdmissionLatencyNs,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+    throw;
+  } catch (...) {
+    auto t1 = std::chrono::steady_clock::now();
+    CAT_METRIC_INC(::catapult::metrics::names::kAdmissionRejectOther);
+    CAT_METRIC_OBSERVE_NS(
+        ::catapult::metrics::names::kAdmissionLatencyNs,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+    throw;
+  }
 }
 
 CatErrorCode CatTokenValidator::tryValidate(const CatToken& token) const noexcept {

@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(ENABLE_LOGGING "Enable logging with spdlog" ON)
+option(ENABLE_METRICS "Emit CAT_METRIC_* calls at hot-path instrumentation points" ON)
 option(CATAPULT_ENABLE_JSON "Enable JSON serialization support (requires nlohmann_json)" ON)
 option(CATAPULT_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(CATAPULT_ENABLE_TSAN "Enable ThreadSanitizer (mutually exclusive with ASan/UBSan)" OFF)
@@ -76,6 +77,7 @@ set(CATAPULT_SOURCES
     src/error.cpp
     src/key_resolver.cpp
     src/logging.cpp
+    src/metrics.cpp
     src/moqt_claims.cpp
     src/parse_limits.cpp
     src/policy_cache.cpp
@@ -186,6 +188,16 @@ set_target_properties(catapult PROPERTIES
 # the spdlog adapter. Rationale is in include/catapult/logging.hpp.
 if(ENABLE_LOGGING)
     target_compile_definitions(catapult PUBLIC ENABLE_LOGGING)
+endif()
+
+# Metrics.
+#
+# Same shape as ENABLE_LOGGING: the library owns the sink seam and the
+# CAT_METRIC_* macros. Embedders wire their own metric backend by
+# installing a MetricsSink at startup. When OFF the macros expand to
+# no-ops and the hot-path instrumentation is a hard zero.
+if(ENABLE_METRICS)
+    target_compile_definitions(catapult PUBLIC ENABLE_METRICS)
 endif()
 
 # Set compiler flags with enhanced security and warnings

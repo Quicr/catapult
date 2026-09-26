@@ -9,6 +9,7 @@
 #include "catapult/dpop.hpp"
 #include "catapult/internal/parse_limits.hpp"
 #include "catapult/logging.hpp"
+#include "catapult/metrics.hpp"
 
 #include <cbor.h>
 #include <openssl/core_names.h>
@@ -1009,6 +1010,21 @@ std::string generate_jti() {
 bool DpopProofValidator::validate_proof(
     const DpopProof& proof, int expected_action, std::string_view expected_uri,
     const std::string& expected_public_key_thumbprint) {
+  // Emit the DPoP allow/reject counter on every exit from this
+  // function. Signature has 11 return sites (10 rejects + 1 allow);
+  // routing them all through an RAII scope-exit keeps every path
+  // instrumented without decorating each `return false`.
+  struct DpopMetric {
+    bool allowed = false;
+    ~DpopMetric() {
+      if (allowed) {
+        CAT_METRIC_INC(::catapult::metrics::names::kDpopValidateAllow);
+      } else {
+        CAT_METRIC_INC(::catapult::metrics::names::kDpopValidateReject);
+      }
+    }
+  } _dpop_metric;
+
   // The `cnf`/`catdpop` binding must be checked against a non-empty
   // expected thumbprint: an empty string cannot represent a caller's
   // policy intent and previously caused the check to be silently
@@ -1154,15 +1170,22 @@ bool DpopProofValidator::validate_proof(
     auto now = std::chrono::system_clock::now();
     auto result = replay_store_->admit(jti, now,
                                        settings_.get_effective_window());
-    if (result != ReplayAdmitResult::Admitted) {
-      if (result == ReplayAdmitResult::StoreExhausted) {
+    switch (result) {
+      case ReplayAdmitResult::Admitted:
+        CAT_METRIC_INC(::catapult::metrics::names::kReplayAdmitted);
+        break;
+      case ReplayAdmitResult::Replay:
+        CAT_METRIC_INC(::catapult::metrics::names::kReplayHit);
+        return false;
+      case ReplayAdmitResult::StoreExhausted:
+        CAT_METRIC_INC(::catapult::metrics::names::kReplayStoreExhausted);
         CAT_LOG_WARN(
             "DPoP replay store exhausted; rejecting proof to fail closed");
-      }
-      return false;
+        return false;
     }
   }
 
+  _dpop_metric.allowed = true;
   return true;
 }
 
