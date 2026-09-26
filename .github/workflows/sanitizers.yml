@@ -8,6 +8,13 @@ on:
 
 jobs:
   asan-ubsan:
+    # ASan/UBSan run on Linux only. The Darwin sanitizer runtime
+    # (libclang_rt.asan_osx_dynamic) hangs at process init on recent
+    # macOS/dyld versions during shadow-memory setup, which produced
+    # a silent stall for every test binary linked against it. Linux
+    # runners give us deterministic sanitizer coverage across clang
+    # and gcc; adding macOS back requires the runtime to be fixed
+    # upstream or vendored.
     strategy:
       fail-fast: false
       matrix:
@@ -20,10 +27,6 @@ jobs:
             compiler: gcc
             cc: gcc
             cxx: g++
-          - os: macos-latest
-            compiler: clang
-            cc: clang
-            cxx: clang++
 
     runs-on: ${{ matrix.os }}
 
@@ -38,16 +41,10 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Set up dependencies (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
+    - name: Set up dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake build-essential libssl-dev
-
-    - name: Set up dependencies (macOS)
-      if: matrix.os == 'macos-latest'
-      run: |
-        brew install cmake openssl
 
     - name: Configure with sanitizers
       run: |
@@ -64,7 +61,7 @@ jobs:
 
     - name: Run tests under ASan/UBSan
       env:
-        ASAN_OPTIONS: ${{ matrix.os == 'ubuntu-latest' && 'detect_leaks=1:halt_on_error=1:strict_string_checks=1' || 'halt_on_error=1:strict_string_checks=1' }}
+        ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
       run: ctest --test-dir build --output-on-failure --timeout 600
 
     - name: Upload sanitizer logs
@@ -101,8 +98,7 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Set up dependencies (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
+    - name: Set up dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake build-essential libssl-dev
