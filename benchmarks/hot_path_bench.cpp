@@ -214,6 +214,25 @@ static void BM_ReplayStore_Admit_Replay(benchmark::State& state) {
 }
 BENCHMARK(BM_ReplayStore_Admit_Replay);
 
+static void BM_ReplayStore_PurgeExpired_Cold(benchmark::State& state) {
+  // Load the store with `N` fully-expired entries and measure a purge
+  // sweep. This is the worst-case for the O(N) purge — a store that
+  // sat idle overnight and now needs to be swept before it hosts fresh
+  // admissions.
+  const std::size_t n = static_cast<std::size_t>(state.range(0));
+  const auto now = std::chrono::system_clock::now();
+  const auto keys = makeKeys(n, 33);
+  for (auto _ : state) {
+    state.PauseTiming();
+    InMemoryReplayStore store(n * 2);
+    for (const auto& k : keys) store.admit(k, now, 300s);
+    state.ResumeTiming();
+    store.purgeExpired(now + 3600s, 300s);
+  }
+  state.SetItemsProcessed(state.iterations() * static_cast<int>(n));
+}
+BENCHMARK(BM_ReplayStore_PurgeExpired_Cold)->Arg(4'096)->Arg(65'536);
+
 static void BM_ReplayStore_Admit_Replay_Concurrent(benchmark::State& state) {
   // Every thread hits the same store on partitioned keys. Replay hit is
   // the workload most representative of steady-state DPoP traffic once

@@ -132,7 +132,11 @@ UsageAdmitResult InMemoryUsageState::admit(
   ++shard.admits_since_cleanup;
   if (shard.admits_since_cleanup >= cleanup_interval_) {
     shard.admits_since_cleanup = 0;
-    shard.purgeExpiredLocked(now);
+    // Opportunistic housekeeping: bounded so a large shard cannot cost
+    // one admit call an O(N) sweep. Cap-recovery above still uses the
+    // exhaustive `purgeExpiredLocked`.
+    static constexpr std::size_t kOpportunisticBudget = 64;
+    shard.purgeIncrementalLocked(now, kOpportunisticBudget);
   }
   return UsageAdmitResult::Admitted;
 }
@@ -177,6 +181,18 @@ std::size_t InMemoryUsageState::exhaustion_events() const {
 void InMemoryUsageState::Shard::purgeExpiredLocked(
     std::chrono::system_clock::time_point now) {
   for (auto it = admitted.begin(); it != admitted.end();) {
+    if (it->second.expiry.has_value() && now >= *it->second.expiry) {
+      it = admitted.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+void InMemoryUsageState::Shard::purgeIncrementalLocked(
+    std::chrono::system_clock::time_point now, std::size_t budget) {
+  auto it = admitted.begin();
+  for (std::size_t i = 0; i < budget && it != admitted.end(); ++i) {
     if (it->second.expiry.has_value() && now >= *it->second.expiry) {
       it = admitted.erase(it);
     } else {

@@ -322,6 +322,11 @@ class InMemoryUsageState final : public UsageStateHook {
     std::size_t max_entries = 0;
 
     void purgeExpiredLocked(std::chrono::system_clock::time_point now);
+    // Bounded-budget variant used inside `admit()` for opportunistic
+    // housekeeping. Cap-recovery, which MUST be exhaustive, still uses
+    // `purgeExpiredLocked`.
+    void purgeIncrementalLocked(std::chrono::system_clock::time_point now,
+                                std::size_t budget);
     RevokeResult insertRevokedLocked(const std::string& key);
   };
 

@@ -403,6 +403,12 @@ class InMemoryPolicyCache final : public PolicyCache {
 
     void touchLocked(EntryList::iterator it);
     void evictExpiredLocked(std::chrono::system_clock::time_point now);
+    // Bounded-budget expiry sweep from the LRU tail. On the store hot
+    // path we only need to reclaim a few slots per call — the LRU
+    // eviction below still enforces the cap — so we do not want to
+    // pay an O(N) sweep on every insertion.
+    void evictExpiredIncrementalLocked(
+        std::chrono::system_clock::time_point now, std::size_t budget);
   };
 
   mutable Shard shards_[kShardCount];

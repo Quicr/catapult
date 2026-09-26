@@ -207,6 +207,15 @@ class InMemoryReplayStore final : public ReplayStore {
 
     void purgeExpiredLocked(std::chrono::system_clock::time_point now,
                             std::chrono::seconds window);
+    // Bounded-budget variant: iterate at most `budget` entries, erasing
+    // any that are outside the replay window. Used inside `admit()` so
+    // one call cannot stall on an O(N) sweep of a large shard.
+    // `purgeExpiredLocked` remains the unbounded sweep that operators
+    // drive from `purgeExpired()` when they explicitly want to drain
+    // everything expired.
+    void purgeIncrementalLocked(std::chrono::system_clock::time_point now,
+                                std::chrono::seconds window,
+                                std::size_t budget);
   };
 
   mutable Shard shards_[kShardCount];

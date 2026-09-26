@@ -163,7 +163,13 @@ void InMemoryPolicyCache::store(std::string_view digest,
     return;
   }
 
-  shard.evictExpiredLocked(now);
+  // Bounded expiry drain from the LRU tail. Full sweeps stay available
+  // via `evictExpiredLocked` for callers that want a hard drain; the
+  // hot store path only reclaims a handful of slots per call. LRU
+  // eviction below still enforces the cap even when nothing was
+  // expiry-reclaimable this pass.
+  static constexpr std::size_t kOpportunisticBudget = 8;
+  shard.evictExpiredIncrementalLocked(now, kOpportunisticBudget);
 
   if (shard.entries.size() >= shard.max_entries) {
     // Drop LRU within this shard. LRU is per-shard by design: a global
@@ -223,6 +229,23 @@ void InMemoryPolicyCache::Shard::evictExpiredLocked(
   // Sweep in one pass within the shard. Because each shard holds only
   // ~1/16 of the entries, this is bounded to O(N / kShardCount).
   for (auto it = entries.begin(); it != entries.end();) {
+    if (it->decision.expires_at <= now) {
+      index.erase(it->digest);
+      it = entries.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+void InMemoryPolicyCache::Shard::evictExpiredIncrementalLocked(
+    std::chrono::system_clock::time_point now, std::size_t budget) {
+  // Walk from the LRU tail forward: the oldest entries are the most
+  // likely to have expired, and this walk is exactly the direction the
+  // LRU cap-eviction below runs. Bounded to `budget` iterations so a
+  // large shard cannot stall a single store call.
+  auto it = entries.begin();
+  for (std::size_t i = 0; i < budget && it != entries.end(); ++i) {
     if (it->decision.expires_at <= now) {
       index.erase(it->digest);
       it = entries.erase(it);

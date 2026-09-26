@@ -93,7 +93,9 @@ ReplayAdmitResult InMemoryReplayStore::admit(
 
   // Fresh jti. Enforce the per-shard cap BEFORE inserting so an
   // exhausted shard cannot be tricked into overshooting by a single
-  // slot on the mutating path.
+  // slot on the mutating path. Cap-recovery must be exhaustive here —
+  // we cannot admit an entry when the sharded cap is genuinely full,
+  // and the incremental sweep might miss a reclaimable slot.
   if (shard.entries.size() >= shard.max_entries) {
     shard.purgeExpiredLocked(now, window);
     if (shard.entries.size() >= shard.max_entries) {
@@ -105,7 +107,11 @@ ReplayAdmitResult InMemoryReplayStore::admit(
   ++shard.admits_since_cleanup;
   if (shard.admits_since_cleanup >= cleanup_interval_) {
     shard.admits_since_cleanup = 0;
-    shard.purgeExpiredLocked(now, window);
+    // Opportunistic housekeeping: bounded so a giant shard cannot cost
+    // a single admit call an O(N) sweep. Operators who want a hard
+    // drain drive `purgeExpired()` from a scheduler.
+    static constexpr std::size_t kOpportunisticBudget = 64;
+    shard.purgeIncrementalLocked(now, window, kOpportunisticBudget);
   }
   return ReplayAdmitResult::Admitted;
 }
@@ -132,6 +138,24 @@ void InMemoryReplayStore::Shard::purgeExpiredLocked(
     std::chrono::system_clock::time_point now,
     std::chrono::seconds window) {
   for (auto it = entries.begin(); it != entries.end();) {
+    if (now - it->second > window) {
+      it = entries.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+void InMemoryReplayStore::Shard::purgeIncrementalLocked(
+    std::chrono::system_clock::time_point now, std::chrono::seconds window,
+    std::size_t budget) {
+  // Bounded sweep. `unordered_map` iteration order is unspecified, so
+  // this is a probabilistic drain — over many admits the whole shard
+  // gets visited. Since each admit walks at most `budget` entries the
+  // per-call cost is O(1). Cap-recovery, where we MUST reclaim if any
+  // slot is reclaimable, still uses the full sweep.
+  auto it = entries.begin();
+  for (std::size_t i = 0; i < budget && it != entries.end(); ++i) {
     if (now - it->second > window) {
       it = entries.erase(it);
     } else {
