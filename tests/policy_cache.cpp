@@ -110,3 +110,89 @@ TEST_SUITE("InMemoryPolicyCache") {
     CHECK(got->outcome == AuthorizationOutcome::Deny);
   }
 }
+
+TEST_SUITE("PolicyCacheKey") {
+  TEST_CASE(
+      "Context isolation: same (token,resource) but different decision "
+      "inputs are different entries") {
+    // FC-7: two requests with the same token and resource but different
+    // PolicyContext (say, different client_ip) MUST NOT collapse to the
+    // same cached decision. Structurally: differing
+    // decision_inputs_digest ⇒ different cache identity.
+    InMemoryPolicyCache cache;
+    auto now = Clock::now();
+    const std::string tr = "token-resource";
+    const std::string ctx_a = "client-ip-A";
+    const std::string ctx_b = "client-ip-B";
+    PolicyCacheKey ka{tr, ctx_a, 1};
+    PolicyCacheKey kb{tr, ctx_b, 1};
+
+    cache.store(
+        ka, AuthorizationDecision{AuthorizationOutcome::Allow, now + 60s},
+        now);
+    cache.store(
+        kb, AuthorizationDecision{AuthorizationOutcome::Deny, now + 60s},
+        now);
+
+    auto got_a = cache.lookup(ka, now);
+    auto got_b = cache.lookup(kb, now);
+    REQUIRE(got_a.has_value());
+    REQUIRE(got_b.has_value());
+    CHECK(got_a->outcome == AuthorizationOutcome::Allow);
+    CHECK(got_b->outcome == AuthorizationOutcome::Deny);
+    CHECK(cache.size() == 2);
+  }
+
+  TEST_CASE("policy_generation bump invalidates every prior entry") {
+    // Any policy-code, key-set, or revocation-list update bumps the
+    // generation. Prior entries become unreachable in the new namespace
+    // even though (token_resource_digest, decision_inputs_digest) are
+    // identical.
+    InMemoryPolicyCache cache;
+    auto now = Clock::now();
+    PolicyCacheKey before{"tr", "ctx", 1};
+    PolicyCacheKey after{"tr", "ctx", 2};
+
+    cache.store(
+        before,
+        AuthorizationDecision{AuthorizationOutcome::Allow, now + 3600s}, now);
+    REQUIRE(cache.lookup(before, now).has_value());
+    CHECK(!cache.lookup(after, now).has_value());
+  }
+
+  TEST_CASE("encodeKey is collision-free across component boundaries") {
+    // A naive concatenation ("ab" | "cd" == "a" | "bcd") would let a
+    // caller who controls one digest bleed bytes into the other. The
+    // length-prefixed encoding must keep the split unambiguous.
+    PolicyCacheKey k1{"ab", "cd", 0};
+    PolicyCacheKey k2{"a", "bcd", 0};
+    PolicyCacheKey k3{"abc", "d", 0};
+    const auto e1 = policy_cache_detail::encodeKey(k1);
+    const auto e2 = policy_cache_detail::encodeKey(k2);
+    const auto e3 = policy_cache_detail::encodeKey(k3);
+    CHECK(e1 != e2);
+    CHECK(e1 != e3);
+    CHECK(e2 != e3);
+  }
+
+  TEST_CASE("encodeKey distinguishes policy_generation") {
+    PolicyCacheKey k1{"tr", "ctx", 1};
+    PolicyCacheKey k2{"tr", "ctx", 2};
+    CHECK(policy_cache_detail::encodeKey(k1) !=
+          policy_cache_detail::encodeKey(k2));
+  }
+
+  TEST_CASE("Empty digests are still keyed distinctly by generation") {
+    // A caller with no context inputs (context-free decision) still
+    // needs the generation to invalidate on policy rotation.
+    InMemoryPolicyCache cache;
+    auto now = Clock::now();
+    PolicyCacheKey g1{"tr", {}, 1};
+    PolicyCacheKey g2{"tr", {}, 2};
+    cache.store(
+        g1, AuthorizationDecision{AuthorizationOutcome::Allow, now + 60s},
+        now);
+    CHECK(cache.lookup(g1, now).has_value());
+    CHECK(!cache.lookup(g2, now).has_value());
+  }
+}

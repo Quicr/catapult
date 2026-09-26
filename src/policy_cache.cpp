@@ -1,8 +1,67 @@
 #include "catapult/policy_cache.hpp"
 
+#include <cstdint>
+#include <cstring>
 #include <stdexcept>
 
 namespace catapult {
+
+namespace policy_cache_detail {
+
+namespace {
+
+void appendLengthPrefixed(std::string& out, std::string_view bytes) {
+  const std::uint32_t len = static_cast<std::uint32_t>(bytes.size());
+  // 4-byte big-endian length prefix so component boundaries are
+  // unambiguous and two distinct (a, b) splits can never produce the
+  // same encoded byte string.
+  const unsigned char len_be[4] = {
+      static_cast<unsigned char>((len >> 24) & 0xFF),
+      static_cast<unsigned char>((len >> 16) & 0xFF),
+      static_cast<unsigned char>((len >> 8) & 0xFF),
+      static_cast<unsigned char>(len & 0xFF),
+  };
+  out.append(reinterpret_cast<const char*>(len_be), sizeof(len_be));
+  out.append(bytes.data(), bytes.size());
+}
+
+}  // namespace
+
+std::string encodeKey(const PolicyCacheKey& key) {
+  std::string out;
+  out.reserve(4 + key.token_resource_digest.size() + 4 +
+              key.decision_inputs_digest.size() + 8);
+  appendLengthPrefixed(out, key.token_resource_digest);
+  appendLengthPrefixed(out, key.decision_inputs_digest);
+  const std::uint64_t gen = key.policy_generation;
+  const unsigned char gen_be[8] = {
+      static_cast<unsigned char>((gen >> 56) & 0xFF),
+      static_cast<unsigned char>((gen >> 48) & 0xFF),
+      static_cast<unsigned char>((gen >> 40) & 0xFF),
+      static_cast<unsigned char>((gen >> 32) & 0xFF),
+      static_cast<unsigned char>((gen >> 24) & 0xFF),
+      static_cast<unsigned char>((gen >> 16) & 0xFF),
+      static_cast<unsigned char>((gen >> 8) & 0xFF),
+      static_cast<unsigned char>(gen & 0xFF),
+  };
+  out.append(reinterpret_cast<const char*>(gen_be), sizeof(gen_be));
+  return out;
+}
+
+}  // namespace policy_cache_detail
+
+std::optional<AuthorizationDecision> PolicyCache::lookup(
+    const PolicyCacheKey& key, std::chrono::system_clock::time_point now) {
+  const std::string composed = policy_cache_detail::encodeKey(key);
+  return lookup(std::string_view(composed), now);
+}
+
+void PolicyCache::store(const PolicyCacheKey& key,
+                        const AuthorizationDecision& decision,
+                        std::chrono::system_clock::time_point now) {
+  const std::string composed = policy_cache_detail::encodeKey(key);
+  store(std::string_view(composed), decision, now);
+}
 
 InMemoryPolicyCache::InMemoryPolicyCache(std::size_t max_entries)
     : max_entries_(max_entries) {

@@ -85,6 +85,45 @@ struct AuthorizationDecision {
 };
 
 /**
+ * @brief Full identity for a cached authorization decision.
+ *
+ * The historical `PolicyCache` interface keyed on `hash(token, resource)`
+ * alone. That is unsafe in practice: two requests with the same token
+ * and resource but different `PolicyContext` (client IP, DPoP proof,
+ * session identity, MOQT tuple) can resolve to different decisions, and
+ * a policy or revocation feed update MUST invalidate every prior cached
+ * verdict issued under the old rules. Keying on `(token, resource)`
+ * alone would let a cache silently return a stale allow after either
+ * change (see FC-7 in `docs/security-invariants.md`).
+ *
+ * A production cache key MUST therefore include:
+ *
+ *   - `token_resource_digest`: caller-computed digest of the encoded
+ *     token bytes + resource path. This is the "what is being decided"
+ *     component.
+ *   - `decision_inputs_digest`: caller-computed digest over every
+ *     `PolicyContext` field that the decision depended on. If the
+ *     decision depends on `client_ip` and `dpop_proof`, both feed the
+ *     digest. Empty means "no context inputs affected the decision" and
+ *     is only correct when the token cannot carry a context-requiring
+ *     claim.
+ *   - `policy_generation`: monotonically increasing counter the operator
+ *     bumps on any policy code, key-set, or revocation-list update.
+ *     Bumping this value MUST invalidate every prior cached decision;
+ *     implementations achieve that by including the generation in the
+ *     hash-map key so an older entry becomes unreachable.
+ *
+ * `PolicyCacheKey` is a value type. The digest views must reference
+ * caller storage that outlives the `lookup`/`store` call; the cache
+ * copies bytes internally and never retains views past the call.
+ */
+struct PolicyCacheKey {
+  std::string_view token_resource_digest;
+  std::string_view decision_inputs_digest;
+  std::uint64_t policy_generation = 0;
+};
+
+/**
  * @brief Abstract authorization-decision cache.
  *
  * Digests are opaque bytes chosen by the caller. Implementations MUST
@@ -103,6 +142,13 @@ class PolicyCache {
    * @return The cached decision iff its `expires_at` is strictly greater
    *   than `now`; `std::nullopt` otherwise (miss, expired, or backend
    *   failure).
+   *
+   * @deprecated Prefer `lookup(PolicyCacheKey, now)`. Keying on
+   *   `(token, resource)` alone is only safe when the decision depends
+   *   on nothing else. Production relays whose decisions depend on
+   *   request context or on a rotating policy / revocation feed MUST
+   *   include those inputs in the key (FC-7 in
+   *   `docs/security-invariants.md`).
    */
   virtual std::optional<AuthorizationDecision> lookup(
       std::string_view digest,
@@ -119,10 +165,42 @@ class PolicyCache {
    * Implementations MAY drop the entry (e.g. capacity exhaustion) but
    * MUST NOT record it with a different `expires_at` than the caller
    * supplied.
+   *
+   * @deprecated See `lookup(std::string_view, now)`.
    */
   virtual void store(std::string_view digest,
                      const AuthorizationDecision& decision,
                      std::chrono::system_clock::time_point now) = 0;
+
+  /**
+   * @brief Fetch a fresh decision keyed on the full authorization
+   *        identity.
+   *
+   * Same freshness contract as the string-view overload; the difference
+   * is that the cache key includes every input the decision depended
+   * on. Implementations MUST treat `(token_resource_digest,
+   * decision_inputs_digest, policy_generation)` as three independent
+   * dimensions of the key — hits that agree on any two but disagree on
+   * the third are misses.
+   *
+   * The default implementation composes the components into a single
+   * canonical byte string and delegates to the legacy `lookup`
+   * overload; overrides SHOULD provide a native implementation.
+   */
+  virtual std::optional<AuthorizationDecision> lookup(
+      const PolicyCacheKey& key,
+      std::chrono::system_clock::time_point now);
+
+  /**
+   * @brief Record a decision keyed on the full authorization identity.
+   *
+   * `PolicyCache` never inspects the caller's inputs; the composed key
+   * is opaque bytes. The default implementation delegates to the legacy
+   * `store` overload after composing.
+   */
+  virtual void store(const PolicyCacheKey& key,
+                     const AuthorizationDecision& decision,
+                     std::chrono::system_clock::time_point now);
 
   /**
    * @brief Best-effort snapshot of the current number of tracked
@@ -130,6 +208,18 @@ class PolicyCache {
    */
   virtual std::size_t size() const = 0;
 };
+
+namespace policy_cache_detail {
+/**
+ * @brief Canonical byte-encoding of a `PolicyCacheKey`.
+ *
+ * Length-prefixed component digests followed by an 8-byte big-endian
+ * `policy_generation`, so two distinct keys can never collide. Exposed
+ * so out-of-tree backends that build their own string key agree with
+ * the in-tree overloads.
+ */
+std::string encodeKey(const PolicyCacheKey& key);
+}  // namespace policy_cache_detail
 
 /**
  * @brief In-process bounded LRU cache with wall-clock TTL.
@@ -153,6 +243,9 @@ class InMemoryPolicyCache final : public PolicyCache {
    *   digest space is attacker-controlled.
    */
   explicit InMemoryPolicyCache(std::size_t max_entries = 100'000);
+
+  using PolicyCache::lookup;
+  using PolicyCache::store;
 
   std::optional<AuthorizationDecision> lookup(
       std::string_view digest,
