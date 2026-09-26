@@ -196,3 +196,69 @@ TEST_SUITE("PolicyCacheKey") {
     CHECK(!cache.lookup(g2, now).has_value());
   }
 }
+
+TEST_SUITE("InMemoryPolicyCache fixed-digest fast path") {
+  TEST_CASE("Store and lookup roundtrip via PolicyCacheDigest") {
+    InMemoryPolicyCache cache;
+    auto now = Clock::now();
+    PolicyCacheDigest d{};
+    for (std::size_t i = 0; i < d.size(); ++i) {
+      d[i] = static_cast<std::uint8_t>(i);
+    }
+    cache.store(d, allowFor(60s, now), now);
+    auto got = cache.lookup(d, now);
+    REQUIRE(got.has_value());
+    CHECK(got->outcome == AuthorizationOutcome::Allow);
+  }
+
+  TEST_CASE("Digest and string_view keys share the same identity") {
+    // A `store(PolicyCacheDigest)` followed by a `lookup(string_view)`
+    // over the same 32 bytes MUST hit. Otherwise a caller who mixes
+    // the two APIs (say, a legacy component still on string_view) sees
+    // spurious misses.
+    InMemoryPolicyCache cache;
+    auto now = Clock::now();
+    PolicyCacheDigest d{};
+    for (std::size_t i = 0; i < d.size(); ++i) {
+      d[i] = static_cast<std::uint8_t>(0xA5 ^ i);
+    }
+    cache.store(d, allowFor(60s, now), now);
+    std::string_view as_view(reinterpret_cast<const char*>(d.data()),
+                             d.size());
+    auto got = cache.lookup(as_view, now);
+    REQUIRE(got.has_value());
+    CHECK(got->outcome == AuthorizationOutcome::Allow);
+  }
+
+  TEST_CASE("Distinct digests are distinct entries") {
+    InMemoryPolicyCache cache;
+    auto now = Clock::now();
+    PolicyCacheDigest a{};
+    PolicyCacheDigest b{};
+    a[0] = 1;
+    b[0] = 2;
+    cache.store(a, AuthorizationDecision{AuthorizationOutcome::Allow,
+                                         now + 60s},
+                now);
+    cache.store(b,
+                AuthorizationDecision{AuthorizationOutcome::Deny, now + 60s},
+                now);
+    auto got_a = cache.lookup(a, now);
+    auto got_b = cache.lookup(b, now);
+    REQUIRE(got_a.has_value());
+    REQUIRE(got_b.has_value());
+    CHECK(got_a->outcome == AuthorizationOutcome::Allow);
+    CHECK(got_b->outcome == AuthorizationOutcome::Deny);
+    CHECK(cache.size() == 2);
+  }
+
+  TEST_CASE("Expired entry via digest is a miss and eviction") {
+    InMemoryPolicyCache cache;
+    auto now = Clock::now();
+    PolicyCacheDigest d{};
+    d[0] = 42;
+    cache.store(d, allowFor(60s, now), now);
+    CHECK(!cache.lookup(d, now + 120s).has_value());
+    CHECK(cache.size() == 0);
+  }
+}

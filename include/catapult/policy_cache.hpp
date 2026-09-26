@@ -51,8 +51,10 @@
 
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <list>
 #include <mutex>
 #include <optional>
@@ -122,6 +124,32 @@ struct PolicyCacheKey {
   std::string_view decision_inputs_digest;
   std::uint64_t policy_generation = 0;
 };
+
+/**
+ * @brief Fixed-size 32-byte digest for the fast-path cache API.
+ *
+ * The `string_view` overloads accept arbitrary-length digests, which is
+ * flexible but forces the in-tree store to hash and copy the bytes into
+ * a heap-allocated `std::string` key on every call — an allocation the
+ * relay hot path cannot afford at millions of lookups per second.
+ *
+ * `PolicyCacheDigest` is a stack-allocated 32-byte SHA-256-shaped
+ * container. Callers that already hash to 32 bytes (BLAKE2s-256,
+ * SHA-256, truncated SHA-512) pass the array directly and skip the
+ * string composition. Implementations SHOULD provide a native path that
+ * elides the copy on lookup. `InMemoryPolicyCache` does — its native
+ * overload keys the internal map on a `string_view` over the array
+ * bytes and only allocates on insertion, where the `unordered_map` node
+ * has to own the key anyway.
+ *
+ * 32 bytes is a hard choice, not a suggestion: 128-bit collision
+ * resistance is the floor for cache keys derived from attacker-visible
+ * inputs. Digests shorter than 32 bytes MUST be zero-padded before use;
+ * digests longer than 32 bytes MUST be truncated by the caller using a
+ * uniform cryptographic hash (never a prefix — a prefix is trivially
+ * collidable).
+ */
+using PolicyCacheDigest = std::array<std::uint8_t, 32>;
 
 /**
  * @brief Abstract authorization-decision cache.
@@ -220,6 +248,33 @@ class PolicyCache {
                      std::chrono::system_clock::time_point now);
 
   /**
+   * @brief Fast-path lookup keyed on a fixed 32-byte digest.
+   *
+   * Semantically identical to the `string_view` overload, but the
+   * argument is a stack-allocated array so an implementation can key
+   * its map without materializing a `std::string`. The base default
+   * forwards to the `string_view` overload after wrapping the array in
+   * a view — safe (the view lives for the duration of the call) but
+   * still forces the string overload to copy the bytes when caching.
+   * Overrides SHOULD provide a native, allocation-free lookup path.
+   */
+  virtual std::optional<AuthorizationDecision> lookup(
+      const PolicyCacheDigest& digest,
+      std::chrono::system_clock::time_point now);
+
+  /**
+   * @brief Fast-path store keyed on a fixed 32-byte digest.
+   *
+   * Same contract as the `string_view` overload; the default forwards
+   * to it. `InMemoryPolicyCache` overrides both overloads so a
+   * digest-driven lookup and a digest-driven store hit the same shard
+   * and internal key.
+   */
+  virtual void store(const PolicyCacheDigest& digest,
+                     const AuthorizationDecision& decision,
+                     std::chrono::system_clock::time_point now);
+
+  /**
    * @brief Best-effort snapshot of the current number of tracked
    *        entries.
    */
@@ -282,6 +337,21 @@ class InMemoryPolicyCache final : public PolicyCache {
              const AuthorizationDecision& decision,
              std::chrono::system_clock::time_point now) override;
 
+  // Native fixed-digest overrides. The base defaults would wrap the
+  // array in a view and forward to the `string_view` path, which still
+  // works — but keeping the specialization on the derived class lets
+  // us name what's happening at the profile call site and makes it
+  // clear that the digest-driven and view-driven APIs land in the same
+  // shard/entry (they must, or a `store()` followed by `lookup()` for
+  // the same bytes could miss).
+  std::optional<AuthorizationDecision> lookup(
+      const PolicyCacheDigest& digest,
+      std::chrono::system_clock::time_point now) override;
+
+  void store(const PolicyCacheDigest& digest,
+             const AuthorizationDecision& decision,
+             std::chrono::system_clock::time_point now) override;
+
   std::size_t size() const override;
 
  private:
@@ -293,10 +363,42 @@ class InMemoryPolicyCache final : public PolicyCache {
 
   static constexpr std::size_t kShardCount = 16;
 
+  // Transparent hash/equal so `index.find(string_view)` can be resolved
+  // without constructing a temporary `std::string`. Without this, every
+  // digest-driven `lookup()` heap-allocated a copy of the digest bytes
+  // solely to look them up — the whole point of the fixed-digest
+  // fast-path API is skipping that.
+  struct StringViewHash {
+    using is_transparent = void;
+    std::size_t operator()(std::string_view v) const noexcept {
+      return std::hash<std::string_view>{}(v);
+    }
+    std::size_t operator()(const std::string& s) const noexcept {
+      return std::hash<std::string_view>{}(s);
+    }
+  };
+  struct StringViewEqual {
+    using is_transparent = void;
+    bool operator()(std::string_view a, std::string_view b) const noexcept {
+      return a == b;
+    }
+    bool operator()(const std::string& a, std::string_view b) const noexcept {
+      return a == b;
+    }
+    bool operator()(std::string_view a, const std::string& b) const noexcept {
+      return a == b;
+    }
+    bool operator()(const std::string& a, const std::string& b) const noexcept {
+      return a == b;
+    }
+  };
+
   struct Shard {
     mutable std::mutex mu;
     EntryList entries;
-    std::unordered_map<std::string, EntryList::iterator> index;
+    std::unordered_map<std::string, EntryList::iterator, StringViewHash,
+                       StringViewEqual>
+        index;
     std::size_t max_entries = 0;
 
     void touchLocked(EntryList::iterator it);

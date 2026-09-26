@@ -63,6 +63,28 @@ void PolicyCache::store(const PolicyCacheKey& key,
   store(std::string_view(composed), decision, now);
 }
 
+std::optional<AuthorizationDecision> PolicyCache::lookup(
+    const PolicyCacheDigest& digest,
+    std::chrono::system_clock::time_point now) {
+  // Base default: wrap the array bytes as a view and forward. The view
+  // stays valid for the duration of the call. Derived classes that own
+  // a native hash-table path override this; the wrapping here exists
+  // so an out-of-tree adapter that inherits `PolicyCache` without
+  // overriding the fixed-digest overload still works.
+  return lookup(
+      std::string_view(reinterpret_cast<const char*>(digest.data()),
+                       digest.size()),
+      now);
+}
+
+void PolicyCache::store(const PolicyCacheDigest& digest,
+                        const AuthorizationDecision& decision,
+                        std::chrono::system_clock::time_point now) {
+  store(std::string_view(reinterpret_cast<const char*>(digest.data()),
+                         digest.size()),
+        decision, now);
+}
+
 InMemoryPolicyCache::InMemoryPolicyCache(std::size_t max_entries) {
   if (max_entries == 0) {
     throw std::invalid_argument(
@@ -100,7 +122,10 @@ std::optional<AuthorizationDecision> InMemoryPolicyCache::lookup(
     std::string_view digest, std::chrono::system_clock::time_point now) {
   Shard& shard = shards_[shardIndex(digest)];
   std::lock_guard<std::mutex> lock(shard.mu);
-  auto index_it = shard.index.find(std::string(digest));
+  // Transparent `find`: no `std::string` construction for the lookup
+  // key. Under load this is the difference between one heap allocation
+  // per lookup and zero.
+  auto index_it = shard.index.find(digest);
   if (index_it == shard.index.end()) {
     return std::nullopt;
   }
@@ -127,8 +152,9 @@ void InMemoryPolicyCache::store(std::string_view digest,
     return;
   }
 
-  std::string key(digest);
-  auto index_it = shard.index.find(key);
+  // Fast-path check first, without allocating: if the key exists we
+  // update in place and never construct a `std::string`.
+  auto index_it = shard.index.find(digest);
   if (index_it != shard.index.end()) {
     // Overwrite in place; move to MRU. `expires_at` is authoritative from
     // the caller — no cache-side TTL substitution.
@@ -149,8 +175,31 @@ void InMemoryPolicyCache::store(std::string_view digest,
     }
   }
 
-  shard.entries.push_front(Entry{std::move(key), decision});
+  // Insertion path must materialize the key — the map node owns it.
+  shard.entries.push_front(Entry{std::string(digest), decision});
   shard.index[shard.entries.front().digest] = shard.entries.begin();
+}
+
+std::optional<AuthorizationDecision> InMemoryPolicyCache::lookup(
+    const PolicyCacheDigest& digest,
+    std::chrono::system_clock::time_point now) {
+  // Bytes reinterpreted as a `string_view`; the view lives only for
+  // this call so aliasing is safe. Delegating to the `string_view`
+  // overload keeps the digest-driven and view-driven APIs pointed at
+  // the same shard/entry — a `store(digest)` followed by
+  // `lookup(string_view over the same bytes)` still hits.
+  return lookup(
+      std::string_view(reinterpret_cast<const char*>(digest.data()),
+                       digest.size()),
+      now);
+}
+
+void InMemoryPolicyCache::store(const PolicyCacheDigest& digest,
+                                const AuthorizationDecision& decision,
+                                std::chrono::system_clock::time_point now) {
+  store(std::string_view(reinterpret_cast<const char*>(digest.data()),
+                         digest.size()),
+        decision, now);
 }
 
 std::size_t InMemoryPolicyCache::size() const {

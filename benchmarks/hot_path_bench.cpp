@@ -80,6 +80,30 @@ static void BM_PolicyCache_Lookup_Hit(benchmark::State& state) {
 }
 BENCHMARK(BM_PolicyCache_Lookup_Hit)->Arg(64)->Arg(1024)->Arg(16'384);
 
+static void BM_PolicyCache_Lookup_Hit_Digest(benchmark::State& state) {
+  // Same shape as `BM_PolicyCache_Lookup_Hit` but keyed on
+  // `PolicyCacheDigest` (fixed 32-byte array) instead of `string_view`.
+  // Measures the allocation-free fast-path introduced by Phase 4b.
+  const std::size_t working_set = static_cast<std::size_t>(state.range(0));
+  InMemoryPolicyCache cache(working_set * 2);
+  const auto now = std::chrono::system_clock::now();
+  std::vector<PolicyCacheDigest> digests(working_set);
+  std::mt19937 gen(11);
+  std::uniform_int_distribution<int> dis(0, 255);
+  for (auto& d : digests) {
+    for (auto& b : d) b = static_cast<std::uint8_t>(dis(gen));
+    cache.store(d, allowFor(3600s, now), now);
+  }
+  std::size_t idx = 0;
+  for (auto _ : state) {
+    auto got = cache.lookup(digests[idx], now);
+    benchmark::DoNotOptimize(got);
+    idx = (idx + 1) % digests.size();
+  }
+  state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_PolicyCache_Lookup_Hit_Digest)->Arg(64)->Arg(1024)->Arg(16'384);
+
 static void BM_PolicyCache_Lookup_Miss(benchmark::State& state) {
   InMemoryPolicyCache cache(1024);
   const auto now = std::chrono::system_clock::now();
