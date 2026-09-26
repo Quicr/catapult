@@ -168,7 +168,7 @@ TEST_CASE("PayloadValidation") {
 
   for (size_t i = 0; i < map_size; i++) {
     if (cbor_isa_uint(pairs[i].key)) {
-      uint64_t claim_id = cbor_get_uint64(pairs[i].key);
+      uint64_t claim_id = cbor_get_int(pairs[i].key);
       cbor_item_t* value = pairs[i].value;
 
       switch (claim_id) {
