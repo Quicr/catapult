@@ -52,11 +52,25 @@ to reproduce on target hardware before publishing operator-facing SLOs.
 |       4 |             26,887 |    124.9 |    133.0 |    187.9 |
 |       8 |             35,269 |    135.7 |    328.1 |    403.1 |
 
-Interpretation: near-linear scaling through 4 threads. p99 doubles
-between 4 → 8 threads while throughput gains ~30% — the shared
-`DpopProofValidator` replay-store mutex is the bottleneck at that
-point. A production deployment saturating 8+ cores per relay should
-plan for a sharded replay backend (see Gate 4).
+Interpretation: near-linear scaling through 4 threads, then the tail
+degrades sharply. **This is Apple Silicon core asymmetry, not a
+library bottleneck.** The M4 has 4 performance + 6 efficiency cores;
+p95 jumps from ~138 μs at 4 threads to ~309 μs at 5 threads, exactly
+when a worker first lands on an E-core.
+
+Two experiments ruled out library-side contention:
+
+1. Every `InMemory*Store` in the library is already 16-way sharded on
+   its own mutex (`InMemoryReplayStore::kShardCount`,
+   `InMemoryUsageState::kShardCount`, `InMemoryPolicyCache::kShardCount`).
+2. Running `--per-worker-dpop` (one `DpopProofValidator` per worker,
+   isolating the parsed-JWK-cache mutex) produced identical throughput
+   and p99 at every thread count — the JWK cache mutex is not the
+   contention point either.
+
+Homogeneous-core production hardware (Xeon, Graviton, EPYC) is not
+expected to exhibit the 4→5-thread discontinuity. Re-baseline on
+target hardware before drawing scaling conclusions from this table.
 
 ### 100k-flow proof (8 threads, 20k iters/thread)
 

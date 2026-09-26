@@ -63,6 +63,11 @@ struct Config {
   double expired_pct = 0.01;
   bool pretty = false;
   unsigned seed = 42;
+  // When true, each worker gets its own DpopProofValidator. Diagnostic:
+  // the shared validator's parsed-JWK-cache mutex is single-guarded, so
+  // running per-worker validators isolates whether that mutex is the
+  // bottleneck at high thread counts.
+  bool per_worker_dpop = false;
 };
 
 void printUsage(const char* argv0) {
@@ -77,6 +82,8 @@ void printUsage(const char* argv0) {
       "(0.01)\n"
       "  --seed N               RNG seed (default 42)\n"
       "  --pretty               human-readable output instead of JSON\n"
+      "  --per-worker-dpop      one DpopProofValidator per worker "
+      "(diagnostic)\n"
       "  --help                 this help\n",
       argv0);
 }
@@ -109,6 +116,8 @@ Config parseArgs(int argc, char** argv) {
       c.seed = static_cast<unsigned>(std::atoi(next("--seed")));
     } else if (a == "--pretty") {
       c.pretty = true;
+    } else if (a == "--per-worker-dpop") {
+      c.per_worker_dpop = true;
     } else {
       std::fprintf(stderr, "unknown arg: %s\n", argv[i]);
       printUsage(argv[0]);
@@ -248,9 +257,14 @@ int main(int argc, char** argv) {
 
   DpopValidationSettings dpop_settings;
   dpop_settings.set_window(300s);
-  // Shared replay store: this is the contention point Gate 8 is
-  // meant to stress.
-  DpopProofValidator dpop_validator(dpop_settings);
+  // A shared replay store, always. Correct replay semantics require
+  // it. `--per-worker-dpop` gives each worker its own validator wrapping
+  // this same store, isolating the validator's parsed-JWK-cache mutex
+  // without losing cross-worker replay detection.
+  auto shared_replay_store = std::make_shared<InMemoryReplayStore>(
+      dpop_settings.get_max_jti_entries(),
+      dpop_settings.get_jti_cleanup_interval());
+  DpopProofValidator shared_dpop_validator(dpop_settings, shared_replay_store);
 
   // --- Worker loop. --------------------------------------------------------
   std::vector<WorkerStats> per_worker(cfg.threads);
@@ -262,6 +276,14 @@ int main(int argc, char** argv) {
   for (int t = 0; t < cfg.threads; ++t) {
     workers.emplace_back([&, t]() {
       auto& stats = per_worker[t];
+      // Local validator when the diagnostic flag is set; otherwise
+      // reference the shared one.
+      std::optional<DpopProofValidator> local_dpop;
+      if (cfg.per_worker_dpop) {
+        local_dpop.emplace(dpop_settings, shared_replay_store);
+      }
+      DpopProofValidator& dpop_validator =
+          cfg.per_worker_dpop ? *local_dpop : shared_dpop_validator;
       stats.latencies_ns.reserve(
           static_cast<size_t>(cfg.iterations_per_thread));
 
