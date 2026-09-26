@@ -1,0 +1,98 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# The benchmark gate is a sanity check, not a precision instrument.
+# GitHub-hosted runners are noisy shared VMs; comparing absolute times
+# to a stored baseline across machines flakes constantly. Instead we
+# fail the job only when a hot-path benchmark drops below a hardcoded
+# throughput floor set well beneath current measurements. That catches
+# accidental removals of sharding, transparent hashing, or bounded
+# housekeeping — a return to O(N)/single-mutex behaviour drops
+# throughput by >10× and trips the floor unambiguously.
+#
+# Update the floors only when a *deliberate* design change moves the
+# steady-state cost, and record why in the commit message.
+
+jobs:
+  hot-path-benchmarks:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        submodules: recursive
+
+    - name: Set up dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libssl-dev libbenchmark-dev
+
+    - name: Configure + build
+      run: |
+        cmake -S . -B build-bench \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DENABLE_LOGGING=OFF \
+          -DCATAPULT_ENABLE_WERROR=ON
+        cmake --build build-bench --target catapult_benchmarks -j$(nproc)
+
+    - name: Run hot-path benchmarks
+      run: |
+        ./build-bench/catapult_benchmarks \
+          --benchmark_filter='Concurrent|Digest' \
+          --benchmark_min_time=1s \
+          --benchmark_format=json \
+          --benchmark_out=bench.json \
+          --benchmark_out_format=json
+
+    - name: Enforce throughput floors
+      # Floors expressed in items/sec, chosen well below the measured
+      # steady state on the current sharded implementation. If a change
+      # trips these, the fix is almost always "you re-introduced a hot
+      # mutex or an O(N) sweep" — not "raise the floor". Only raise
+      # after an intentional trade-off.
+      run: |
+        python3 - <<'PY'
+        import json, sys
+        with open('bench.json') as f:
+            data = json.load(f)
+        # (benchmark_name_prefix, min_items_per_second)
+        floors = {
+            'BM_PolicyCache_Lookup_Hit_Concurrent/threads:1':      5_000_000,
+            'BM_PolicyCache_Lookup_Hit_Concurrent/threads:8':      1_000_000,
+            'BM_ReplayStore_Admit_Replay_Concurrent/threads:1':    5_000_000,
+            'BM_ReplayStore_Admit_Replay_Concurrent/threads:8':    1_000_000,
+            'BM_UsageState_Admit_Replay_Concurrent/threads:1':     5_000_000,
+            'BM_UsageState_Admit_Replay_Concurrent/threads:8':     1_000_000,
+            'BM_PolicyCache_Lookup_Hit_Digest/1024':              10_000_000,
+        }
+        failed = False
+        for b in data['benchmarks']:
+            name = b['name']
+            if name not in floors:
+                continue
+            floor = floors[name]
+            ips = b.get('items_per_second')
+            if ips is None:
+                print(f"::warning::{name} did not report items_per_second")
+                continue
+            status = 'OK ' if ips >= floor else 'FAIL'
+            print(f"{status} {name}: {ips:,.0f} items/s (floor {floor:,})")
+            if ips < floor:
+                failed = True
+        if failed:
+            print("::error::At least one hot-path benchmark fell below its throughput floor. "
+                  "If this is a deliberate trade-off, raise the floor in "
+                  ".github/workflows/benchmarks.yml with a note in the commit.")
+            sys.exit(1)
+        PY
+
+    - name: Upload benchmark JSON
+      if: always()
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      with:
+        name: benchmark-results
+        path: bench.json
