@@ -190,6 +190,43 @@ static void BM_ReplayStore_Admit_Replay(benchmark::State& state) {
 }
 BENCHMARK(BM_ReplayStore_Admit_Replay);
 
+static void BM_ReplayStore_Admit_Replay_Concurrent(benchmark::State& state) {
+  // Every thread hits the same store on partitioned keys. Replay hit is
+  // the workload most representative of steady-state DPoP traffic once
+  // the jti window fills; it exposes lock contention without also
+  // measuring insertion cost.
+  static InMemoryReplayStore* store = nullptr;
+  static std::vector<std::string>* keys = nullptr;
+  static std::chrono::system_clock::time_point* now = nullptr;
+  if (state.thread_index() == 0) {
+    store = new InMemoryReplayStore(65'536);
+    keys = new std::vector<std::string>(makeKeys(8192, 106));
+    now = new std::chrono::system_clock::time_point(
+        std::chrono::system_clock::now());
+    for (const auto& k : *keys) store->admit(k, *now, 300s);
+  }
+  std::size_t idx = state.thread_index();
+  for (auto _ : state) {
+    auto r = store->admit((*keys)[idx % keys->size()], *now + 1s, 300s);
+    benchmark::DoNotOptimize(r);
+    idx += state.threads();
+  }
+  if (state.thread_index() == 0) {
+    delete store;
+    delete keys;
+    delete now;
+    store = nullptr;
+    keys = nullptr;
+    now = nullptr;
+  }
+  state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ReplayStore_Admit_Replay_Concurrent)
+    ->Threads(1)
+    ->Threads(2)
+    ->Threads(4)
+    ->Threads(8);
+
 // ---------------------------------------------------------------------------
 // UsageStateHook
 
@@ -230,3 +267,43 @@ static void BM_UsageState_Admit_Replay(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_UsageState_Admit_Replay);
+
+static void BM_UsageState_Admit_Replay_Concurrent(benchmark::State& state) {
+  // Concurrent replay hit against a shared usage store. Same rationale
+  // as the ReplayStore concurrent replay benchmark — measure the cost
+  // of the shared-mutex read path once the store is full.
+  static InMemoryUsageState* store = nullptr;
+  static std::vector<std::string>* keys = nullptr;
+  static std::chrono::system_clock::time_point* now = nullptr;
+  if (state.thread_index() == 0) {
+    store = new InMemoryUsageState(65'536);
+    keys = new std::vector<std::string>(makeKeys(8192, 108));
+    now = new std::chrono::system_clock::time_point(
+        std::chrono::system_clock::now());
+    for (const auto& k : *keys) {
+      store->admit(k, CatReplayMode::RejectOnReplay, *now, *now + 1h);
+    }
+  }
+  std::size_t idx = state.thread_index();
+  for (auto _ : state) {
+    auto r = store->admit((*keys)[idx % keys->size()],
+                          CatReplayMode::RejectOnReplay, *now + 1s,
+                          *now + 1h);
+    benchmark::DoNotOptimize(r);
+    idx += state.threads();
+  }
+  if (state.thread_index() == 0) {
+    delete store;
+    delete keys;
+    delete now;
+    store = nullptr;
+    keys = nullptr;
+    now = nullptr;
+  }
+  state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_UsageState_Admit_Replay_Concurrent)
+    ->Threads(1)
+    ->Threads(2)
+    ->Threads(4)
+    ->Threads(8);
