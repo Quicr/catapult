@@ -614,7 +614,8 @@ void from_json(const nlohmann::json& j, CatToken& token) {
           cat_json["catgeoiso3166"].get<std::vector<std::string>>();
     }
     if (cat_json.contains("cattpk_b64") && cat_json["cattpk_b64"].is_string()) {
-      token.cat.cattpk = b64_to_bytes(cat_json["cattpk_b64"].get<std::string>());
+      token.cat.cattpk =
+          b64_to_bytes(cat_json["cattpk_b64"].get<std::string>());
     }
   }
 

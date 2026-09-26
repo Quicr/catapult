@@ -158,32 +158,29 @@ inline constexpr const char* kReplayStoreExhausted =
 
 #ifdef ENABLE_METRICS
 
-#define CAT_METRIC_INC(name)                                    \
-  do {                                                          \
-    auto _cat_msink = ::catapult::metrics::getMetricsSink();    \
-    if (_cat_msink) _cat_msink->increment((name), 1);           \
+#define CAT_METRIC_INC(name)                                 \
+  do {                                                       \
+    auto _cat_msink = ::catapult::metrics::getMetricsSink(); \
+    if (_cat_msink) _cat_msink->increment((name), 1);        \
   } while (0)
 
-#define CAT_METRIC_INC_BY(name, by)                             \
-  do {                                                          \
-    auto _cat_msink = ::catapult::metrics::getMetricsSink();    \
-    if (_cat_msink)                                             \
-      _cat_msink->increment((name), static_cast<uint64_t>(by)); \
+#define CAT_METRIC_INC_BY(name, by)                                           \
+  do {                                                                        \
+    auto _cat_msink = ::catapult::metrics::getMetricsSink();                  \
+    if (_cat_msink) _cat_msink->increment((name), static_cast<uint64_t>(by)); \
   } while (0)
 
-#define CAT_METRIC_OBSERVE_NS(name, value_ns)                   \
-  do {                                                          \
-    auto _cat_msink = ::catapult::metrics::getMetricsSink();    \
-    if (_cat_msink)                                             \
-      _cat_msink->observe((name),                               \
-                          static_cast<uint64_t>(value_ns));     \
+#define CAT_METRIC_OBSERVE_NS(name, value_ns)                       \
+  do {                                                              \
+    auto _cat_msink = ::catapult::metrics::getMetricsSink();        \
+    if (_cat_msink)                                                 \
+      _cat_msink->observe((name), static_cast<uint64_t>(value_ns)); \
   } while (0)
 
-#define CAT_METRIC_GAUGE(name, value)                           \
-  do {                                                          \
-    auto _cat_msink = ::catapult::metrics::getMetricsSink();    \
-    if (_cat_msink)                                             \
-      _cat_msink->gauge((name), static_cast<int64_t>(value));   \
+#define CAT_METRIC_GAUGE(name, value)                                       \
+  do {                                                                      \
+    auto _cat_msink = ::catapult::metrics::getMetricsSink();                \
+    if (_cat_msink) _cat_msink->gauge((name), static_cast<int64_t>(value)); \
   } while (0)
 
 #else

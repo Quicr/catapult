@@ -222,8 +222,8 @@ class UsageStateHook {
    */
   virtual StoreCapabilities capabilities() const {
     return StoreCapabilities{StoreAtomicity::PerProcess,
-                             StoreDurability::Ephemeral,
-                             StoreScope::SingleNode, "unspecified"};
+                             StoreDurability::Ephemeral, StoreScope::SingleNode,
+                             "unspecified"};
   }
 };
 
@@ -307,8 +307,8 @@ class InMemoryUsageState final : public UsageStateHook {
     // ephemeral, single-node. Fleet-wide `catreplay` enforcement
     // requires an external adapter.
     return StoreCapabilities{StoreAtomicity::PerProcess,
-                             StoreDurability::Ephemeral,
-                             StoreScope::SingleNode, "in-memory"};
+                             StoreDurability::Ephemeral, StoreScope::SingleNode,
+                             "in-memory"};
   }
 
  private:

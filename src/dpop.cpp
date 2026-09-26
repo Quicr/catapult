@@ -7,9 +7,6 @@
  */
 
 #include "catapult/dpop.hpp"
-#include "catapult/internal/parse_limits.hpp"
-#include "catapult/logging.hpp"
-#include "catapult/metrics.hpp"
 
 #include <cbor.h>
 #include <openssl/core_names.h>
@@ -21,6 +18,10 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
+
+#include "catapult/internal/parse_limits.hpp"
+#include "catapult/logging.hpp"
+#include "catapult/metrics.hpp"
 
 #ifdef CATAPULT_ENABLE_JSON
 #include <nlohmann/json.hpp>
@@ -100,9 +101,9 @@ std::vector<uint8_t> buildDpopProtectedHeaderBytes(
   pushPair(CborItemPtr(cbor_build_uint8(dpop_labels::TYP)),
            CborItemPtr(cbor_build_string("dpop-proof+cwt")));
   if (!cose_key.empty()) {
-    pushPair(CborItemPtr(cbor_build_uint8(dpop_labels::COSE_KEY)),
-             CborItemPtr(cbor_build_bytestring(cose_key.data(),
-                                               cose_key.size())));
+    pushPair(
+        CborItemPtr(cbor_build_uint8(dpop_labels::COSE_KEY)),
+        CborItemPtr(cbor_build_bytestring(cose_key.data(), cose_key.size())));
   }
 
   // The protected header integer labels are 1/3/-2 (RFC 8152) which have
@@ -365,8 +366,7 @@ std::vector<uint8_t> DpopProof::create_signing_input() const {
   std::vector<uint8_t> payload_bytes(payload_str.begin(), payload_str.end());
   return createJwtSigningInput(header_bytes, payload_bytes);
 #else
-  throw CryptoError(
-      "JWT DPoP signing requires CATAPULT_ENABLE_JSON");
+  throw CryptoError("JWT DPoP signing requires CATAPULT_ENABLE_JSON");
 #endif
 }
 
@@ -464,9 +464,9 @@ std::string DpopProof::serialize_cwt() const {
                                                   payload_cbor.size())),
                 "COSE_Sign1 payload");
 
-  pushArrayItem(CborItemPtr(cbor_build_bytestring(signature_.data(),
-                                                  signature_.size())),
-                "COSE_Sign1 signature");
+  pushArrayItem(
+      CborItemPtr(cbor_build_bytestring(signature_.data(), signature_.size())),
+      "COSE_Sign1 signature");
 
   size_t length = 0;
   auto buffer = cbor_serialize_alloc_owned(cose_array.get(), length);
@@ -552,8 +552,7 @@ DpopProof DpopProof::deserialize_cwt(std::string_view cwt_data) {
   CborItemPtr cose_root;
   try {
     auto env = catapult::internal::loadStrictCoseEnvelope(
-        std::span<const uint8_t>(cose_bytes.data(), cose_bytes.size()),
-        {18});
+        std::span<const uint8_t>(cose_bytes.data(), cose_bytes.size()), {18});
     cose_root = std::move(env.item);
   } catch (const InvalidCborError&) {
     throw InvalidTokenFormatError{};
@@ -920,8 +919,8 @@ DpopProof DpopProof::deserialize_jwt(std::string_view jwt_data) {
       }
       const std::string action_name_str = action_val.get<std::string>();
       bool resolved = false;
-      for (int i = moqt_actions::CLIENT_SETUP;
-           i <= moqt_actions::TRACK_STATUS; ++i) {
+      for (int i = moqt_actions::CLIENT_SETUP; i <= moqt_actions::TRACK_STATUS;
+           ++i) {
         if (moqt_actions::action_name(i) == action_name_str) {
           payload.actx.action = i;
           resolved = true;
@@ -1168,8 +1167,8 @@ bool DpopProofValidator::validate_proof(
   if (settings_.get_jti_processing()) {
     const auto& jti = proof.get_payload().jti.value();
     auto now = std::chrono::system_clock::now();
-    auto result = replay_store_->admit(jti, now,
-                                       settings_.get_effective_window());
+    auto result =
+        replay_store_->admit(jti, now, settings_.get_effective_window());
     switch (result) {
       case ReplayAdmitResult::Admitted:
         CAT_METRIC_INC(::catapult::metrics::names::kReplayAdmitted);

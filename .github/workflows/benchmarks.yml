@@ -36,7 +36,9 @@ jobs:
         cmake -S . -B build-bench \
           -DCMAKE_BUILD_TYPE=Release \
           -DENABLE_LOGGING=OFF \
-          -DCATAPULT_ENABLE_WERROR=ON
+          -DCATAPULT_ENABLE_WERROR=ON \
+          -DCATAPULT_ENABLE_JSON=OFF \
+          -DCATAPULT_INSTALL=OFF
         cmake --build build-bench --target catapult_benchmarks -j$(nproc)
 
     - name: Run hot-path benchmarks

@@ -40,10 +40,8 @@ void validateParseLimits(const ParseLimits& limits) {
                 kAbsoluteMaxEncodedTokenBytes);
   requireAtMost("max_decoded_cbor_bytes", limits.max_decoded_cbor_bytes,
                 kAbsoluteMaxDecodedCborBytes);
-  requireAtMost("max_cbor_depth", limits.max_cbor_depth,
-                kAbsoluteMaxCborDepth);
-  requireAtMost("max_uri_length", limits.max_uri_length,
-                kAbsoluteMaxUriLength);
+  requireAtMost("max_cbor_depth", limits.max_cbor_depth, kAbsoluteMaxCborDepth);
+  requireAtMost("max_uri_length", limits.max_uri_length, kAbsoluteMaxUriLength);
   requireAtMost("max_regex_pattern_length", limits.max_regex_pattern_length,
                 kAbsoluteMaxRegexPatternLength);
   requireAtMost("max_regex_patterns", limits.max_regex_patterns,

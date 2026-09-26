@@ -75,7 +75,8 @@ class SecureAllocator {
       size_t alloc_align = alignof(T) < alignof(std::max_align_t)
                                ? alignof(std::max_align_t)
                                : alignof(T);
-      size_t alloc_size = ((size + alloc_align - 1) / alloc_align) * alloc_align;
+      size_t alloc_size =
+          ((size + alloc_align - 1) / alloc_align) * alloc_align;
       T* ptr = static_cast<T*>(std::aligned_alloc(alloc_align, alloc_size));
       if (!ptr) throw std::bad_alloc();
       lockMemory(ptr, size);

@@ -299,8 +299,7 @@ class PermissivePolicy final : public AuthorizationPolicyHook {
                         const PolicyContext&) override {
     return true;
   }
-  bool acceptGeohash(const GeohashClaimValue&,
-                     const PolicyContext&) override {
+  bool acceptGeohash(const GeohashClaimValue&, const PolicyContext&) override {
     return true;
   }
   bool acceptGeoAltitude(const GeoAltitude&, const PolicyContext&) override {
@@ -337,8 +336,7 @@ class RejectingPolicy final : public AuthorizationPolicyHook {
                         const PolicyContext&) override {
     return false;
   }
-  bool acceptGeohash(const GeohashClaimValue&,
-                     const PolicyContext&) override {
+  bool acceptGeohash(const GeohashClaimValue&, const PolicyContext&) override {
     return false;
   }
   bool acceptGeoAltitude(const GeoAltitude&, const PolicyContext&) override {

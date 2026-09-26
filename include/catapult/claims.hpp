@@ -135,8 +135,7 @@ struct GeoCoordinate {
       : lat(latitude), lon(longitude), radius(r) {}
 
   static std::optional<GeoCoordinate> createSafe(
-      double lat, double lon,
-      std::optional<double> r = std::nullopt) noexcept {
+      double lat, double lon, std::optional<double> r = std::nullopt) noexcept {
     if (lat >= -90.0 && lat <= 90.0 && lon >= -180.0 && lon <= 180.0 &&
         (!r.has_value() || (r.value() >= 0.0 && r.value() <= 4e7))) {
       GeoCoordinate coord;
@@ -224,9 +223,9 @@ struct CatProofOfPossession {
 
 /// CTA-5007-B §4.6.9 replay-protection modes.
 enum class CatReplayMode : uint32_t {
-  None = 0,           ///< Recipient MAY replay
-  RejectOnReplay = 1, ///< Recipient MUST reject duplicate CTI
-  RevokeOnReplay = 2, ///< Recipient MUST revoke on duplicate CTI
+  None = 0,            ///< Recipient MAY replay
+  RejectOnReplay = 1,  ///< Recipient MUST reject duplicate CTI
+  RevokeOnReplay = 2,  ///< Recipient MUST revoke on duplicate CTI
 };
 
 // ---------------------------------------------------------------------------
@@ -310,7 +309,8 @@ struct CatHostHeaderMatchList {
 struct CatConfirmation {
   std::optional<std::vector<uint8_t>> jkt;  ///< JWK SHA-256 thumbprint
   std::optional<std::string> kid;           ///< key identifier
-  std::optional<std::vector<uint8_t>> raw;  ///< opaque map bytes for unknown forms
+  std::optional<std::vector<uint8_t>>
+      raw;  ///< opaque map bytes for unknown forms
 };
 
 // ---------------------------------------------------------------------------
@@ -330,8 +330,8 @@ struct CatConfirmation {
  *        revisions; unknown labels are ignored on decode.
  */
 struct CatDpopSettings {
-  std::optional<int64_t> window_seconds;  ///< label 0: DPoP acceptance window
-  std::optional<bool> honor_jti;          ///< label 1: replay-track the jti
+  std::optional<int64_t> window_seconds;    ///< label 0: DPoP acceptance window
+  std::optional<bool> honor_jti;            ///< label 1: replay-track the jti
   std::optional<std::vector<uint8_t>> raw;  ///< opaque residual bytes
 };
 
@@ -474,19 +474,19 @@ struct RequestClaims {
  *        requires on the wire.
  */
 struct CatClaims {
-  std::optional<CatReplayMode> catreplay;               ///< uint mode
-  std::optional<CatProofOfPossession> catpor;           ///< [prob, id, ?exp]
-  std::optional<uint32_t> catv;                         ///< uint version
-  std::optional<std::vector<CatNipEntry>> catnip;       ///< tagged NIP entries
-  std::optional<CatUriMatchMap> catu;                   ///< URI component match
-  std::optional<std::vector<std::string>> catm;         ///< HTTP methods
+  std::optional<CatReplayMode> catreplay;          ///< uint mode
+  std::optional<CatProofOfPossession> catpor;      ///< [prob, id, ?exp]
+  std::optional<uint32_t> catv;                    ///< uint version
+  std::optional<std::vector<CatNipEntry>> catnip;  ///< tagged NIP entries
+  std::optional<CatUriMatchMap> catu;              ///< URI component match
+  std::optional<std::vector<std::string>> catm;    ///< HTTP methods
   std::optional<std::vector<std::vector<uint8_t>>> catalpn;  ///< ALPN byte strs
-  std::optional<CatHostHeaderMatchList> cath;           ///< header matches
+  std::optional<CatHostHeaderMatchList> cath;                ///< header matches
   std::optional<std::vector<std::string>> catgeoiso3166;
-  std::optional<GeoCoordinate> catgeocoord;             ///< [lat, lon, radius]
+  std::optional<GeoCoordinate> catgeocoord;  ///< [lat, lon, radius]
   std::optional<GeohashClaimValue> geohash;
-  std::optional<GeoAltitude> catgeoalt;                 ///< [alt, ?deviation]
-  std::optional<std::vector<uint8_t>> cattpk;           ///< pubkey thumbprint
+  std::optional<GeoAltitude> catgeoalt;        ///< [alt, ?deviation]
+  std::optional<std::vector<uint8_t>> cattpk;  ///< pubkey thumbprint
 };
 
 }  // namespace catapult

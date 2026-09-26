@@ -126,8 +126,7 @@ ReplayAdmitResult InMemoryReplayStore::admit(
 }
 
 void InMemoryReplayStore::purgeExpired(
-    std::chrono::system_clock::time_point now,
-    std::chrono::seconds window) {
+    std::chrono::system_clock::time_point now, std::chrono::seconds window) {
   for (auto& shard : shards_) {
     std::lock_guard<std::mutex> lock(shard.mu);
     shard.purgeExpiredLocked(now, window);
@@ -144,8 +143,7 @@ std::size_t InMemoryReplayStore::size() const {
 }
 
 void InMemoryReplayStore::Shard::purgeExpiredLocked(
-    std::chrono::system_clock::time_point now,
-    std::chrono::seconds window) {
+    std::chrono::system_clock::time_point now, std::chrono::seconds window) {
   for (auto it = entries.begin(); it != entries.end();) {
     if (now - it->second > window) {
       it = entries.erase(it);

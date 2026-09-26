@@ -46,13 +46,13 @@ constexpr int64_t ALG_ChaCha20_Poly1305 =
     24;  ///< ChaCha20-Poly1305 w/ 256-bit key, 128-bit tag
 
 namespace crypto_constants {
-constexpr size_t HMAC_KEY_SIZE = 32;   ///< HMAC-SHA256 recommended key size
-constexpr size_t ES256_KEY_SIZE = 32;  ///< P-256 private key size
-constexpr size_t AES128_KEY_SIZE = 16;      ///< AES-128 key size in bytes
-constexpr size_t AES192_KEY_SIZE = 24;      ///< AES-192 key size in bytes
-constexpr size_t AES256_KEY_SIZE = 32;      ///< AES-256 key size in bytes
-constexpr size_t ChaCha20_KEY_SIZE = 32;    ///< ChaCha20 key size in bytes
-constexpr size_t GCM_IV_SIZE = 12;          ///< GCM IV size in bytes (96 bits)
+constexpr size_t HMAC_KEY_SIZE = 32;      ///< HMAC-SHA256 recommended key size
+constexpr size_t ES256_KEY_SIZE = 32;     ///< P-256 private key size
+constexpr size_t AES128_KEY_SIZE = 16;    ///< AES-128 key size in bytes
+constexpr size_t AES192_KEY_SIZE = 24;    ///< AES-192 key size in bytes
+constexpr size_t AES256_KEY_SIZE = 32;    ///< AES-256 key size in bytes
+constexpr size_t ChaCha20_KEY_SIZE = 32;  ///< ChaCha20 key size in bytes
+constexpr size_t GCM_IV_SIZE = 12;        ///< GCM IV size in bytes (96 bits)
 constexpr size_t GCM_TAG_SIZE = 16;  ///< GCM authentication tag size in bytes
 constexpr size_t ChaCha20_NONCE_SIZE =
     12;  ///< ChaCha20-Poly1305 nonce size in bytes
@@ -347,8 +347,7 @@ class Es256Algorithm : public CryptographicAlgorithm {
 std::vector<uint8_t> createCoseSignInput(
     std::span<const uint8_t> bodyProtectedHeader,
     std::span<const uint8_t> signatureProtectedHeader,
-    std::span<const uint8_t> externalAAD,
-    std::span<const uint8_t> payload);
+    std::span<const uint8_t> externalAAD, std::span<const uint8_t> payload);
 
 /**
  * @brief Create COSE Sig_structure for COSE_Sign1 (single signature)
@@ -358,8 +357,7 @@ std::vector<uint8_t> createCoseSignInput(
  * @return COSE Sig_structure as CBOR-encoded bytes
  */
 std::vector<uint8_t> createCoseSign1Input(
-    std::span<const uint8_t> protectedHeader,
-    std::span<const uint8_t> payload,
+    std::span<const uint8_t> protectedHeader, std::span<const uint8_t> payload,
     std::span<const uint8_t> externalAAD = {});
 
 /**
@@ -373,8 +371,7 @@ std::vector<uint8_t> createCoseSign1Input(
  * @return Serialized MAC_structure to be MACed
  */
 std::vector<uint8_t> createCoseMac0Input(
-    std::span<const uint8_t> protectedHeader,
-    std::span<const uint8_t> payload,
+    std::span<const uint8_t> protectedHeader, std::span<const uint8_t> payload,
     std::span<const uint8_t> externalAAD = {});
 
 /**

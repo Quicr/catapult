@@ -527,8 +527,16 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     # CDN-scale load harness. Runs the full CAT+DPoP admission hot path
     # under an N-worker workload and emits p50/p95/p99 latency + throughput
     # + a rejection taxonomy. See Gate 8 in the production-readiness plan.
-    add_executable(catapult_load_harness perf/load_harness.cpp)
-    target_link_libraries(catapult_load_harness catapult)
+    #
+    # The harness computes JWK thumbprints via `jwk::calculateJWKThumbprint`
+    # and `DpopKeyPair::get_public_key_jwk`, which are only available when
+    # `CATAPULT_ENABLE_JSON` is on. Gate the executable accordingly so
+    # sanitizer / fuzz builds (which disable JSON to keep the crypto
+    # surface small) still configure cleanly.
+    if(CATAPULT_ENABLE_JSON)
+        add_executable(catapult_load_harness perf/load_harness.cpp)
+        target_link_libraries(catapult_load_harness catapult)
+    endif()
 
     # Performance tests (using Catch2)
     find_package(Catch2 3 QUIET)

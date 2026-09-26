@@ -131,8 +131,7 @@ class IpAllowlistPolicy final : public AuthorizationPolicyHook {
                         const PolicyContext& ctx) override;
   bool acceptGeohash(const GeohashClaimValue&,
                      const PolicyContext& ctx) override;
-  bool acceptGeoAltitude(const GeoAltitude&,
-                         const PolicyContext& ctx) override;
+  bool acceptGeoAltitude(const GeoAltitude&, const PolicyContext& ctx) override;
 
  private:
   [[nodiscard]] bool matches(const PolicyContext& ctx) const noexcept;
@@ -206,8 +205,7 @@ class DpopBindingPolicy final : public AuthorizationPolicyHook {
                         const PolicyContext&) override {
     return true;
   }
-  bool acceptGeohash(const GeohashClaimValue&,
-                     const PolicyContext&) override {
+  bool acceptGeohash(const GeohashClaimValue&, const PolicyContext&) override {
     return true;
   }
   bool acceptGeoAltitude(const GeoAltitude&, const PolicyContext&) override {

@@ -196,8 +196,7 @@ class PolicyCache {
    *   `docs/security-invariants.md`).
    */
   virtual std::optional<AuthorizationDecision> lookup(
-      std::string_view digest,
-      std::chrono::system_clock::time_point now) = 0;
+      std::string_view digest, std::chrono::system_clock::time_point now) = 0;
 
   /**
    * @brief Record a decision.
@@ -233,8 +232,7 @@ class PolicyCache {
    * overload; overrides SHOULD provide a native implementation.
    */
   virtual std::optional<AuthorizationDecision> lookup(
-      const PolicyCacheKey& key,
-      std::chrono::system_clock::time_point now);
+      const PolicyCacheKey& key, std::chrono::system_clock::time_point now);
 
   /**
    * @brief Record a decision keyed on the full authorization identity.
@@ -343,8 +341,7 @@ class InMemoryPolicyCache final : public PolicyCache {
       std::string_view digest,
       std::chrono::system_clock::time_point now) override;
 
-  void store(std::string_view digest,
-             const AuthorizationDecision& decision,
+  void store(std::string_view digest, const AuthorizationDecision& decision,
              std::chrono::system_clock::time_point now) override;
 
   // Native fixed-digest overrides. The base defaults would wrap the

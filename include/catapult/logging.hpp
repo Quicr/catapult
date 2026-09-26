@@ -173,15 +173,15 @@ class Logger {
 // Guard `enabled()` before the format call so filtered severities pay
 // zero formatting cost. The `try/catch` is defensive: a format-error
 // (e.g. mismatched argument) must not tear down the caller.
-#define CAT_LOG_IMPL(level, ...)                                     \
-  do {                                                               \
-    auto _cat_sink = ::catapult::logging::getLogSink();              \
-    if (_cat_sink && _cat_sink->enabled(level)) {                    \
-      try {                                                          \
-        _cat_sink->log(level, ::std::format(__VA_ARGS__));           \
-      } catch (...) {                                                \
-      }                                                              \
-    }                                                                \
+#define CAT_LOG_IMPL(level, ...)                           \
+  do {                                                     \
+    auto _cat_sink = ::catapult::logging::getLogSink();    \
+    if (_cat_sink && _cat_sink->enabled(level)) {          \
+      try {                                                \
+        _cat_sink->log(level, ::std::format(__VA_ARGS__)); \
+      } catch (...) {                                      \
+      }                                                    \
+    }                                                      \
   } while (0)
 
 #define CAT_LOG_TRACE(...) \

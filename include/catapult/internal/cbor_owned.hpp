@@ -74,8 +74,7 @@ template <typename T>
   requires std::is_integral_v<T> && std::is_signed_v<T>
 inline CborItemPtr cbor_build_uint64_owned(T value) {
   if (value < 0) {
-    throw InvalidCborError(
-        "cbor_build_uint64_owned received a negative value");
+    throw InvalidCborError("cbor_build_uint64_owned received a negative value");
   }
   return cbor_build_uint64_owned(static_cast<uint64_t>(value));
 }

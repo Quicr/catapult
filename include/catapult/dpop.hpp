@@ -24,7 +24,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-
 #include <unordered_map>
 #include <unordered_set>
 
@@ -779,8 +778,7 @@ class DpopProofValidator {
   using LruList = std::list<ParsedKeyEntry>;
   mutable std::mutex parsed_key_cache_mu_;
   mutable LruList parsed_key_lru_;
-  mutable std::unordered_map<std::string, LruList::iterator>
-      parsed_key_index_;
+  mutable std::unordered_map<std::string, LruList::iterator> parsed_key_index_;
 
   // Look up (or import + cache) the `CryptographicAlgorithm` for a JWT
   // DPoP proof. Non-owning `shared_ptr` — the cache retains ownership.

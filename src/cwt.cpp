@@ -76,7 +76,8 @@ bool decodeNumericDate(cbor_item_t* value, bool round_up_on_fraction,
     // -2^63, which corresponds to magnitude (2^63 - 1) i.e.
     // static_cast<uint64_t>(INT64_MAX).
     uint64_t magnitude = cbor_get_int(value);
-    if (magnitude > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+    if (magnitude >
+        static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
       return false;
     }
     out = -static_cast<int64_t>(magnitude) - 1;
@@ -89,7 +90,7 @@ bool decodeNumericDate(cbor_item_t* value, bool round_up_on_fraction,
     // double into UB. The int64_t max value is not exactly representable
     // as a double; use the largest double strictly less than 2^63 as the
     // upper bound.
-    constexpr double kMax = 9223372036854774784.0;  // largest double < 2^63
+    constexpr double kMax = 9223372036854774784.0;   // largest double < 2^63
     constexpr double kMin = -9223372036854775808.0;  // exactly -2^63
     if (d > kMax || d < kMin) return false;
     double rounded = round_up_on_fraction ? std::ceil(d) : std::floor(d);
@@ -288,10 +289,9 @@ class CborMapBuilder {
     }
     if (alt.deviation.has_value()) {
       const int32_t d = *alt.deviation;
-      auto dev_val = d >= 0
-                         ? cbor_build_uint64_owned(static_cast<uint64_t>(d))
-                         : cbor_build_negint64_owned(
-                               static_cast<uint64_t>(-(static_cast<int64_t>(d) + 1)));
+      auto dev_val = d >= 0 ? cbor_build_uint64_owned(static_cast<uint64_t>(d))
+                            : cbor_build_negint64_owned(static_cast<uint64_t>(
+                                  -(static_cast<int64_t>(d) + 1)));
       if (!cbor_array_push(arr.get(), dev_val.get())) {
         throw InvalidCborError("Failed to push catgeoalt deviation");
       }
@@ -338,17 +338,16 @@ class CborMapBuilder {
     if (!cbor_array_push(arr.get(), prob.get())) {
       throw InvalidCborError("Failed to push catpor probability");
     }
-    auto ident =
-        cbor_build_bytestring_owned(por.identifier.data(), por.identifier.size());
+    auto ident = cbor_build_bytestring_owned(por.identifier.data(),
+                                             por.identifier.size());
     if (!cbor_array_push(arr.get(), ident.get())) {
       throw InvalidCborError("Failed to push catpor identifier");
     }
     if (por.expiry.has_value()) {
       const int64_t e = *por.expiry;
-      auto exp_val = e >= 0
-                         ? cbor_build_uint64_owned(static_cast<uint64_t>(e))
-                         : cbor_build_negint64_owned(
-                               static_cast<uint64_t>(-(e + 1)));
+      auto exp_val =
+          e >= 0 ? cbor_build_uint64_owned(static_cast<uint64_t>(e))
+                 : cbor_build_negint64_owned(static_cast<uint64_t>(-(e + 1)));
       if (!cbor_array_push(arr.get(), exp_val.get())) {
         throw InvalidCborError("Failed to push catpor expiry");
       }
@@ -361,8 +360,7 @@ class CborMapBuilder {
     auto key = cbor_build_uint64_owned(claim_id);
     auto arr = cbor_new_definite_array_owned(nips.size());
     for (const auto& e : nips) {
-      auto val =
-          cbor_build_bytestring_owned(e.value.data(), e.value.size());
+      auto val = cbor_build_bytestring_owned(e.value.data(), e.value.size());
       auto tagged = CborItemPtr(cbor_new_tag(e.tag));
       cbor_tag_set_item(tagged.get(), val.get());
       if (!cbor_array_push(arr.get(), tagged.get())) {
@@ -377,10 +375,10 @@ class CborMapBuilder {
     auto key = cbor_build_uint64_owned(claim_id);
     auto m = cbor_new_definite_map_owned(catu.components.size());
     for (const auto& [label, match] : catu.components) {
-      auto lbl_key = label >= 0
-                         ? cbor_build_uint64_owned(static_cast<uint64_t>(label))
-                         : cbor_build_negint64_owned(
-                               static_cast<uint64_t>(-(label + 1)));
+      auto lbl_key =
+          label >= 0
+              ? cbor_build_uint64_owned(static_cast<uint64_t>(label))
+              : cbor_build_negint64_owned(static_cast<uint64_t>(-(label + 1)));
       auto entry = cbor_new_definite_array_owned(2);
       auto ty = cbor_build_uint64_owned(static_cast<uint64_t>(match.type));
       if (!cbor_array_push(entry.get(), ty.get())) {
@@ -425,8 +423,8 @@ class CborMapBuilder {
       if (!cbor_array_push(match.get(), ty.get())) {
         throw InvalidCborError("Failed to push cath match type");
       }
-      auto val_bstr = cbor_build_bytestring_owned(
-          e.match.value.data(), e.match.value.size());
+      auto val_bstr = cbor_build_bytestring_owned(e.match.value.data(),
+                                                  e.match.value.size());
       if (!cbor_array_push(match.get(), val_bstr.get())) {
         throw InvalidCborError("Failed to push cath match value");
       }
@@ -664,8 +662,7 @@ class ClaimProcessor {
               "'moqt-reval' revalidation interval must be non-negative");
         }
         auto reval_key = cbor_build_uint64_owned(CLAIM_MOQT_REVAL);
-        auto reval_val =
-            cbor_build_uint64_owned(static_cast<uint64_t>(secs));
+        auto reval_val = cbor_build_uint64_owned(static_cast<uint64_t>(secs));
         builder.addPairToMap(builder.root_.get(), std::move(reval_key),
                              std::move(reval_val));
       }
@@ -721,11 +718,9 @@ class ClaimProcessor {
 
       auto scope_array = cbor_new_definite_array_owned(scope_len);
 
-      auto actions_array =
-          cbor_new_definite_array_owned(scope.actions.size());
+      auto actions_array = cbor_new_definite_array_owned(scope.actions.size());
       for (int action : scope.actions) {
-        auto action_item =
-            cbor_build_uint8_owned(static_cast<uint8_t>(action));
+        auto action_item = cbor_build_uint8_owned(static_cast<uint8_t>(action));
         if (!cbor_array_push(actions_array.get(), action_item.get())) {
           throw InvalidCborError("Failed to push MOQT action");
         }
@@ -736,8 +731,7 @@ class ClaimProcessor {
 
       if (scope_len >= 2) {
         const auto& ns_conditions = scope.namespace_match.conditions();
-        auto ns_matches =
-            cbor_new_definite_array_owned(ns_conditions.size());
+        auto ns_matches = cbor_new_definite_array_owned(ns_conditions.size());
         for (const auto& cond : ns_conditions) {
           auto ns_item = serializeBinaryMatch(cond);
           if (!ns_item) {
@@ -763,8 +757,7 @@ class ClaimProcessor {
             throw InvalidCborError("Failed to push MOQT track match");
           }
         } else {
-          auto tr_matches =
-              cbor_new_definite_array_owned(tr_conditions.size());
+          auto tr_matches = cbor_new_definite_array_owned(tr_conditions.size());
           for (const auto& cond : tr_conditions) {
             auto tr_item = serializeBinaryMatch(cond);
             if (!tr_item) {
@@ -1007,7 +1000,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         // than the wire value states, which is the fail-closed direction.
         int64_t exp_val;
         if (!decodeNumericDate(value_item, /*round_up_on_fraction=*/false,
-                                exp_val)) {
+                               exp_val)) {
           throw InvalidClaimValueError(
               "'exp' must be a NumericDate (uint, negint, or non-NaN float in "
               "int64 range)");
@@ -1023,7 +1016,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         // fail-closed rounding direction.
         int64_t nbf_val;
         if (!decodeNumericDate(value_item, /*round_up_on_fraction=*/true,
-                                nbf_val)) {
+                               nbf_val)) {
           throw InvalidClaimValueError(
               "'nbf' must be a NumericDate (uint, negint, or non-NaN float in "
               "int64 range)");
@@ -1112,8 +1105,8 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
                   "'catpor' expiry must be an unsigned integer");
             }
             uint64_t e = cbor_get_int(arr[2]);
-            if (e > static_cast<uint64_t>(
-                       std::numeric_limits<int64_t>::max())) {
+            if (e >
+                static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
               throw InvalidClaimValueError("'catpor' expiry exceeds int64");
             }
             por.expiry = static_cast<int64_t>(e);
@@ -1166,16 +1159,16 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
             int64_t label = 0;
             if (cbor_isa_uint(lbl)) {
               uint64_t raw = cbor_get_int(lbl);
-              if (raw > static_cast<uint64_t>(
-                            std::numeric_limits<int64_t>::max())) {
+              if (raw >
+                  static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
                 throw InvalidClaimValueError(
                     "'catu' component label exceeds int64 range");
               }
               label = static_cast<int64_t>(raw);
             } else if (cbor_isa_negint(lbl)) {
               uint64_t mag = cbor_get_int(lbl);
-              if (mag > static_cast<uint64_t>(
-                            std::numeric_limits<int64_t>::max())) {
+              if (mag >
+                  static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
                 throw InvalidClaimValueError(
                     "'catu' negative label exceeds int64 range");
               }
@@ -1291,8 +1284,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
             }
             cbor_item_t** m = cbor_array_handle(pair[1]);
             if (!cbor_isa_uint(m[0])) {
-              throw InvalidClaimValueError(
-                  "'cath' match type must be uint");
+              throw InvalidClaimValueError("'cath' match type must be uint");
             }
             uint64_t type_u = cbor_get_int(m[0]);
             if (type_u > 6) {
@@ -1497,8 +1489,8 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
           auto read_int32 = [](cbor_item_t* it) -> int32_t {
             if (cbor_isa_uint(it)) {
               uint64_t v = cbor_get_int(it);
-              if (v > static_cast<uint64_t>(
-                          std::numeric_limits<int32_t>::max())) {
+              if (v >
+                  static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
                 throw InvalidClaimValueError(
                     "'catgeoalt' int exceeds int32 range");
               }
@@ -1506,8 +1498,8 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
             }
             if (cbor_isa_negint(it)) {
               uint64_t mag = cbor_get_int(it);
-              if (mag > static_cast<uint64_t>(
-                            std::numeric_limits<int32_t>::max())) {
+              if (mag >
+                  static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
                 throw InvalidClaimValueError(
                     "'catgeoalt' negint exceeds int32 range");
               }
@@ -1554,7 +1546,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         // values.
         int64_t iat_val;
         if (!decodeNumericDate(value_item, /*round_up_on_fraction=*/false,
-                                iat_val)) {
+                               iat_val)) {
           throw InvalidClaimValueError(
               "'iat' must be a NumericDate (uint, negint, or non-NaN float in "
               "int64 range)");
@@ -1565,8 +1557,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
 
       case CLAIM_CATIFDATA:
         if (cbor_isa_string(value_item)) {
-          token.informational.catifdata =
-              CatIfData(extract_string(value_item));
+          token.informational.catifdata = CatIfData(extract_string(value_item));
         } else if (cbor_isa_array(value_item)) {
           size_t n = cbor_array_size(value_item);
           constexpr size_t MAX_IFDATA = 32;
@@ -1608,8 +1599,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
             // Integer label 3 is `jkt` (RFC 8747 §3.2).
             if (cbor_isa_uint(lbl) && cbor_get_int(lbl) == 3) {
               if (!cbor_isa_bytestring(val)) {
-                throw InvalidClaimValueError(
-                    "'cnf' jkt must be a byte string");
+                throw InvalidClaimValueError("'cnf' jkt must be a byte string");
               }
               size_t l = cbor_bytestring_length(val);
               // RFC 7638 JWK thumbprint using SHA-256 is exactly 32 bytes.
@@ -1687,7 +1677,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
                 {
                   uint64_t w = cbor_get_int(val);
                   if (w > static_cast<uint64_t>(
-                             std::numeric_limits<int64_t>::max())) {
+                              std::numeric_limits<int64_t>::max())) {
                     throw InvalidClaimValueError(
                         "'catdpop' window-seconds exceeds int64");
                   }
@@ -1695,8 +1685,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
                 }
                 break;
               case 1:  // honor_jti
-                if (!cbor_isa_float_ctrl(val) ||
-                    !cbor_is_bool(val)) {
+                if (!cbor_isa_float_ctrl(val) || !cbor_is_bool(val)) {
                   throw InvalidClaimValueError(
                       "'catdpop' honor_jti must be a boolean");
                 }
@@ -1763,8 +1752,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
             }
             size_t scope_len = cbor_array_size(scope_arr.get());
             if (scope_len < 1) {
-              throw InvalidClaimValueError(
-                  "MOQT scope missing action list");
+              throw InvalidClaimValueError("MOQT scope missing action list");
             }
 
             std::vector<int> actions;
@@ -1776,8 +1764,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
             constexpr size_t MAX_ACTIONS = 50;
             size_t action_count = cbor_array_size(actions_arr.get());
             if (action_count > MAX_ACTIONS) {
-              throw InvalidClaimValueError(
-                  "MOQT scope has too many actions");
+              throw InvalidClaimValueError("MOQT scope has too many actions");
             }
             for (size_t ai = 0; ai < action_count; ++ai) {
               auto act = cbor_array_get_owned(actions_arr.get(), ai);
@@ -1786,10 +1773,9 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
                     "MOQT action must be an unsigned integer");
               }
               uint64_t action_u64 = cbor_get_int(act.get());
-              if (action_u64 > static_cast<uint64_t>(
-                                   std::numeric_limits<int>::max())) {
-                throw InvalidClaimValueError(
-                    "MOQT action exceeds int range");
+              if (action_u64 >
+                  static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+                throw InvalidClaimValueError("MOQT action exceeds int range");
               }
               int action_val = static_cast<int>(action_u64);
               if (!moqt_actions::is_valid_action(action_val)) {
@@ -1813,9 +1799,9 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
                     "string or (type, bytestring) tuple");
               }
               if (cbor_isa_bytestring(item)) {
-                std::string_view sv(reinterpret_cast<const char*>(
-                                        cbor_bytestring_handle(item)),
-                                    cbor_bytestring_length(item));
+                std::string_view sv(
+                    reinterpret_cast<const char*>(cbor_bytestring_handle(item)),
+                    cbor_bytestring_length(item));
                 return MoqtBinaryMatch::exact(sv);
               }
               if (cbor_isa_array(item) && cbor_array_size(item) == 2) {
@@ -1827,10 +1813,9 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
                       "MOQT match tuple must be (uint, bytestring)");
                 }
                 int type = static_cast<int>(cbor_get_int(type_item.get()));
-                std::string_view sv(
-                    reinterpret_cast<const char*>(
-                        cbor_bytestring_handle(val_item.get())),
-                    cbor_bytestring_length(val_item.get()));
+                std::string_view sv(reinterpret_cast<const char*>(
+                                        cbor_bytestring_handle(val_item.get())),
+                                    cbor_bytestring_length(val_item.get()));
                 switch (type) {
                   case 0:
                     return MoqtBinaryMatch::exact(sv);
@@ -1902,8 +1887,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
                     track_match = MoqtCompoundMatch::single(std::move(m));
                   }
                 }
-              } else if (track_item &&
-                         cbor_isa_bytestring(track_item.get())) {
+              } else if (track_item && cbor_isa_bytestring(track_item.get())) {
                 auto m = parse_bin_match(track_item.get());
                 if (!m.is_empty()) {
                   track_match = MoqtCompoundMatch::single(std::move(m));
@@ -1938,10 +1922,9 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         }
         {
           uint64_t reval_u = cbor_get_int(value_item);
-          if (reval_u > static_cast<uint64_t>(
-                            std::numeric_limits<int64_t>::max())) {
-            throw InvalidClaimValueError(
-                "'moqt-reval' exceeds int64 range");
+          if (reval_u >
+              static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+            throw InvalidClaimValueError("'moqt-reval' exceeds int64 range");
           }
           pending_moqt_reval_seconds = static_cast<int64_t>(reval_u);
         }
@@ -2231,8 +2214,8 @@ std::vector<uint8_t> Cwt::createCwt(
       }
 
       // Add signature (encoded as bstr)
-      auto signatureBstr = CborItemPtr(cbor_build_bytestring(
-          signatureBytes.data(), signatureBytes.size()));
+      auto signatureBstr = CborItemPtr(
+          cbor_build_bytestring(signatureBytes.data(), signatureBytes.size()));
       if (!cbor_array_push(coseStructure.get(), signatureBstr.get())) {
         throw InvalidCborError("Failed to add signature to COSE structure");
       }
@@ -2272,8 +2255,7 @@ CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
   // helper enforces size, definite-length, duplicate-key, trailing-bytes,
   // and nesting-depth policy uniformly across every COSE-parse entry
   // point (see also validateCwt, validateMultiSignedCwt, DpopProof).
-  auto env =
-      catapult::internal::loadStrictCoseEnvelope(cwtBytes, {16, 17, 18});
+  auto env = catapult::internal::loadStrictCoseEnvelope(cwtBytes, {16, 17, 18});
   CborItemPtr coseItem = std::move(env.item);
 
   if (!cbor_isa_array(coseItem.get())) {
@@ -2302,9 +2284,8 @@ CwtHeader Cwt::decodeHeader(std::span<const uint8_t> cwtBytes) {
   // bytes, and unrecognised CBOR tags.
   CborItemPtr headerItem;
   try {
-    headerItem = catapult::internal::loadStrict(
-        std::span<const uint8_t>(protectedHeaderBytes.data(),
-                                 protectedHeaderBytes.size()));
+    headerItem = catapult::internal::loadStrict(std::span<const uint8_t>(
+        protectedHeaderBytes.data(), protectedHeaderBytes.size()));
   } catch (const InvalidCborError&) {
     throw InvalidTokenFormatError();
   }
@@ -2436,9 +2417,8 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
       if (!cbor_isa_bytestring(coseArray[2])) {
         throw InvalidTokenFormatError();
       }
-      std::span<const uint8_t> ciphertext(
-          cbor_bytestring_handle(coseArray[2]),
-          cbor_bytestring_length(coseArray[2]));
+      std::span<const uint8_t> ciphertext(cbor_bytestring_handle(coseArray[2]),
+                                          cbor_bytestring_length(coseArray[2]));
 
       // Decrypt with Enc_structure as AAD to authenticate the protected
       // header (RFC 8152 §5.3). Producers built after this change will
@@ -2565,8 +2545,8 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
     }
 
     auto isKnownAlgorithm = [](int64_t alg) {
-      return alg == ALG_ES256 || alg == ALG_HMAC256_256 ||
-             alg == ALG_A128GCM || alg == ALG_A192GCM || alg == ALG_A256GCM ||
+      return alg == ALG_ES256 || alg == ALG_HMAC256_256 || alg == ALG_A128GCM ||
+             alg == ALG_A192GCM || alg == ALG_A256GCM ||
              alg == ALG_ChaCha20_Poly1305;
     };
     if (!isKnownAlgorithm(headerAlgId)) {
@@ -2700,9 +2680,9 @@ Cwt Cwt::validateMultiSignedCwt(
     // protected header", not "malformed CBOR".
     if (!protectedHeaderBytes.empty()) {
       try {
-        CborItemPtr outerHeaderItem = catapult::internal::loadStrict(
-            std::span<const uint8_t>(protectedHeaderBytes.data(),
-                                     protectedHeaderBytes.size()));
+        CborItemPtr outerHeaderItem =
+            catapult::internal::loadStrict(std::span<const uint8_t>(
+                protectedHeaderBytes.data(), protectedHeaderBytes.size()));
         if (!outerHeaderItem || !cbor_isa_map(outerHeaderItem.get())) {
           throw InvalidTokenFormatError();
         }
@@ -2778,9 +2758,9 @@ Cwt Cwt::validateMultiSignedCwt(
         // Per-signature protected header: strict parse.
         CborItemPtr sigHeaderItem;
         try {
-          sigHeaderItem = catapult::internal::loadStrict(
-              std::span<const uint8_t>(sigProtectedHeader.data(),
-                                       sigProtectedHeader.size()));
+          sigHeaderItem =
+              catapult::internal::loadStrict(std::span<const uint8_t>(
+                  sigProtectedHeader.data(), sigProtectedHeader.size()));
         } catch (const InvalidCborError&) {
           throw InvalidTokenFormatError();
         }

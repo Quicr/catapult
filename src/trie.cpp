@@ -27,10 +27,9 @@ void TrieNodePoolDeleter::operator()(TrieNode* ptr) const {
 
 void TrieNode::setChild(char c, TrieNodePtr child) {
   auto b = static_cast<unsigned char>(c);
-  auto it = std::lower_bound(children.begin(), children.end(), b,
-                             [](const Edge& e, unsigned char v) {
-                               return e.byte < v;
-                             });
+  auto it = std::lower_bound(
+      children.begin(), children.end(), b,
+      [](const Edge& e, unsigned char v) { return e.byte < v; });
   if (it != children.end() && it->byte == b) {
     if (child) {
       it->child = std::move(child);
@@ -45,10 +44,9 @@ void TrieNode::setChild(char c, TrieNodePtr child) {
 
 TrieNodePtr TrieNode::removeChild(char c) {
   auto b = static_cast<unsigned char>(c);
-  auto it = std::lower_bound(children.begin(), children.end(), b,
-                             [](const Edge& e, unsigned char v) {
-                               return e.byte < v;
-                             });
+  auto it = std::lower_bound(
+      children.begin(), children.end(), b,
+      [](const Edge& e, unsigned char v) { return e.byte < v; });
   if (it == children.end() || it->byte != b) return TrieNodePtr{};
   TrieNodePtr removed = std::move(it->child);
   children.erase(it);

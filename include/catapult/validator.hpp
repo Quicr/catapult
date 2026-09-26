@@ -26,10 +26,10 @@ class CatTokenValidator;
 /**
  * @brief Immutable, validated view of a CAT token.
  *
- * A `ValidatedCatToken` can only be produced by `CatTokenValidator::intoValidated`,
- * which enforces every semantic check the validator performs. Once
- * constructed, the underlying claims are read-only: callers cannot mutate
- * fields around the checks that were applied.
+ * A `ValidatedCatToken` can only be produced by
+ * `CatTokenValidator::intoValidated`, which enforces every semantic check the
+ * validator performs. Once constructed, the underlying claims are read-only:
+ * callers cannot mutate fields around the checks that were applied.
  *
  * This addresses catapult_analysis M-01: parsed authorization objects must
  * not expose mutable state that lets callers write invalid values after
@@ -87,47 +87,47 @@ class CatTokenValidator {
       expectedAudiences_;       ///< Expected token audiences
   int64_t clockSkewTolerance_;  ///< Clock skew tolerance in seconds
   RevalidationCallback* revalidation_callback_ = nullptr;
-      ///< Observability hook fired during moqt-reval enforcement.
-      ///< Non-owning; the caller is responsible for lifetime. A nullptr
-      ///< means "do nothing" — equivalent to installing a
-      ///< NoopRevalidationCallback but without the vtable dispatch.
+  ///< Observability hook fired during moqt-reval enforcement.
+  ///< Non-owning; the caller is responsible for lifetime. A nullptr
+  ///< means "do nothing" — equivalent to installing a
+  ///< NoopRevalidationCallback but without the vtable dispatch.
   UsageStateHook* usage_state_ = nullptr;
-      ///< Enforcement hook for CTA-5007-B `catreplay` modes. Non-owning;
-      ///< the caller is responsible for lifetime. A nullptr means "do
-      ///< not enforce" — a token carrying `catreplay=RejectOnReplay`
-      ///< or `RevokeOnReplay` is then rejected outright, because
-      ///< silently downgrading to `None` would let a misconfigured
-      ///< relay believe it was enforcing replay when it was not.
+  ///< Enforcement hook for CTA-5007-B `catreplay` modes. Non-owning;
+  ///< the caller is responsible for lifetime. A nullptr means "do
+  ///< not enforce" — a token carrying `catreplay=RejectOnReplay`
+  ///< or `RevokeOnReplay` is then rejected outright, because
+  ///< silently downgrading to `None` would let a misconfigured
+  ///< relay believe it was enforcing replay when it was not.
   AuthorizationPolicyHook* authz_policy_ = nullptr;
-      ///< Enforcement hook for semantic claims the library cannot decide
-      ///< from token state alone: `catpor`, `catdpop`, `catif`, `catr`,
-      ///< `catgeoiso3166`, `geohash`, `catgeoalt`. Non-owning; the caller
-      ///< is responsible for lifetime. A nullptr means "no policy" —
-      ///< when a token carries any of these claims and no hook is
-      ///< installed, validation fails closed with a missing-required-
-      ///< claim error. Test suites and staged rollouts can install
-      ///< `PermissivePolicy` to opt out of enforcement explicitly.
+  ///< Enforcement hook for semantic claims the library cannot decide
+  ///< from token state alone: `catpor`, `catdpop`, `catif`, `catr`,
+  ///< `catgeoiso3166`, `geohash`, `catgeoalt`. Non-owning; the caller
+  ///< is responsible for lifetime. A nullptr means "no policy" —
+  ///< when a token carries any of these claims and no hook is
+  ///< installed, validation fails closed with a missing-required-
+  ///< claim error. Test suites and staged rollouts can install
+  ///< `PermissivePolicy` to opt out of enforcement explicitly.
   RequiredPolicyContextFields required_context_fields_{};
-      ///< Which `PolicyContext` fields the validator will require callers
-      ///< to populate before dispatching to `authz_policy_`. Default is
-      ///< "no field is required" — the caller is responsible for opting
-      ///< in per deployment via `withRequiredContextFields()`. When a
-      ///< required field is missing, `validate()` throws
-      ///< `MissingRequiredClaimError` *before* any policy callback fires,
-      ///< so a forgetful caller cannot silently succeed against a hook
-      ///< that fails to check its own inputs.
+  ///< Which `PolicyContext` fields the validator will require callers
+  ///< to populate before dispatching to `authz_policy_`. Default is
+  ///< "no field is required" — the caller is responsible for opting
+  ///< in per deployment via `withRequiredContextFields()`. When a
+  ///< required field is missing, `validate()` throws
+  ///< `MissingRequiredClaimError` *before* any policy callback fires,
+  ///< so a forgetful caller cannot silently succeed against a hook
+  ///< that fails to check its own inputs.
   bool moqt_scope_context_optional_ = false;
-      ///< When false (the default) a token carrying MOQT scope claims is
-      ///< rejected unless the caller supplied a complete
-      ///< `(moqt_action, moqt_namespace, moqt_track)` tuple on the
-      ///< `PolicyContext`. This closes the P1 finding in
-      ///< `PRODUCTION_READINESS_AUDIT.md` where a MOQT-scoped token could
-      ///< be admitted by a token-only `validate(token)` call because the
-      ///< scope check silently skipped on missing tuple. Set to true via
-      ///< `withMoqtScopeContextOptional(true)` only for non-MOQT
-      ///< integrations that intentionally accept scoped tokens without
-      ///< checking the tuple; production relays MUST leave this at the
-      ///< default.
+  ///< When false (the default) a token carrying MOQT scope claims is
+  ///< rejected unless the caller supplied a complete
+  ///< `(moqt_action, moqt_namespace, moqt_track)` tuple on the
+  ///< `PolicyContext`. This closes the P1 finding in
+  ///< `PRODUCTION_READINESS_AUDIT.md` where a MOQT-scoped token could
+  ///< be admitted by a token-only `validate(token)` call because the
+  ///< scope check silently skipped on missing tuple. Set to true via
+  ///< `withMoqtScopeContextOptional(true)` only for non-MOQT
+  ///< integrations that intentionally accept scoped tokens without
+  ///< checking the tuple; production relays MUST leave this at the
+  ///< default.
 
  public:
   /**
@@ -305,9 +305,8 @@ class CatTokenValidator {
    * `tryValidate(token)` except the request context is forwarded to the
    * authorization-policy hook.
    */
-  [[nodiscard]] CatErrorCode tryValidate(const CatToken& token,
-                                         const PolicyContext& context)
-      const noexcept;
+  [[nodiscard]] CatErrorCode tryValidate(
+      const CatToken& token, const PolicyContext& context) const noexcept;
 
   /**
    * @brief Validate a token and consume it into an immutable

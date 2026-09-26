@@ -115,8 +115,8 @@ class ReplayStore {
    */
   virtual StoreCapabilities capabilities() const {
     return StoreCapabilities{StoreAtomicity::PerProcess,
-                             StoreDurability::Ephemeral,
-                             StoreScope::SingleNode, "unspecified"};
+                             StoreDurability::Ephemeral, StoreScope::SingleNode,
+                             "unspecified"};
   }
 };
 
@@ -197,8 +197,8 @@ class InMemoryReplayStore final : public ReplayStore {
     // has its own map). No fleet-wide guarantee whatsoever — that is
     // what `requireFleetCapableReplayBackend` exists to catch.
     return StoreCapabilities{StoreAtomicity::PerProcess,
-                             StoreDurability::Ephemeral,
-                             StoreScope::SingleNode, "in-memory"};
+                             StoreDurability::Ephemeral, StoreScope::SingleNode,
+                             "in-memory"};
   }
 
  private:

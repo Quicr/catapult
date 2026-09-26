@@ -59,10 +59,9 @@ struct TrieNode {
    */
   TrieNode* getChild(char c) const noexcept {
     auto b = static_cast<unsigned char>(c);
-    auto it = std::lower_bound(children.begin(), children.end(), b,
-                               [](const Edge& e, unsigned char v) {
-                                 return e.byte < v;
-                               });
+    auto it = std::lower_bound(
+        children.begin(), children.end(), b,
+        [](const Edge& e, unsigned char v) { return e.byte < v; });
     if (it == children.end() || it->byte != b) return nullptr;
     return it->child.get();
   }

@@ -71,10 +71,9 @@ std::optional<AuthorizationDecision> PolicyCache::lookup(
   // a native hash-table path override this; the wrapping here exists
   // so an out-of-tree adapter that inherits `PolicyCache` without
   // overriding the fixed-digest overload still works.
-  return lookup(
-      std::string_view(reinterpret_cast<const char*>(digest.data()),
-                       digest.size()),
-      now);
+  return lookup(std::string_view(reinterpret_cast<const char*>(digest.data()),
+                                 digest.size()),
+                now);
 }
 
 void PolicyCache::store(const PolicyCacheDigest& digest,
@@ -213,10 +212,9 @@ std::optional<AuthorizationDecision> InMemoryPolicyCache::lookup(
   // overload keeps the digest-driven and view-driven APIs pointed at
   // the same shard/entry — a `store(digest)` followed by
   // `lookup(string_view over the same bytes)` still hits.
-  return lookup(
-      std::string_view(reinterpret_cast<const char*>(digest.data()),
-                       digest.size()),
-      now);
+  return lookup(std::string_view(reinterpret_cast<const char*>(digest.data()),
+                                 digest.size()),
+                now);
 }
 
 void InMemoryPolicyCache::store(const PolicyCacheDigest& digest,

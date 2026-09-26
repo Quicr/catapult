@@ -241,10 +241,10 @@ class MultiSignatureStructureBuilder : public SigStructureBuilder {
   std::span<const uint8_t> payload_;
 
  public:
-  MultiSignatureStructureBuilder(std::span<const uint8_t> bodyProtectedHeader,
-                                 std::span<const uint8_t> signatureProtectedHeader,
-                                 std::span<const uint8_t> externalAAD,
-                                 std::span<const uint8_t> payload)
+  MultiSignatureStructureBuilder(
+      std::span<const uint8_t> bodyProtectedHeader,
+      std::span<const uint8_t> signatureProtectedHeader,
+      std::span<const uint8_t> externalAAD, std::span<const uint8_t> payload)
       : bodyProtectedHeader_(bodyProtectedHeader),
         signatureProtectedHeader_(signatureProtectedHeader),
         externalAAD_(externalAAD),
@@ -280,9 +280,9 @@ class MultiSignatureStructureBuilder : public SigStructureBuilder {
   }
 };
 
-std::vector<uint8_t> createCoseSign1Input(std::span<const uint8_t> protectedHeader,
-                                          std::span<const uint8_t> payload,
-                                          std::span<const uint8_t> externalAAD) {
+std::vector<uint8_t> createCoseSign1Input(
+    std::span<const uint8_t> protectedHeader, std::span<const uint8_t> payload,
+    std::span<const uint8_t> externalAAD) {
   SingleSignatureStructureBuilder builder(protectedHeader, externalAAD,
                                           payload);
   return builder.build();
@@ -291,16 +291,15 @@ std::vector<uint8_t> createCoseSign1Input(std::span<const uint8_t> protectedHead
 std::vector<uint8_t> createCoseSignInput(
     std::span<const uint8_t> bodyProtectedHeader,
     std::span<const uint8_t> signatureProtectedHeader,
-    std::span<const uint8_t> externalAAD,
-    std::span<const uint8_t> payload) {
+    std::span<const uint8_t> externalAAD, std::span<const uint8_t> payload) {
   MultiSignatureStructureBuilder builder(
       bodyProtectedHeader, signatureProtectedHeader, externalAAD, payload);
   return builder.build();
 }
 
-std::vector<uint8_t> createCoseMac0Input(std::span<const uint8_t> protectedHeader,
-                                         std::span<const uint8_t> payload,
-                                         std::span<const uint8_t> externalAAD) {
+std::vector<uint8_t> createCoseMac0Input(
+    std::span<const uint8_t> protectedHeader, std::span<const uint8_t> payload,
+    std::span<const uint8_t> externalAAD) {
   Mac0StructureBuilder builder(protectedHeader, externalAAD, payload);
   return builder.build();
 }
@@ -567,8 +566,8 @@ std::vector<uint8_t> es256DerToRaw(std::span<const uint8_t> der) {
   }
   // Left-pad each component to exactly 32 bytes (big-endian).
   BN_bn2bin(r, raw.data() + (kEs256ComponentBytes - rBytes));
-  BN_bn2bin(s, raw.data() + kEs256ComponentBytes +
-                   (kEs256ComponentBytes - sBytes));
+  BN_bn2bin(
+      s, raw.data() + kEs256ComponentBytes + (kEs256ComponentBytes - sBytes));
   ECDSA_SIG_free(sig);
   return raw;
 }
@@ -578,8 +577,8 @@ std::vector<uint8_t> es256RawToDer(std::span<const uint8_t> raw) {
     throw CryptoError("ES256 raw signature must be exactly 64 bytes");
   }
   BIGNUM* r = BN_bin2bn(raw.data(), kEs256ComponentBytes, nullptr);
-  BIGNUM* s = BN_bin2bn(raw.data() + kEs256ComponentBytes,
-                        kEs256ComponentBytes, nullptr);
+  BIGNUM* s = BN_bin2bn(raw.data() + kEs256ComponentBytes, kEs256ComponentBytes,
+                        nullptr);
   if (!r || !s) {
     if (r) BN_free(r);
     if (s) BN_free(s);

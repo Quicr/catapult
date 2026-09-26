@@ -3,11 +3,11 @@
  * @brief Bounded object pool for hot-path allocations.
  *
  * The pool serves TrieNode allocations during URI-matcher construction. It is
- * intentionally simple: a mutex-guarded singly linked free list of pre-allocated
- * cache-line-aligned slots, with heap fallback when exhausted. Ownership on
- * release is resolved by an exact `offsetof` conversion from the returned slot
- * back to its enclosing node, so the pool never has to infer membership from a
- * pointer-in-range comparison.
+ * intentionally simple: a mutex-guarded singly linked free list of
+ * pre-allocated cache-line-aligned slots, with heap fallback when exhausted.
+ * Ownership on release is resolved by an exact `offsetof` conversion from the
+ * returned slot back to its enclosing node, so the pool never has to infer
+ * membership from a pointer-in-range comparison.
  */
 
 #pragma once

@@ -58,8 +58,7 @@ void checkShortestIntegerEncoding(cbor_item_t* item) {
 // is O(n^2 * key_size) worst case but adequate for CAT payloads capped at
 // 4 KiB. It intentionally does not depend on hashing to keep the check
 // independent of libcbor's internal ordering.
-void walk(cbor_item_t* item, const StrictCborOptions& opts,
-          std::size_t depth) {
+void walk(cbor_item_t* item, const StrictCborOptions& opts, std::size_t depth) {
   if (!item) {
     throw InvalidCborError("Null CBOR item during strict validation");
   }
@@ -386,8 +385,7 @@ void preScanOne(PreScanCursor& c, std::size_t depth) {
       uint64_t len;
       readLen(len);
       // Declared byte length must fit within remaining input.
-      if (len > c.max_bytes ||
-          len > static_cast<uint64_t>(c.end - c.p)) {
+      if (len > c.max_bytes || len > static_cast<uint64_t>(c.end - c.p)) {
         throw InvalidCborError(
             "CBOR bytestring/textstring length exceeds remaining input");
       }
@@ -402,15 +400,12 @@ void preScanOne(PreScanCursor& c, std::size_t depth) {
       const std::size_t items = (mt == 5) ? 2 : 1;  // map pairs count twice
       // Each nested item is at least 1 byte on the wire (a smallest int is
       // one head byte). Reject counts that cannot possibly fit.
-      const std::size_t remaining =
-          static_cast<std::size_t>(c.end - c.p);
-      if (count > c.max_bytes ||
-          count * items > remaining) {
+      const std::size_t remaining = static_cast<std::size_t>(c.end - c.p);
+      if (count > c.max_bytes || count * items > remaining) {
         throw InvalidCborError(
             "CBOR array/map declared count exceeds remaining input");
       }
-      const std::size_t total_items =
-          static_cast<std::size_t>(count) * items;
+      const std::size_t total_items = static_cast<std::size_t>(count) * items;
       for (std::size_t i = 0; i < total_items; ++i) {
         preScanOne(c, depth + 1);
       }
@@ -442,8 +437,7 @@ void preScanOne(PreScanCursor& c, std::size_t depth) {
           n = 8;
           break;
         case 31:
-          throw InvalidCborError(
-              "Indefinite-length break outside container");
+          throw InvalidCborError("Indefinite-length break outside container");
         default:
           throw InvalidCborError("Reserved additional-info in CBOR head");
       }

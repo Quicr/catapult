@@ -55,8 +55,7 @@ CatTokenValidator& CatTokenValidator::withRevalidationCallback(
   return *this;
 }
 
-CatTokenValidator& CatTokenValidator::withUsageStateHook(
-    UsageStateHook* hook) {
+CatTokenValidator& CatTokenValidator::withUsageStateHook(UsageStateHook* hook) {
   usage_state_ = hook;
   return *this;
 }
@@ -120,8 +119,7 @@ void CatTokenValidator::validate(const CatToken& token,
                  .count();
 
   // Cross-claim relationship: nbf must not exceed exp.
-  if (token.core.exp && token.core.nbf &&
-      *token.core.nbf > *token.core.exp) {
+  if (token.core.exp && token.core.nbf && *token.core.nbf > *token.core.exp) {
     throw InvalidClaimValueError(
         "Token 'nbf' is after 'exp' — token is uninhabitable");
   }
@@ -236,8 +234,7 @@ void CatTokenValidator::validateMoqtRevalidation(
   // near-future revalidation window).
   int64_t deadline;
   if (internal::addOverflow(iat, reval, deadline)) {
-    throw InvalidClaimValueError(
-        "'iat + moqt-reval' overflows int64_t");
+    throw InvalidClaimValueError("'iat + moqt-reval' overflows int64_t");
   }
   // Apply the operator-configured clock skew tolerance in the same
   // direction as `exp`: extend the acceptance window forward. Overflow
@@ -245,8 +242,7 @@ void CatTokenValidator::validateMoqtRevalidation(
   int64_t deadline_with_skew;
   if (internal::addOverflow(deadline, clockSkewTolerance_,
                             deadline_with_skew)) {
-    throw InvalidClaimValueError(
-        "'iat + moqt-reval + skew' overflows int64_t");
+    throw InvalidClaimValueError("'iat + moqt-reval + skew' overflows int64_t");
   }
   const bool expired = now_epoch_seconds > deadline_with_skew;
 
@@ -395,8 +391,8 @@ void CatTokenValidator::validateUsageLimits(const CatToken& token) const {
   }
 
   const auto& cti_bytes = *token.core.cti;
-  std::string_view cti_view(
-      reinterpret_cast<const char*>(cti_bytes.data()), cti_bytes.size());
+  std::string_view cti_view(reinterpret_cast<const char*>(cti_bytes.data()),
+                            cti_bytes.size());
 
   auto now = std::chrono::system_clock::now();
   std::optional<std::chrono::system_clock::time_point> exp_tp;
@@ -455,8 +451,8 @@ void CatTokenValidator::validateAuthorizationPolicy(
   const bool has_catdpop = token.dpop.catdpop.has_value();
   const bool has_catif = token.request.catif.has_value();
   const bool has_catr = token.request.catr.has_value();
-  const bool has_geoiso = token.cat.catgeoiso3166.has_value() &&
-                          !token.cat.catgeoiso3166->empty();
+  const bool has_geoiso =
+      token.cat.catgeoiso3166.has_value() && !token.cat.catgeoiso3166->empty();
   const bool has_geohash = token.cat.geohash.has_value();
   const bool has_geoalt = token.cat.catgeoalt.has_value();
 
@@ -530,8 +526,7 @@ void CatTokenValidator::validateAuthorizationPolicy(
   }
   if (has_geohash &&
       !authz_policy_->acceptGeohash(*token.cat.geohash, context)) {
-    throw GeographicValidationError(
-        "geohash rejected by authorization policy");
+    throw GeographicValidationError("geohash rejected by authorization policy");
   }
   if (has_geoalt &&
       !authz_policy_->acceptGeoAltitude(*token.cat.catgeoalt, context)) {
@@ -558,8 +553,8 @@ void CatTokenValidator::validateAuthorizationPolicy(
 // When the tuple is present, at least one scope must return true from
 // `isAuthorized`; otherwise the bearer is out of scope for this request
 // and the validator rejects.
-void CatTokenValidator::validateMoqtScopes(
-    const CatToken& token, const PolicyContext& context) const {
+void CatTokenValidator::validateMoqtScopes(const CatToken& token,
+                                           const PolicyContext& context) const {
   if (!token.extended.hasMoqtClaims()) {
     return;
   }
@@ -585,9 +580,8 @@ void CatTokenValidator::validateMoqtScopes(
   if (moqt == nullptr) {
     return;
   }
-  const bool authorized = moqt->isAuthorized(*context.moqt_action,
-                                             *context.moqt_namespace,
-                                             *context.moqt_track);
+  const bool authorized = moqt->isAuthorized(
+      *context.moqt_action, *context.moqt_namespace, *context.moqt_track);
   if (!authorized) {
     throw InvalidClaimValueError(
         "MOQT scopes do not authorize the requested action/namespace/track");
@@ -725,7 +719,8 @@ ValidatedCatToken CatTokenValidator::intoValidated(
   }
 }
 
-CatErrorCode CatTokenValidator::tryValidate(const CatToken& token) const noexcept {
+CatErrorCode CatTokenValidator::tryValidate(
+    const CatToken& token) const noexcept {
   return tryValidate(token, PolicyContext{});
 }
 
@@ -745,8 +740,8 @@ CatErrorCode CatTokenValidator::tryValidate(
   }
 }
 
-Result<ValidatedCatToken, CatErrorCode>
-CatTokenValidator::tryIntoValidated(CatToken token) const noexcept {
+Result<ValidatedCatToken, CatErrorCode> CatTokenValidator::tryIntoValidated(
+    CatToken token) const noexcept {
   auto code = tryValidate(token);
   if (code != CatErrorCode::SUCCESS) {
     return Result<ValidatedCatToken, CatErrorCode>::error(code);
@@ -755,8 +750,7 @@ CatTokenValidator::tryIntoValidated(CatToken token) const noexcept {
       ValidatedCatToken(std::move(token)));
 }
 
-Result<ValidatedCatToken, CatErrorCode>
-CatTokenValidator::tryIntoValidated(
+Result<ValidatedCatToken, CatErrorCode> CatTokenValidator::tryIntoValidated(
     CatToken token, const PolicyContext& context) const noexcept {
   auto code = tryValidate(token, context);
   if (code != CatErrorCode::SUCCESS) {
