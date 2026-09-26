@@ -534,6 +534,13 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     add_executable(relay_token_validation examples/relay_token_validation.cpp)
     target_link_libraries(relay_token_validation catapult)
 
+    # Fleet-adapter integration example. Demonstrates the ReplayStore /
+    # UsageStateHook / PolicyCache seam a multi-relay production
+    # deployment must fill in; not a production adapter itself.
+    add_executable(fleet_adapter_integration
+            examples/fleet_adapter_integration.cpp)
+    target_link_libraries(fleet_adapter_integration catapult)
+
     # Performance tests (using Catch2)
     find_package(Catch2 3 QUIET)
     if(Catch2_FOUND)
