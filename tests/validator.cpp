@@ -948,6 +948,22 @@ TEST_CASE("ValidatedCatToken is move-only") {
 // issuer. The validator must reject a token once `iat + moqt-reval` is in
 // the past, must require `iat`, and must fold in the clock-skew tolerance
 // consistently with `exp`/`nbf`.
+// A MOQT-scoped token requires the request tuple by default. These
+// reval-focused tests are not exercising scope enforcement so they
+// supply a permissive tuple via `moqtScopeContext()`; the tuple values
+// themselves are irrelevant because scopes use `MoqtBinaryMatch::any()`.
+namespace {
+PolicyContext moqtScopeContext() {
+    static const std::string kNs = "ns";
+    static const std::string kTrack = "tr";
+    PolicyContext ctx;
+    ctx.moqt_action = moqt_actions::PUBLISH;
+    ctx.moqt_namespace = kNs;
+    ctx.moqt_track = kTrack;
+    return ctx;
+}
+}  // namespace
+
 TEST_CASE("MoqtReval - within window accepts token") {
     auto now_tp = std::chrono::system_clock::now();
     CatToken token;
@@ -962,7 +978,7 @@ TEST_CASE("MoqtReval - within window accepts token") {
     token.extended.setMoqtClaims(std::move(moqt));
 
     CatTokenValidator validator;
-    REQUIRE_NOTHROW(validator.validate(token));
+    REQUIRE_NOTHROW(validator.validate(token, moqtScopeContext()));
 }
 
 TEST_CASE("MoqtReval - past deadline rejects with TokenRevalidationRequiredError") {
@@ -979,7 +995,8 @@ TEST_CASE("MoqtReval - past deadline rejects with TokenRevalidationRequiredError
     token.extended.setMoqtClaims(std::move(moqt));
 
     CatTokenValidator validator;
-    CHECK_THROWS_AS(validator.validate(token), TokenRevalidationRequiredError);
+    CHECK_THROWS_AS(validator.validate(token, moqtScopeContext()),
+                    TokenRevalidationRequiredError);
 }
 
 TEST_CASE("MoqtReval - missing iat is rejected as missing required claim") {
@@ -995,7 +1012,8 @@ TEST_CASE("MoqtReval - missing iat is rejected as missing required claim") {
     token.extended.setMoqtClaims(std::move(moqt));
 
     CatTokenValidator validator;
-    CHECK_THROWS_AS(validator.validate(token), MissingRequiredClaimError);
+    CHECK_THROWS_AS(validator.validate(token, moqtScopeContext()),
+                    MissingRequiredClaimError);
 }
 
 TEST_CASE("MoqtReval - clock skew tolerance extends the reval window") {
@@ -1013,11 +1031,12 @@ TEST_CASE("MoqtReval - clock skew tolerance extends the reval window") {
     token.extended.setMoqtClaims(std::move(moqt));
 
     CatTokenValidator strict;
-    CHECK_THROWS_AS(strict.validate(token), TokenRevalidationRequiredError);
+    CHECK_THROWS_AS(strict.validate(token, moqtScopeContext()),
+                    TokenRevalidationRequiredError);
 
     CatTokenValidator lenient;
     lenient.withClockSkewTolerance(90);
-    REQUIRE_NOTHROW(lenient.validate(token));
+    REQUIRE_NOTHROW(lenient.validate(token, moqtScopeContext()));
 }
 
 TEST_CASE("MoqtReval - claim absent leaves validation untouched") {
@@ -1035,7 +1054,7 @@ TEST_CASE("MoqtReval - claim absent leaves validation untouched") {
     token.extended.setMoqtClaims(std::move(moqt));
 
     CatTokenValidator validator;
-    REQUIRE_NOTHROW(validator.validate(token));
+    REQUIRE_NOTHROW(validator.validate(token, moqtScopeContext()));
 }
 
 TEST_SUITE("tryValidate — non-throwing hot-path surface") {

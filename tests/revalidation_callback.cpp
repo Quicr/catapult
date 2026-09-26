@@ -60,6 +60,19 @@ CatToken makeMoqtToken(int64_t iat, std::chrono::seconds reval_interval) {
   return token;
 }
 
+// A MOQT-scoped token requires the request tuple by default. These reval
+// tests are not exercising scope enforcement; the tuple values only need
+// to match the exact("ns")/exact("tr") scope above.
+PolicyContext moqtScopeContext() {
+  static const std::string kNs = "ns";
+  static const std::string kTrack = "tr";
+  PolicyContext ctx;
+  ctx.moqt_action = moqt_actions::SUBSCRIBE;
+  ctx.moqt_namespace = kNs;
+  ctx.moqt_track = kTrack;
+  return ctx;
+}
+
 }  // namespace
 
 TEST_SUITE("RevalidationCallback") {
@@ -70,7 +83,7 @@ TEST_SUITE("RevalidationCallback") {
 
     // iat is now; reval interval is 300s — plenty of budget.
     auto token = makeMoqtToken(nowSeconds(), 300s);
-    CHECK_NOTHROW(validator.validate(token));
+    CHECK_NOTHROW(validator.validate(token, moqtScopeContext()));
 
     CHECK(cb.fresh_count.load() == 1);
     CHECK(cb.expired_count.load() == 0);
@@ -113,7 +126,7 @@ TEST_SUITE("RevalidationCallback") {
     validator.withRevalidationCallback(nullptr);
 
     auto fresh = makeMoqtToken(nowSeconds(), 300s);
-    CHECK_NOTHROW(validator.validate(fresh));
+    CHECK_NOTHROW(validator.validate(fresh, moqtScopeContext()));
 
     auto expired = makeMoqtToken(nowSeconds() - 600, 60s);
     CHECK_THROWS_AS(validator.validate(expired),
@@ -127,6 +140,6 @@ TEST_SUITE("RevalidationCallback") {
     validator.withRevalidationCallback(&noop);
 
     auto token = makeMoqtToken(nowSeconds(), 300s);
-    CHECK_NOTHROW(validator.validate(token));
+    CHECK_NOTHROW(validator.validate(token, moqtScopeContext()));
   }
 }

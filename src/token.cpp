@@ -72,6 +72,12 @@ CatTokenValidator& CatTokenValidator::withRequiredContextFields(
   return *this;
 }
 
+CatTokenValidator& CatTokenValidator::withMoqtScopeContextOptional(
+    bool optional) {
+  moqt_scope_context_optional_ = optional;
+  return *this;
+}
+
 /**
  * @brief Template-based claim validation helper
  */
@@ -535,27 +541,44 @@ void CatTokenValidator::validateAuthorizationPolicy(
 
 // CAT-4-MOQT (draft-ietf-moq-c4m-01): a token that carries `moqt` scopes
 // declares which (action, namespace, track) tuples the bearer is
-// authorized for. When the caller supplies the request tuple through
-// `PolicyContext` we enforce that at least one scope authorises it.
+// authorized for. Enforcement is fail-closed: if the token has scopes,
+// the caller MUST supply the complete request tuple on the
+// `PolicyContext` so the scopes can be evaluated against a concrete
+// request. A missing or partial tuple is `MissingRequiredClaimError` —
+// otherwise a `validate(token)` call with empty context would silently
+// admit a scoped token without ever comparing the requested flow to its
+// scopes (P1 finding in `PRODUCTION_READINESS_AUDIT.md`).
 //
-// If the token has scopes but the caller supplied only part of the
-// tuple, the check is skipped — the caller has opted out of MOQT-level
-// enforcement for that call. A relay that wants "you MUST hand me the
-// tuple" behaviour uses `withRequiredContextFields()` to force
-// population before the check runs.
+// A non-MOQT integration that deliberately accepts scoped tokens without
+// tuple enforcement opts out via `withMoqtScopeContextOptional(true)`.
+// That is an explicit, auditable choice; production MOQT relays MUST
+// leave the default in place.
 //
-// If the token has scopes and the caller supplied all three fields, at
-// least one scope must return true from `isAuthorized`; otherwise the
-// bearer is out of scope for this request and the validator rejects.
+// When the tuple is present, at least one scope must return true from
+// `isAuthorized`; otherwise the bearer is out of scope for this request
+// and the validator rejects.
 void CatTokenValidator::validateMoqtScopes(
     const CatToken& token, const PolicyContext& context) const {
   if (!token.extended.hasMoqtClaims()) {
     return;
   }
-  if (!context.moqt_action.has_value() ||
-      !context.moqt_namespace.has_value() ||
-      !context.moqt_track.has_value()) {
-    return;
+  const bool tuple_complete = context.moqt_action.has_value() &&
+                              context.moqt_namespace.has_value() &&
+                              context.moqt_track.has_value();
+  if (!tuple_complete) {
+    if (moqt_scope_context_optional_) {
+      return;
+    }
+    if (!context.moqt_action.has_value()) {
+      throw MissingRequiredClaimError(
+          "policy context: moqt_action (required by MOQT-scoped token)");
+    }
+    if (!context.moqt_namespace.has_value()) {
+      throw MissingRequiredClaimError(
+          "policy context: moqt_namespace (required by MOQT-scoped token)");
+    }
+    throw MissingRequiredClaimError(
+        "policy context: moqt_track (required by MOQT-scoped token)");
   }
   const auto* moqt = token.extended.getMoqtClaimsReadOnly();
   if (moqt == nullptr) {

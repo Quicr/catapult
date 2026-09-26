@@ -116,6 +116,18 @@ class CatTokenValidator {
       ///< `MissingRequiredClaimError` *before* any policy callback fires,
       ///< so a forgetful caller cannot silently succeed against a hook
       ///< that fails to check its own inputs.
+  bool moqt_scope_context_optional_ = false;
+      ///< When false (the default) a token carrying MOQT scope claims is
+      ///< rejected unless the caller supplied a complete
+      ///< `(moqt_action, moqt_namespace, moqt_track)` tuple on the
+      ///< `PolicyContext`. This closes the P1 finding in
+      ///< `PRODUCTION_READINESS_AUDIT.md` where a MOQT-scoped token could
+      ///< be admitted by a token-only `validate(token)` call because the
+      ///< scope check silently skipped on missing tuple. Set to true via
+      ///< `withMoqtScopeContextOptional(true)` only for non-MOQT
+      ///< integrations that intentionally accept scoped tokens without
+      ///< checking the tuple; production relays MUST leave this at the
+      ///< default.
 
  public:
   /**
@@ -221,6 +233,23 @@ class CatTokenValidator {
    */
   CatTokenValidator& withRequiredContextFields(
       RequiredPolicyContextFields fields);
+
+  /**
+   * @brief Opt out of the MOQT scope-context requirement (fail-open path).
+   *
+   * By default, a token carrying MOQT scope claims requires the caller to
+   * supply the full `(moqt_action, moqt_namespace, moqt_track)` tuple on
+   * the `PolicyContext`. A missing or partial tuple is
+   * `MissingRequiredClaimError` — otherwise a `validate(token)` call with
+   * empty context would silently admit a scoped token without ever
+   * comparing the requested flow to its scopes (see
+   * `PRODUCTION_READINESS_AUDIT.md` P1 §MOQT scope enforcement).
+   *
+   * A non-MOQT integration that deliberately admits scoped tokens without
+   * checking the tuple can opt out here. The default is enforcement;
+   * opting out is an explicit, auditable choice.
+   */
+  CatTokenValidator& withMoqtScopeContextOptional(bool optional = true);
 
   /**
    * @brief Validate a CAT token

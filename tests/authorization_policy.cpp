@@ -502,9 +502,10 @@ TEST_SUITE("AuthorizationPolicyHook — validator wiring") {
     CHECK_NOTHROW(validator.validate(token, ctx));
   }
 
-  TEST_CASE("MOQT scope check is skipped when the tuple is partial") {
-    // Partial context = caller has opted out. If the caller wants "you
-    // MUST hand me the tuple" behaviour they use RequiredPolicyContextFields.
+  TEST_CASE("MOQT scoped token rejects when the tuple is partial") {
+    // A token that carries MOQT scopes MUST be evaluated against a
+    // concrete request tuple; a partial context is fail-closed. Silently
+    // admitting was the P1 finding in `PRODUCTION_READINESS_AUDIT.md`.
     auto token = baseToken();
     std::vector<int> pub{moqt_actions::PUBLISH};
     MoqtClaims moqt;
@@ -513,9 +514,39 @@ TEST_SUITE("AuthorizationPolicyHook — validator wiring") {
 
     CatTokenValidator validator;
     PolicyContext ctx;
-    ctx.moqt_action = moqt_actions::SUBSCRIBE;  // would fail full check
-    // No namespace/track supplied — check is skipped.
+    ctx.moqt_action = moqt_actions::SUBSCRIBE;
+    CHECK_THROWS_AS(validator.validate(token, ctx),
+                    MissingRequiredClaimError);
+  }
+
+  TEST_CASE("MOQT scoped token can opt out of the tuple requirement") {
+    // Non-MOQT integrations that intentionally admit scoped tokens
+    // without checking the tuple must set the opt-out explicitly. That
+    // is an audited choice, not a silent default.
+    auto token = baseToken();
+    std::vector<int> pub{moqt_actions::PUBLISH};
+    MoqtClaims moqt;
+    moqt.addScope(pub, MoqtBinaryMatch::exact("live"), MoqtBinaryMatch::any());
+    token.extended.setMoqtClaims(std::move(moqt));
+
+    CatTokenValidator validator;
+    validator.withMoqtScopeContextOptional(true);
+    PolicyContext ctx;
     CHECK_NOTHROW(validator.validate(token, ctx));
+  }
+
+  TEST_CASE("MOQT scoped token rejects a token-only validate() call") {
+    // The single-argument overload supplies an empty context. Before
+    // this fix it would admit a MOQT-scoped token without ever
+    // evaluating scope. Now it fails closed by default.
+    auto token = baseToken();
+    std::vector<int> pub{moqt_actions::PUBLISH};
+    MoqtClaims moqt;
+    moqt.addScope(pub, MoqtBinaryMatch::exact("live"), MoqtBinaryMatch::any());
+    token.extended.setMoqtClaims(std::move(moqt));
+
+    CatTokenValidator validator;
+    CHECK_THROWS_AS(validator.validate(token), MissingRequiredClaimError);
   }
 
   TEST_CASE("tryValidate surfaces the policy failure via error code") {

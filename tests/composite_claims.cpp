@@ -837,6 +837,11 @@ TEST_CASE("Composite scope guard - moqt without reval inside composite is fine")
     // A composite may legitimately carry `moqt` scopes (they're not the
     // scoped-restricted claim). Only `moqt-reval` is; make sure the guard
     // doesn't over-reject.
+    //
+    // Composite evaluation dispatches through the context-free `validate()`
+    // overload, so scope enforcement on inner tokens cannot see a request
+    // tuple. Opt out of tuple enforcement for this test — its intent is to
+    // exercise the reval-in-composite guard, not scope enforcement.
     auto inner = createValidToken("issuer-embedded");
     MoqtClaims moqt;
     std::vector<int> actions = {moqt_actions::PUBLISH};
@@ -847,6 +852,8 @@ TEST_CASE("Composite scope guard - moqt without reval inside composite is fine")
     outer.composite.orClaim = std::make_unique<OrClaim>();
     (*outer.composite.orClaim)->addToken(inner);
 
-    auto validator = CatTokenValidator().withClockSkewTolerance(60);
+    auto validator = CatTokenValidator()
+                         .withClockSkewTolerance(60)
+                         .withMoqtScopeContextOptional(true);
     REQUIRE_NOTHROW(validator.validate(outer));
 }
