@@ -76,6 +76,23 @@ enum class RevalidationStatus {
  * Callbacks MUST NOT throw. The validator does not catch exceptions
  * from this call — an escaped exception aborts the current validation
  * and unwinds through the caller.
+ *
+ * ## Lifetime and concurrency contract
+ *
+ * - **Ownership.** `CatTokenValidator` holds a non-owning raw pointer.
+ *   The callback MUST outlive every validator that references it.
+ * - **Configuration mutation.** `withRevalidationCallback()` is NOT safe
+ *   to call concurrently with `validate()` on the same validator. The
+ *   library does not synchronise the pointer swap; callers rotate
+ *   observability plumbing by preparing a fresh validator instance and
+ *   swapping references at the caller layer, or by installing the
+ *   callback once at startup.
+ * - **Concurrent invocation.** A shared validator on a relay thread pool
+ *   fires `onRevalidationCheck` concurrently from every worker. The
+ *   callback body MUST be safe under concurrent calls — protect any
+ *   mutable state (counters, metric aggregators) with atomics or a
+ *   mutex.
+ * - **No-throw.** Marked `noexcept` on the interface. See above.
  */
 class RevalidationCallback {
  public:

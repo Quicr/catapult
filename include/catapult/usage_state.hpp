@@ -96,6 +96,24 @@ enum class RevokeResult {
  * `admit()` MUST atomically check for a prior sighting AND either record a
  * new one or return `Replay` / `Revoked`; callers must not perform their
  * own read-then-write cycle.
+ *
+ * ## Lifetime and concurrency contract
+ *
+ * - **Ownership.** `CatTokenValidator` holds a non-owning raw pointer.
+ *   The hook MUST outlive every validator that references it.
+ * - **Configuration mutation.** `withUsageStateHook()` is NOT safe to
+ *   call concurrently with `validate()` on the same validator. Rotate
+ *   backends by preparing a new validator instance.
+ * - **Concurrent invocation.** `admit()`, `revoke()`, `purgeExpired()`,
+ *   and `size()` are called from every worker thread. Adapters over
+ *   external services MUST handle their own connection pooling and
+ *   preserve the atomicity contract of `admit()` under concurrent
+ *   admissions of the same `cti`.
+ * - **Exception behaviour.** Same as `ReplayStore`: prefer
+ *   `StoreExhausted` on transient backend failure; a thrown exception
+ *   aborts admission.
+ * - **Fleet-wide guarantees.** See `capabilities()` and
+ *   `requireFleetCapableUsageBackend()` for the startup gate.
  */
 class UsageStateHook {
  public:

@@ -41,6 +41,24 @@ enum class ReplayAdmitResult {
  * on freshness, record it. Callers must not perform their own get-then-set
  * cycle around this call — that would reintroduce the TOCTOU race that
  * this interface exists to close.
+ *
+ * ## Lifetime and concurrency contract
+ *
+ * - **Ownership.** `DpopProofValidator` holds a `std::shared_ptr<ReplayStore>`;
+ *   the store lives as long as any validator referencing it.
+ * - **Concurrent invocation.** `admit()`, `purgeExpired()`, and `size()`
+ *   are called from every worker thread and MUST be safe under
+ *   concurrent access. Adapters over external services (Redis, DB) must
+ *   handle their own connection pooling; the library does not gate calls.
+ * - **Atomicity scope.** See `capabilities()` — the interface signature
+ *   alone does not distinguish per-process from cluster-wide atomicity.
+ *   `requireFleetCapableReplayBackend()` is how a deployment enforces
+ *   its declared scope at startup.
+ * - **Exception behaviour.** `admit()` propagating an exception aborts
+ *   admission. Adapters that see transient backend errors SHOULD
+ *   surface them as `StoreExhausted` (fail closed) rather than throw,
+ *   so a bounded number of transient failures does not tear down the
+ *   caller's exception-handling path.
  */
 class ReplayStore {
  public:

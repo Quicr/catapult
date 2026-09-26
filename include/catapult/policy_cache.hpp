@@ -128,6 +128,23 @@ struct PolicyCacheKey {
  *
  * Digests are opaque bytes chosen by the caller. Implementations MUST
  * hash-map on the full digest and MUST NOT truncate.
+ *
+ * ## Lifetime and concurrency contract
+ *
+ * - **Ownership.** The relay owns the cache instance and passes it to
+ *   the admission path by reference. The cache MUST outlive every
+ *   admission thread that references it.
+ * - **Concurrent invocation.** `lookup()`, `store()`, and `size()` are
+ *   called from every worker thread; implementations MUST be safe under
+ *   concurrent access. The in-tree `InMemoryPolicyCache` is
+ *   mutex-guarded.
+ * - **Exception behaviour.** A backend failure MUST surface as a miss
+ *   from `lookup()` (see "Fail-open vs fail-closed" above). Adapters
+ *   that throw from `lookup()` or `store()` compromise the "cache off
+ *   is always safe" invariant — do not.
+ * - **View lifetimes.** All digest / key views passed to `lookup()` and
+ *   `store()` are valid for the duration of the call only. The cache
+ *   copies bytes it needs to retain.
  */
 class PolicyCache {
  public:

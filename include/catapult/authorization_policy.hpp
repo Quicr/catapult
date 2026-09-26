@@ -173,12 +173,32 @@ struct RequiredPolicyContextFields {
  * requirement has been satisfied by the current request context, passed
  * in as a `PolicyContext`. A `false` return causes `CatTokenValidator`
  * to reject the token with the appropriate CatError subclass.
- * Implementations MUST be safe to call concurrently from multiple threads.
  *
  * All accept*() methods are called only when the token actually carries
  * the corresponding claim; a policy authoring a strict-only deployment
  * does not need to worry about "should I return true when the claim is
  * absent?" — that path never reaches the hook.
+ *
+ * ## Lifetime and concurrency contract
+ *
+ * - **Ownership.** `CatTokenValidator` holds a non-owning raw pointer.
+ *   The hook MUST outlive every validator that references it.
+ * - **Configuration mutation.** `withAuthorizationPolicy()` is NOT safe
+ *   to call concurrently with `validate()` on the same validator. Swap
+ *   hooks by preparing a new validator or serialising externally.
+ * - **Concurrent invocation.** Every accept*() method is called
+ *   concurrently from every worker thread when the validator is shared
+ *   on a thread pool. Implementations MUST be safe under concurrent
+ *   calls; mutable dependencies (blocklists, feature-flag caches) must
+ *   be synchronised or immutable.
+ * - **Exception behaviour.** The validator does NOT catch exceptions
+ *   from an accept*() call; an escaped exception aborts admission and
+ *   unwinds through the caller. Prefer returning `false` for policy
+ *   failure; reserve exceptions for programmer bugs.
+ * - **PolicyContext view lifetimes.** The `PolicyContext` reference and
+ *   every field on it are valid only for the duration of the callback.
+ *   Do not retain views past return; copy any bytes the hook needs to
+ *   keep.
  */
 class AuthorizationPolicyHook {
  public:
