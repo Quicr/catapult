@@ -1152,7 +1152,7 @@ TEST_SUITE("tryValidate — non-throwing hot-path surface") {
         bad.moqt_action = moqt_actions::SUBSCRIBE;
         bad.moqt_namespace = live_ns;
         bad.moqt_track = any_track;
-        CHECK_THROWS_AS(validator.intoValidated(token, bad),
+        CHECK_THROWS_AS((void)validator.intoValidated(token, bad),
                         InvalidClaimValueError);
     }
 
@@ -1195,7 +1195,7 @@ TEST_SUITE("tryValidate — non-throwing hot-path surface") {
         token.extended.setMoqtClaims(std::move(moqt));
 
         CatTokenValidator validator;
-        CHECK_THROWS_AS(validator.intoValidated(token),
+        CHECK_THROWS_AS((void)validator.intoValidated(token),
                         MissingRequiredClaimError);
     }
 
