@@ -1,6 +1,6 @@
 # Common Access Token (CAT) Implementation Makefile
 
-.PHONY: all build test clean install help lint check docs configure format lint bench 
+.PHONY: all build test clean install help lint check docs configure format bench memory-test sanitizers fuzz
 
 # Default target
 all: build
@@ -47,9 +47,22 @@ lint:
 
 memory-test: build
 	@command -v valgrind >/dev/null 2>&1 && \
-		valgrind --tool=memcheck --leak-check=full $(BUILD_DIR)/cat_tests 2>/dev/null || \
+		valgrind --tool=memcheck --leak-check=full $(BUILD_DIR)/catapult_tests 2>/dev/null || \
 		echo "Valgrind not available, skipping memory tests"
 
+sanitizers:
+	mkdir -p build-san
+	cd build-san && cmake -DCMAKE_BUILD_TYPE=Debug \
+		-DCATAPULT_ENABLE_SANITIZERS=ON -DENABLE_LOGGING=OFF ../
+	cmake --build build-san --parallel
+	ASAN_OPTIONS="halt_on_error=1" UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1" \
+		ctest --test-dir build-san --output-on-failure --timeout 600
+
+fuzz:
+	mkdir -p build-fuzz
+	CC=clang CXX=clang++ cmake -S . -B build-fuzz \
+		-DCMAKE_BUILD_TYPE=Debug -DCATAPULT_ENABLE_FUZZERS=ON
+	cmake --build build-fuzz --parallel
 
 docs:
 	@echo "Generating API documentation ..."
@@ -68,6 +81,9 @@ help:
 	@echo "  clean       - Remove build directory"
 	@echo "  install     - Install the built binaries and libraries"
 	@echo "  bench       - Run benchmarks (if available)"
+	@echo "  sanitizers  - Configure & run tests under ASan+UBSan in build-san/"
+	@echo "  fuzz        - Configure & build libFuzzer harnesses in build-fuzz/"
+	@echo "  memory-test - Run valgrind memcheck against the test binary"
 	@echo "  format      - Format C++ code with clang-format"
 	@echo "  lint        - Lint C++ code with clang-tidy"
 	@echo "  docs        - Generate API documentation with Doxygen"

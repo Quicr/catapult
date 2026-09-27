@@ -66,6 +66,22 @@ memory-test: build
         valgrind --tool=memcheck --leak-check=full {{build_dir}}/catapult_tests 2>/dev/null || \
         echo "Valgrind not available, skipping memory tests"
 
+# Configure & run tests under ASan+UBSan
+sanitizers:
+    mkdir -p build-san
+    cd build-san && cmake -DCMAKE_BUILD_TYPE=Debug \
+        -DCATAPULT_ENABLE_SANITIZERS=ON -DENABLE_LOGGING=OFF ..
+    cmake --build build-san --parallel
+    ASAN_OPTIONS="halt_on_error=1" UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1" \
+        ctest --test-dir build-san --output-on-failure --timeout 600
+
+# Configure & build libFuzzer harnesses (requires Clang)
+fuzz:
+    mkdir -p build-fuzz
+    CC=clang CXX=clang++ cmake -S . -B build-fuzz \
+        -DCMAKE_BUILD_TYPE=Debug -DCATAPULT_ENABLE_FUZZERS=ON
+    cmake --build build-fuzz --parallel
+
 # Generate API documentation
 docs:
     @echo "Generating API documentation ..."
@@ -91,6 +107,8 @@ help:
     @echo "  format         - Format C++ code with clang-format"
     @echo "  lint           - Lint C++ code with clang-tidy"
     @echo "  memory-test    - Run memory tests with valgrind"
+    @echo "  sanitizers     - Configure & run tests under ASan+UBSan in build-san/"
+    @echo "  fuzz           - Configure & build libFuzzer harnesses in build-fuzz/"
     @echo "  docs           - Generate API documentation with Doxygen"
     @echo "  help           - Show this help message"
     @echo ""
