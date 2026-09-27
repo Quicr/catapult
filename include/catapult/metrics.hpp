@@ -147,6 +147,20 @@ inline constexpr const char* kReplayHit = "catapult.replay.hit";
 inline constexpr const char* kReplayStoreExhausted =
     "catapult.replay.store_exhausted";
 
+// Reference-policy accept/reject counters. Every `accept*()` hook on a
+// bundled `AuthorizationPolicyHook` implementation increments one of
+// these so operators can distinguish "policy admitted" from "policy
+// rejected" without wrapping the hook. Bespoke policies opt in by
+// calling `CAT_METRIC_INC` directly.
+inline constexpr const char* kPolicyIpAllowlistAccept =
+    "catapult.policy.ip_allowlist.accept";
+inline constexpr const char* kPolicyIpAllowlistReject =
+    "catapult.policy.ip_allowlist.reject";
+inline constexpr const char* kPolicyDpopBindingAccept =
+    "catapult.policy.dpop_binding.accept";
+inline constexpr const char* kPolicyDpopBindingReject =
+    "catapult.policy.dpop_binding.reject";
+
 }  // namespace names
 
 }  // namespace metrics

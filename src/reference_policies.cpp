@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "catapult/metrics.hpp"
+
 namespace catapult {
 
 namespace {
@@ -123,8 +125,13 @@ bool IpAllowlistPolicy::contains(std::string_view ip) const noexcept {
 }
 
 bool IpAllowlistPolicy::matches(const PolicyContext& ctx) const noexcept {
-  if (!ctx.client_ip.has_value()) return false;
-  return ipMatches(entries_, *ctx.client_ip);
+  bool ok = ctx.client_ip.has_value() && ipMatches(entries_, *ctx.client_ip);
+  if (ok) {
+    CAT_METRIC_INC(::catapult::metrics::names::kPolicyIpAllowlistAccept);
+  } else {
+    CAT_METRIC_INC(::catapult::metrics::names::kPolicyIpAllowlistReject);
+  }
+  return ok;
 }
 
 bool IpAllowlistPolicy::acceptProofOfPossession(const CatProofOfPossession&,
@@ -164,11 +171,15 @@ bool IpAllowlistPolicy::acceptGeoAltitude(const GeoAltitude&,
 
 bool DpopBindingPolicy::acceptDpopBinding(const CatDpopSettings& wire,
                                           const PolicyContext& ctx) {
-  if (ctx.dpop_proof == nullptr) return false;
+  if (ctx.dpop_proof == nullptr) {
+    CAT_METRIC_INC(::catapult::metrics::names::kPolicyDpopBindingReject);
+    return false;
+  }
   if (overlay_target_ != nullptr) {
     std::lock_guard<std::mutex> lock(overlay_mu_);
     overlay_target_->overlayCatDpopSettings(wire);
   }
+  CAT_METRIC_INC(::catapult::metrics::names::kPolicyDpopBindingAccept);
   return true;
 }
 
