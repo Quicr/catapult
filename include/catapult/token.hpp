@@ -559,20 +559,29 @@ class CatTokenBuilder {
 
 inline CatTokenBuilder CatToken::builder() { return CatTokenBuilder{}; }
 
-// CatTokenBuilder inline implementations
+// CatTokenBuilder inline implementations.
+//
+// Every setter delegates to the corresponding `CatToken::with*` method
+// so the mutation logic lives in exactly one place. The builder
+// contributes the two behaviours the direct API deliberately lacks:
+//   1. `build()` runs `validateTokenStructure()` and returns by value;
+//      calling `with*` on a `CatToken` never runs structural checks.
+//   2. Convenience shapes over the raw claim types (`expiresAt(int64)`,
+//      `tokenIdFromString(sv)`, `audience(single)`, `dpopThumbprint`)
+//      that fold into the same primitive setter.
 inline CatTokenBuilder& CatTokenBuilder::issuer(const std::string& iss) {
-  token_.core.iss = iss;
+  token_.withIssuer(iss);
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::audience(const std::string& aud) {
-  token_.core.aud = std::vector<std::string>{aud};
+  token_.withAudience(std::vector<std::string>{aud});
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::audience(
     const std::vector<std::string>& auds) {
-  token_.core.aud = auds;
+  token_.withAudience(auds);
   return *this;
 }
 
@@ -594,44 +603,47 @@ inline CatTokenBuilder& CatTokenBuilder::notBefore(int64_t nbf) {
 }
 
 inline CatTokenBuilder& CatTokenBuilder::tokenId(std::vector<uint8_t> cti) {
-  token_.core.cti = std::move(cti);
+  token_.withCwtId(std::move(cti));
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::tokenIdFromString(
     std::string_view cti) {
-  token_.core.cti = std::vector<uint8_t>(cti.begin(), cti.end());
+  token_.withCwtIdString(cti);
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::version(uint32_t v) {
-  token_.cat.catv = v;
+  token_.withVersion(v);
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::uriMatch(CatUriMatchMap catu) {
-  token_.cat.catu = std::move(catu);
+  token_.withUriMatch(std::move(catu));
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::replayMode(CatReplayMode mode) {
-  token_.cat.catreplay = mode;
+  token_.withReplayProtection(mode);
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::proofOfPossession(
     CatProofOfPossession por) {
-  token_.cat.catpor = std::move(por);
+  token_.withProofOfPossession(std::move(por));
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::subject(const std::string& sub) {
-  token_.informational.sub = sub;
+  token_.withSubject(sub);
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::geoCoordinate(
     double lat, double lon, std::optional<double> radius) {
+  // Builder path uses the validating factory: an out-of-range coord is
+  // silently dropped rather than committed. `CatToken::withGeoCoordinate`
+  // takes the raw ctor for callers that have already validated.
   auto coord = GeoCoordinate::createSafe(lat, lon, radius);
   if (coord.has_value()) {
     token_.cat.catgeocoord = coord.value();
@@ -640,41 +652,41 @@ inline CatTokenBuilder& CatTokenBuilder::geoCoordinate(
 }
 
 inline CatTokenBuilder& CatTokenBuilder::geohash(GeohashClaimValue hash) {
-  token_.cat.geohash = std::move(hash);
+  token_.withGeohash(std::move(hash));
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::altitude(GeoAltitude alt) {
-  token_.cat.catgeoalt = alt;
+  token_.withGeoAltitude(alt);
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::networkInterfaces(
     std::vector<CatNipEntry> nips) {
-  token_.cat.catnip = std::move(nips);
+  token_.withNetworkInterfaces(std::move(nips));
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::methods(std::vector<std::string> m) {
-  token_.cat.catm = std::move(m);
+  token_.withMethods(std::move(m));
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::alpn(
     std::vector<std::vector<uint8_t>> protocols) {
-  token_.cat.catalpn = std::move(protocols);
+  token_.withAlpnProtocols(std::move(protocols));
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::headerMatches(
     CatHostHeaderMatchList h) {
-  token_.cat.cath = std::move(h);
+  token_.withHeaderMatches(std::move(h));
   return *this;
 }
 
 inline CatTokenBuilder& CatTokenBuilder::countries(
     const std::vector<std::string>& iso3166) {
-  token_.cat.catgeoiso3166 = iso3166;
+  token_.withCountries(iso3166);
   return *this;
 }
 
@@ -682,7 +694,7 @@ inline CatTokenBuilder& CatTokenBuilder::dpopThumbprint(
     std::vector<uint8_t> jkt) {
   CatConfirmation cnf;
   cnf.jkt = std::move(jkt);
-  token_.dpop.cnf = std::move(cnf);
+  token_.withConfirmation(std::move(cnf));
   return *this;
 }
 
