@@ -120,6 +120,190 @@ bool decodeAlgCborValue(cbor_item_t* value, int64_t& out) {
   return false;
 }
 
+// Parse a single MOQT `bin-match` element (CAT-4-MOQT
+// draft-ietf-moq-c4m-01). Accepts either a bare bytestring (implicit
+// EXACT match) or a `[type, bytestring]` tuple; rejects nil, the
+// CONTAINS extension (type 3), and any other shape.
+//
+// Error messages preserved verbatim from the original inline lambda so
+// that fuzz/regression tests keyed on the message text keep passing.
+MoqtBinaryMatch parseMoqtBinaryMatch(cbor_item_t* item) {
+  // CAT-4-MOQT (draft-ietf-moq-c4m-01) assigns `nil` in a
+  // bin-match position a specific "exact zero-length" meaning.
+  // Silently returning `any()` would widen authorization to
+  // every namespace, which is exactly the failure mode that
+  // led to C-05. Until the internal model can distinguish
+  // "exact empty" from "wildcard", fail closed rather than
+  // pick the more permissive interpretation.
+  if (!item || cbor_is_null(item)) {
+    throw InvalidClaimValueError(
+        "MOQT match element must not be nil; use exact byte "
+        "string or (type, bytestring) tuple");
+  }
+  if (cbor_isa_bytestring(item)) {
+    std::string_view sv(
+        reinterpret_cast<const char*>(cbor_bytestring_handle(item)),
+        cbor_bytestring_length(item));
+    return MoqtBinaryMatch::exact(sv);
+  }
+  if (cbor_isa_array(item) && cbor_array_size(item) == 2) {
+    auto type_item = cbor_array_get_owned(item, 0);
+    auto val_item = cbor_array_get_owned(item, 1);
+    if (!type_item || !cbor_isa_uint(type_item.get()) || !val_item ||
+        !cbor_isa_bytestring(val_item.get())) {
+      throw InvalidClaimValueError(
+          "MOQT match tuple must be (uint, bytestring)");
+    }
+    int type = static_cast<int>(cbor_get_int(type_item.get()));
+    std::string_view sv(
+        reinterpret_cast<const char*>(cbor_bytestring_handle(val_item.get())),
+        cbor_bytestring_length(val_item.get()));
+    switch (type) {
+      case 0:
+        return MoqtBinaryMatch::exact(sv);
+      case 1:
+        return MoqtBinaryMatch::prefix(sv);
+      case 2:
+        return MoqtBinaryMatch::suffix(sv);
+      case 3:
+        // CONTAINS is not part of the CAT-4-MOQT bin-match
+        // CDDL. Accepting an unknown extension can silently
+        // broaden a token's authorization scope; refuse it
+        // unless the deployment has negotiated the
+        // extension out of band.
+        throw InvalidClaimValueError(
+            "MOQT match type 3 (contains) is an unsupported "
+            "extension");
+      default:
+        throw InvalidClaimValueError(
+            "MOQT match tuple has unknown type");
+    }
+  }
+  throw InvalidClaimValueError(
+      "MOQT match element must be a byte string or (type, "
+      "bytestring) tuple");
+}
+
+// Decode the CAT-4-MOQT `moqt` claim (native CBOR array of scope
+// tuples) into `token.extended`. Enforces the CDDL from
+// draft-ietf-moq-c4m-01 and preserves every diagnostic string from the
+// original inline case so downstream tests remain valid.
+void decodeMoqtClaim(cbor_item_t* value_item, CatToken& token) {
+  if (!cbor_isa_array(value_item)) {
+    throw InvalidClaimValueError("'moqt' must be a CBOR array");
+  }
+  cbor_item_t* const moqt_array_ptr = value_item;
+
+  constexpr size_t MAX_MOQT_SCOPES = 100;
+  size_t moqt_scope_count = cbor_array_size(moqt_array_ptr);
+  if (moqt_scope_count > MAX_MOQT_SCOPES) {
+    throw InvalidClaimValueError("Too many MOQT scopes");
+  }
+  auto moqt_claims = MoqtClaims::create(moqt_scope_count);
+  for (size_t si = 0; si < moqt_scope_count; ++si) {
+    auto scope_arr = cbor_array_get_owned(moqt_array_ptr, si);
+    if (!scope_arr || !cbor_isa_array(scope_arr.get())) {
+      throw InvalidClaimValueError("MOQT scope must be an array");
+    }
+    size_t scope_len = cbor_array_size(scope_arr.get());
+    if (scope_len < 1) {
+      throw InvalidClaimValueError("MOQT scope missing action list");
+    }
+
+    std::vector<int> actions;
+    auto actions_arr = cbor_array_get_owned(scope_arr.get(), 0);
+    if (!actions_arr || !cbor_isa_array(actions_arr.get())) {
+      throw InvalidClaimValueError(
+          "MOQT scope action list must be an array");
+    }
+    constexpr size_t MAX_ACTIONS = 50;
+    size_t action_count = cbor_array_size(actions_arr.get());
+    if (action_count > MAX_ACTIONS) {
+      throw InvalidClaimValueError("MOQT scope has too many actions");
+    }
+    for (size_t ai = 0; ai < action_count; ++ai) {
+      auto act = cbor_array_get_owned(actions_arr.get(), ai);
+      if (!act || !cbor_isa_uint(act.get())) {
+        throw InvalidClaimValueError(
+            "MOQT action must be an unsigned integer");
+      }
+      uint64_t action_u64 = cbor_get_int(act.get());
+      if (action_u64 >
+          static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+        throw InvalidClaimValueError("MOQT action exceeds int range");
+      }
+      int action_val = static_cast<int>(action_u64);
+      if (!moqt_actions::is_valid_action(action_val)) {
+        throw InvalidClaimValueError("MOQT action id is not recognized");
+      }
+      actions.push_back(action_val);
+    }
+
+    MoqtCompoundMatch ns_match = MoqtCompoundMatch::any();
+    MoqtCompoundMatch track_match = MoqtCompoundMatch::any();
+
+    if (scope_len >= 2) {
+      auto ns_arr = cbor_array_get_owned(scope_arr.get(), 1);
+      if (!ns_arr || !cbor_isa_array(ns_arr.get())) {
+        throw InvalidClaimValueError(
+            "MOQT scope namespace element must be an array");
+      }
+      size_t ns_count = cbor_array_size(ns_arr.get());
+      if (ns_count > 0) {
+        std::vector<MoqtBinaryMatch> ns_conditions;
+        for (size_t ni = 0; ni < ns_count; ++ni) {
+          auto ns_elem = cbor_array_get_owned(ns_arr.get(), ni);
+          auto m = parseMoqtBinaryMatch(ns_elem.get());
+          if (!m.is_empty()) {
+            ns_conditions.push_back(std::move(m));
+          }
+        }
+        ns_match = MoqtCompoundMatch::all(std::move(ns_conditions));
+      }
+    }
+    if (scope_len >= 3) {
+      auto track_item = cbor_array_get_owned(scope_arr.get(), 2);
+      if (track_item && cbor_isa_array(track_item.get()) &&
+          cbor_array_size(track_item.get()) > 0) {
+        auto first = cbor_array_get_owned(track_item.get(), 0);
+        if (first && cbor_isa_array(first.get())) {
+          std::vector<MoqtBinaryMatch> tr_conditions;
+          for (size_t ti = 0; ti < cbor_array_size(track_item.get()); ++ti) {
+            auto tr_elem = cbor_array_get_owned(track_item.get(), ti);
+            auto m = parseMoqtBinaryMatch(tr_elem.get());
+            if (!m.is_empty()) {
+              tr_conditions.push_back(std::move(m));
+            }
+          }
+          track_match = MoqtCompoundMatch::all(std::move(tr_conditions));
+        } else {
+          auto m = parseMoqtBinaryMatch(track_item.get());
+          if (!m.is_empty()) {
+            track_match = MoqtCompoundMatch::single(std::move(m));
+          }
+        }
+      } else if (track_item && cbor_isa_bytestring(track_item.get())) {
+        auto m = parseMoqtBinaryMatch(track_item.get());
+        if (!m.is_empty()) {
+          track_match = MoqtCompoundMatch::single(std::move(m));
+        }
+      } else if (track_item && !cbor_is_null(track_item.get())) {
+        throw InvalidClaimValueError(
+            "MOQT scope track element must be null, bytestring, or "
+            "array");
+      }
+    }
+
+    if (actions.empty()) {
+      throw InvalidClaimValueError(
+          "MOQT scope must contain at least one action");
+    }
+    moqt_claims.addScope(actions, std::move(ns_match),
+                         std::move(track_match));
+  }
+  token.extended.setMoqtClaims(std::move(moqt_claims));
+}
+
 }  // namespace
 
 // RAII deleter implementations
@@ -1728,181 +1912,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         // a native CBOR array. Historically we wrapped this in a bytestring
         // and appended the reval interval as a concatenated CBOR value —
         // that was not a valid CWT and is no longer accepted.
-        if (!cbor_isa_array(value_item)) {
-          throw InvalidClaimValueError("'moqt' must be a CBOR array");
-        }
-        {
-          cbor_item_t* const moqt_array_ptr = value_item;
-
-          constexpr size_t MAX_MOQT_SCOPES = 100;
-          size_t moqt_scope_count = cbor_array_size(moqt_array_ptr);
-          if (moqt_scope_count > MAX_MOQT_SCOPES) {
-            throw InvalidClaimValueError("Too many MOQT scopes");
-          }
-          auto moqt_claims = MoqtClaims::create(moqt_scope_count);
-          for (size_t si = 0; si < moqt_scope_count; ++si) {
-            auto scope_arr = cbor_array_get_owned(moqt_array_ptr, si);
-            if (!scope_arr || !cbor_isa_array(scope_arr.get())) {
-              throw InvalidClaimValueError("MOQT scope must be an array");
-            }
-            size_t scope_len = cbor_array_size(scope_arr.get());
-            if (scope_len < 1) {
-              throw InvalidClaimValueError("MOQT scope missing action list");
-            }
-
-            std::vector<int> actions;
-            auto actions_arr = cbor_array_get_owned(scope_arr.get(), 0);
-            if (!actions_arr || !cbor_isa_array(actions_arr.get())) {
-              throw InvalidClaimValueError(
-                  "MOQT scope action list must be an array");
-            }
-            constexpr size_t MAX_ACTIONS = 50;
-            size_t action_count = cbor_array_size(actions_arr.get());
-            if (action_count > MAX_ACTIONS) {
-              throw InvalidClaimValueError("MOQT scope has too many actions");
-            }
-            for (size_t ai = 0; ai < action_count; ++ai) {
-              auto act = cbor_array_get_owned(actions_arr.get(), ai);
-              if (!act || !cbor_isa_uint(act.get())) {
-                throw InvalidClaimValueError(
-                    "MOQT action must be an unsigned integer");
-              }
-              uint64_t action_u64 = cbor_get_int(act.get());
-              if (action_u64 >
-                  static_cast<uint64_t>(std::numeric_limits<int>::max())) {
-                throw InvalidClaimValueError("MOQT action exceeds int range");
-              }
-              int action_val = static_cast<int>(action_u64);
-              if (!moqt_actions::is_valid_action(action_val)) {
-                throw InvalidClaimValueError(
-                    "MOQT action id is not recognized");
-              }
-              actions.push_back(action_val);
-            }
-
-            auto parse_bin_match = [](cbor_item_t* item) -> MoqtBinaryMatch {
-              // CAT-4-MOQT (draft-ietf-moq-c4m-01) assigns `nil` in a
-              // bin-match position a specific "exact zero-length" meaning.
-              // Silently returning `any()` would widen authorization to
-              // every namespace, which is exactly the failure mode that
-              // led to C-05. Until the internal model can distinguish
-              // "exact empty" from "wildcard", fail closed rather than
-              // pick the more permissive interpretation.
-              if (!item || cbor_is_null(item)) {
-                throw InvalidClaimValueError(
-                    "MOQT match element must not be nil; use exact byte "
-                    "string or (type, bytestring) tuple");
-              }
-              if (cbor_isa_bytestring(item)) {
-                std::string_view sv(
-                    reinterpret_cast<const char*>(cbor_bytestring_handle(item)),
-                    cbor_bytestring_length(item));
-                return MoqtBinaryMatch::exact(sv);
-              }
-              if (cbor_isa_array(item) && cbor_array_size(item) == 2) {
-                auto type_item = cbor_array_get_owned(item, 0);
-                auto val_item = cbor_array_get_owned(item, 1);
-                if (!type_item || !cbor_isa_uint(type_item.get()) ||
-                    !val_item || !cbor_isa_bytestring(val_item.get())) {
-                  throw InvalidClaimValueError(
-                      "MOQT match tuple must be (uint, bytestring)");
-                }
-                int type = static_cast<int>(cbor_get_int(type_item.get()));
-                std::string_view sv(reinterpret_cast<const char*>(
-                                        cbor_bytestring_handle(val_item.get())),
-                                    cbor_bytestring_length(val_item.get()));
-                switch (type) {
-                  case 0:
-                    return MoqtBinaryMatch::exact(sv);
-                  case 1:
-                    return MoqtBinaryMatch::prefix(sv);
-                  case 2:
-                    return MoqtBinaryMatch::suffix(sv);
-                  case 3:
-                    // CONTAINS is not part of the CAT-4-MOQT bin-match
-                    // CDDL. Accepting an unknown extension can silently
-                    // broaden a token's authorization scope; refuse it
-                    // unless the deployment has negotiated the
-                    // extension out of band.
-                    throw InvalidClaimValueError(
-                        "MOQT match type 3 (contains) is an unsupported "
-                        "extension");
-                  default:
-                    throw InvalidClaimValueError(
-                        "MOQT match tuple has unknown type");
-                }
-              }
-              throw InvalidClaimValueError(
-                  "MOQT match element must be a byte string or (type, "
-                  "bytestring) tuple");
-            };
-
-            MoqtCompoundMatch ns_match = MoqtCompoundMatch::any();
-            MoqtCompoundMatch track_match = MoqtCompoundMatch::any();
-
-            if (scope_len >= 2) {
-              auto ns_arr = cbor_array_get_owned(scope_arr.get(), 1);
-              if (!ns_arr || !cbor_isa_array(ns_arr.get())) {
-                throw InvalidClaimValueError(
-                    "MOQT scope namespace element must be an array");
-              }
-              size_t ns_count = cbor_array_size(ns_arr.get());
-              if (ns_count > 0) {
-                std::vector<MoqtBinaryMatch> ns_conditions;
-                for (size_t ni = 0; ni < ns_count; ++ni) {
-                  auto ns_elem = cbor_array_get_owned(ns_arr.get(), ni);
-                  auto m = parse_bin_match(ns_elem.get());
-                  if (!m.is_empty()) {
-                    ns_conditions.push_back(std::move(m));
-                  }
-                }
-                ns_match = MoqtCompoundMatch::all(std::move(ns_conditions));
-              }
-            }
-            if (scope_len >= 3) {
-              auto track_item = cbor_array_get_owned(scope_arr.get(), 2);
-              if (track_item && cbor_isa_array(track_item.get()) &&
-                  cbor_array_size(track_item.get()) > 0) {
-                auto first = cbor_array_get_owned(track_item.get(), 0);
-                if (first && cbor_isa_array(first.get())) {
-                  std::vector<MoqtBinaryMatch> tr_conditions;
-                  for (size_t ti = 0; ti < cbor_array_size(track_item.get());
-                       ++ti) {
-                    auto tr_elem = cbor_array_get_owned(track_item.get(), ti);
-                    auto m = parse_bin_match(tr_elem.get());
-                    if (!m.is_empty()) {
-                      tr_conditions.push_back(std::move(m));
-                    }
-                  }
-                  track_match =
-                      MoqtCompoundMatch::all(std::move(tr_conditions));
-                } else {
-                  auto m = parse_bin_match(track_item.get());
-                  if (!m.is_empty()) {
-                    track_match = MoqtCompoundMatch::single(std::move(m));
-                  }
-                }
-              } else if (track_item && cbor_isa_bytestring(track_item.get())) {
-                auto m = parse_bin_match(track_item.get());
-                if (!m.is_empty()) {
-                  track_match = MoqtCompoundMatch::single(std::move(m));
-                }
-              } else if (track_item && !cbor_is_null(track_item.get())) {
-                throw InvalidClaimValueError(
-                    "MOQT scope track element must be null, bytestring, or "
-                    "array");
-              }
-            }
-
-            if (actions.empty()) {
-              throw InvalidClaimValueError(
-                  "MOQT scope must contain at least one action");
-            }
-            moqt_claims.addScope(actions, std::move(ns_match),
-                                 std::move(track_match));
-          }
-          token.extended.setMoqtClaims(std::move(moqt_claims));
-        }
+        decodeMoqtClaim(value_item, token);
         break;
 
       case CLAIM_MOQT_REVAL:
