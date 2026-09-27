@@ -62,7 +62,40 @@ class CatToken {
   std::unordered_map<int64_t, std::string> custom{};  ///< Custom claims
 
   CatToken() = default;
-  virtual ~CatToken() = default;
+  // Non-virtual on purpose. `CatToken` is a value type, never inherited
+  // from. A virtual destructor pinned a vtable pointer onto every
+  // in-memory instance (a per-token, per-worker overhead the relay hot
+  // path pays on every admission) with no `delete p` on a base pointer
+  // ever taking advantage of it. Kept default-defined so the whole
+  // rule-of-zero still applies.
+  ~CatToken() = default;
+
+  // Read-only projection over the claim groups. Prefer these accessors
+  // in new code — they let downstream callers (and future ABI-break
+  // cleanups) move to a `private:` claim body without churning every
+  // read site. The direct fields above remain public for source-compat
+  // with the 500+ call sites that mutate them in-place; they will be
+  // privatised in a subsequent ABI break.
+  [[nodiscard]] const CoreClaims& coreClaims() const noexcept { return core; }
+  [[nodiscard]] const CatClaims& catClaims() const noexcept { return cat; }
+  [[nodiscard]] const InformationalClaims& informationalClaims()
+      const noexcept {
+    return informational;
+  }
+  [[nodiscard]] const DpopClaims& dpopClaims() const noexcept { return dpop; }
+  [[nodiscard]] const RequestClaims& requestClaims() const noexcept {
+    return request;
+  }
+  [[nodiscard]] const CompositeClaims& compositeClaims() const noexcept {
+    return composite;
+  }
+  [[nodiscard]] const ExtendedCatClaims& extendedClaims() const noexcept {
+    return extended;
+  }
+  [[nodiscard]] const std::unordered_map<int64_t, std::string>& customClaims()
+      const noexcept {
+    return custom;
+  }
 
   /**
    * @brief Create a builder for fluent token construction
