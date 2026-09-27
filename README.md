@@ -54,9 +54,10 @@ just build-cmake
 # Run tests
 just test
 
-# Run specific test categories
-./build/catapult_tests --test-case="moqt"      # MOQT tests only
-./build/catapult_tests --test-case="claims"    # Claims tests only
+# Run specific test suites (doctest filters use wildcards)
+./build/catapult_tests --test-suite="*MOQT*"   # MOQT-related suites
+./build/catapult_tests --test-suite="*DPoP*"   # DPoP-related suites
+./build/catapult_tests --list-test-suites      # See all suites
 
 # Clean build directory
 just clean
@@ -93,12 +94,12 @@ make -j$(nproc)
 # Run tests
 ./catapult_tests
 
-# Run specific test categories
-./catapult_tests --test-case="moqt"      # MOQT tests only
-./catapult_tests --test-case="claims"    # Claims tests only
+# Run a specific test suite (doctest filters use wildcards)
+./catapult_tests --test-suite="*MOQT*"
 
-# Verbose output
-./catapult_tests --verbose
+# List all suites, or query the doctest options
+./catapult_tests --list-test-suites
+./catapult_tests --help
 ```
 
 ## Docker Build and Test
@@ -133,6 +134,18 @@ Run tests:
 
 ```
 
+## Build Options
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `ENABLE_LOGGING` | ON | Compile in spdlog-based logging |
+| `CATAPULT_ENABLE_JSON` | ON | JSON serialization (requires nlohmann_json) |
+| `CATAPULT_ENABLE_SANITIZERS` | OFF | ASan + UBSan |
+| `CATAPULT_ENABLE_TSAN` | OFF | ThreadSanitizer (mutually exclusive with ASan) |
+| `CATAPULT_ENABLE_WERROR` | OFF | Treat compiler warnings as errors |
+| `CATAPULT_ENABLE_LTO` | OFF | Link-time optimization for library targets |
+| `CATAPULT_ENABLE_FUZZERS` | OFF | Build libFuzzer harnesses (Clang only) |
+
 ## Sanitizer Testing (ASan/UBSan)
 
 ```bash
@@ -150,6 +163,27 @@ ctest --test-dir build-san --output-on-failure --timeout 600
 ```
 
 On macOS, remove `detect_leaks=1` as it is not supported.
+
+## Fuzzing (Clang + libFuzzer)
+
+```bash
+CC=clang CXX=clang++ cmake -S . -B build-fuzz \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCATAPULT_ENABLE_FUZZERS=ON
+
+cmake --build build-fuzz -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+# Fuzz targets live under build-fuzz/fuzz/. Corpora are under fuzz/corpus/.
+./build-fuzz/fuzz/fuzz_base64url fuzz/corpus/fuzz_base64url -runs=100000
+```
+
+## Observability
+
+Applications inject a `MetricsSink` implementation via
+`catapult::metrics::setMetricsSink(...)` (from `include/catapult/metrics.hpp`)
+to receive counter, observation, and gauge samples for parser decisions,
+policy accept/reject events, DPoP proof outcomes, and cache hits. When no
+sink is installed the observability path is zero-cost.
 
 ## Benchmarks
 
