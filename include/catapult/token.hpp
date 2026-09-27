@@ -180,13 +180,13 @@ class CatToken {
              std::constructible_from<RequestClaims, ReqClaims_T> &&
              std::constructible_from<CompositeClaims, CompClaims_T>
   {
-    return std::make_unique<CatToken>(createValidatedStack(
-        std::forward<CoreClaims_T>(core_claims),
-        std::forward<CatClaims_T>(cat_claims),
-        std::forward<InfoClaims_T>(info_claims),
-        std::forward<DpopClaims_T>(dpop_claims),
-        std::forward<ReqClaims_T>(req_claims),
-        std::forward<CompClaims_T>(comp_claims)));
+    return std::make_unique<CatToken>(
+        createValidatedStack(std::forward<CoreClaims_T>(core_claims),
+                             std::forward<CatClaims_T>(cat_claims),
+                             std::forward<InfoClaims_T>(info_claims),
+                             std::forward<DpopClaims_T>(dpop_claims),
+                             std::forward<ReqClaims_T>(req_claims),
+                             std::forward<CompClaims_T>(comp_claims)));
   }
 
   /**

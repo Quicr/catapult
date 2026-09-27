@@ -175,8 +175,7 @@ MoqtBinaryMatch parseMoqtBinaryMatch(cbor_item_t* item) {
             "MOQT match type 3 (contains) is an unsupported "
             "extension");
       default:
-        throw InvalidClaimValueError(
-            "MOQT match tuple has unknown type");
+        throw InvalidClaimValueError("MOQT match tuple has unknown type");
     }
   }
   throw InvalidClaimValueError(
@@ -213,8 +212,7 @@ void decodeMoqtClaim(cbor_item_t* value_item, CatToken& token) {
     std::vector<int> actions;
     auto actions_arr = cbor_array_get_owned(scope_arr.get(), 0);
     if (!actions_arr || !cbor_isa_array(actions_arr.get())) {
-      throw InvalidClaimValueError(
-          "MOQT scope action list must be an array");
+      throw InvalidClaimValueError("MOQT scope action list must be an array");
     }
     constexpr size_t MAX_ACTIONS = 50;
     size_t action_count = cbor_array_size(actions_arr.get());
@@ -224,12 +222,10 @@ void decodeMoqtClaim(cbor_item_t* value_item, CatToken& token) {
     for (size_t ai = 0; ai < action_count; ++ai) {
       auto act = cbor_array_get_owned(actions_arr.get(), ai);
       if (!act || !cbor_isa_uint(act.get())) {
-        throw InvalidClaimValueError(
-            "MOQT action must be an unsigned integer");
+        throw InvalidClaimValueError("MOQT action must be an unsigned integer");
       }
       uint64_t action_u64 = cbor_get_int(act.get());
-      if (action_u64 >
-          static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+      if (action_u64 > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
         throw InvalidClaimValueError("MOQT action exceeds int range");
       }
       int action_val = static_cast<int>(action_u64);
@@ -298,8 +294,7 @@ void decodeMoqtClaim(cbor_item_t* value_item, CatToken& token) {
       throw InvalidClaimValueError(
           "MOQT scope must contain at least one action");
     }
-    moqt_claims.addScope(actions, std::move(ns_match),
-                         std::move(track_match));
+    moqt_claims.addScope(actions, std::move(ns_match), std::move(track_match));
   }
   token.extended.setMoqtClaims(std::move(moqt_claims));
 }

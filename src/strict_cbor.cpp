@@ -478,7 +478,7 @@ CborItemPtr loadStrict(std::span<const uint8_t> data,
   // rejects such inputs before any allocation happens.
   preScanStrict(data, opts);
 
-  struct cbor_load_result result{};
+  cbor_load_result result{};
   auto item = cbor_load_owned(data.data(), data.size(), result);
   if (result.error.code != CBOR_ERR_NONE || !item) {
     throw InvalidCborError("Malformed CBOR input");
