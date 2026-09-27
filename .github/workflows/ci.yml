@@ -45,10 +45,16 @@ jobs:
         brew install cmake openssl clang-format
 
     - name: Configure CMake
+      # Scope: build + unit tests only. The install/export contract is
+      # covered by the install-consumer job (which apt-installs a system
+      # nlohmann_json). Disabling CATAPULT_INSTALL here sidesteps the
+      # CMakeLists.txt guard that fatal-errors when JSON was resolved via
+      # the vendored submodule.
       run: |
         mkdir build
         cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON -DCATAPULT_ENABLE_WERROR=ON ..
+        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON \
+              -DCATAPULT_ENABLE_WERROR=ON -DCATAPULT_INSTALL=OFF ..
 
     - name: Build
       run: |
