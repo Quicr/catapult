@@ -2,16 +2,15 @@
 
 ![Catapult Icon](catapult-icon.svg)
 
-[![CI](https://github.com/Quicr/catapult/actions/workflows/ci.yml/badge.svg)](https://github.com/Quicr/catapult/actions/workflows/ci.yml)
-[![Sanitizers](https://github.com/Quicr/catapult/actions/workflows/sanitizers.yml/badge.svg)](https://github.com/Quicr/catapult/actions/workflows/sanitizers.yml)
-[![Code Formatting](https://github.com/Quicr/catapult/actions/workflows/format.yml/badge.svg)](https://github.com/Quicr/catapult/actions/workflows/format.yml)
+[![CI](https://github.com/Quicr/catapult/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Quicr/catapult/actions/workflows/ci.yml)
+[![Sanitizers](https://github.com/Quicr/catapult/actions/workflows/sanitizers.yml/badge.svg?branch=main)](https://github.com/Quicr/catapult/actions/workflows/sanitizers.yml)
+[![Fuzz](https://github.com/Quicr/catapult/actions/workflows/fuzz.yml/badge.svg?branch=main)](https://github.com/Quicr/catapult/actions/workflows/fuzz.yml)
+[![Benchmarks](https://github.com/Quicr/catapult/actions/workflows/benchmarks.yml/badge.svg?branch=main)](https://github.com/Quicr/catapult/actions/workflows/benchmarks.yml)
+[![Code Formatting](https://github.com/Quicr/catapult/actions/workflows/format.yml/badge.svg?branch=main)](https://github.com/Quicr/catapult/actions/workflows/format.yml)
 [![License](https://img.shields.io/badge/License-BSD_2--Clause-blue.svg)](BSD-2-Clause.txt)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 
-| Platform | Architecture | Status |
-|----------|-------------|--------|
-|  Linux | x86_64, ARM64 | [![Ubuntu](https://github.com/Quicr/catapult/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Quicr/catapult/actions/workflows/ci.yml?query=branch%3Amain+os%3Aubuntu-latest) |
-|  macOS | x86_64, ARM64 | [![macOS](https://github.com/Quicr/catapult/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Quicr/catapult/actions/workflows/ci.yml?query=branch%3Amain+os%3Amacos-latest) |
+CI covers Linux x86_64, Linux ARM64, and macOS ARM64 (Apple Silicon).
 
 Catapult is a modern C++ library that provides secure, high-performance implementation
 for Common Access Token. One of the primary application goals for Catapult is 

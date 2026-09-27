@@ -18,12 +18,13 @@ jobs:
           # Linux arm64 (GitHub-hosted ARM runners, publicly available since 2025-01)
           - os: ubuntu-24.04-arm
             arch: arm64
-          # macOS arm64 (macos-latest is Apple Silicon since macos-14)
+          # macOS arm64 (macos-latest is Apple Silicon since macos-14).
+          # macos-13 (Intel) was dropped because GitHub's Intel-Mac hosted
+          # runner queue has been chronically saturated (24h+ waits) —
+          # add a self-hosted x86_64 macOS runner if that coverage is
+          # needed again.
           - os: macos-latest
             arch: arm64
-          # macOS x86_64 pinned to macos-13 to keep coverage on Intel hardware
-          - os: macos-13
-            arch: x64
 
     runs-on: ${{ matrix.os }}
 
