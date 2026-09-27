@@ -232,6 +232,15 @@ enum class CatReplayMode : uint32_t {
 // CAT `catnip` — tagged network-interface-parameter entries
 // ---------------------------------------------------------------------------
 
+/// RFC 9164 §3.1 CBOR tag for a bare IPv4 address (4 bytes).
+inline constexpr uint64_t kRfc9164IPv4Tag = 52;
+/// RFC 9164 §3.2 CBOR tag for a bare IPv6 address (16 bytes).
+inline constexpr uint64_t kRfc9164IPv6Tag = 54;
+/// Expected raw-address length in bytes for the RFC 9164 IPv4 tag.
+inline constexpr std::size_t kRfc9164IPv4Bytes = 4;
+/// Expected raw-address length in bytes for the RFC 9164 IPv6 tag.
+inline constexpr std::size_t kRfc9164IPv6Bytes = 16;
+
 /// One entry of `catnip`. `tag` is the CBOR tag identifier assigned by the
 /// draft (e.g. IPv4/IPv6/ASN); `value` is the tagged byte string. Consumers
 /// MUST NOT interpret the value without checking the tag.

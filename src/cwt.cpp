@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <typeinfo>
 
 #include "catapult/base64.hpp"
 #include "catapult/crypto.hpp"
@@ -875,8 +876,22 @@ std::vector<uint8_t> Cwt::encodePayload() const {
 
     return result;
 
+  } catch (const CatError&) {
+    // Preserve typed CAT errors from downstream helpers (e.g. an
+    // InvalidClaimValueError thrown by a claim serializer) so the caller
+    // can distinguish "the claim itself was invalid" from "libcbor
+    // couldn't serialize a well-formed structure".
+    throw;
+  } catch (const std::bad_alloc&) {
+    // Allocation failure inside libcbor or a CBOR helper must be
+    // surfaced as-is; a caller running out of memory should not learn
+    // about it as `InvalidCborError`.
+    throw;
   } catch (const std::exception& e) {
-    throw InvalidCborError(std::string("CBOR encoding failed: ") + e.what());
+    // Everything else is genuinely a CBOR-encoding failure; wrap with
+    // the original message so diagnostics don't lose the source type.
+    throw InvalidCborError(std::string("CBOR encoding failed (") +
+                           typeid(e).name() + "): " + e.what());
   }
 }
 
@@ -900,21 +915,20 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
   // per-entry semantic validation of the tag/value combination remains
   // the CLAIM_CATNIP switch's responsibility below.
   catapult::internal::StrictCborOptions opts;
-  opts.allowed_tags = {52, 54};
+  opts.allowed_tags = {kRfc9164IPv4Tag, kRfc9164IPv6Tag};
   auto item = catapult::internal::loadStrict(cborData, opts);
 
   if (!cbor_isa_map(item.get())) {
     throw InvalidTokenFormatError();
   }
 
-  // Maximum string length to prevent memory exhaustion
-  constexpr size_t MAX_STRING_LENGTH = 65536;  // 64KB
-
-  // Helper lambda for extracting strings with length validation
+  // Helper lambda for extracting strings with length validation.
+  // The per-string cap is defined in `internal/parse_limits.hpp` alongside
+  // the other decoder ceilings.
   auto extract_string = [](cbor_item_t* str_item) -> std::string {
     if (!str_item) return {};
     size_t length = cbor_string_length(str_item);
-    if (length > MAX_STRING_LENGTH) {
+    if (length > catapult::internal::kMaxClaimStringBytes) {
       throw InvalidClaimValueError("String value exceeds maximum length");
     }
     const unsigned char* data = cbor_string_handle(str_item);
@@ -1034,7 +1048,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         }
         {
           size_t len = cbor_bytestring_length(value_item);
-          if (len > MAX_STRING_LENGTH) {
+          if (len > catapult::internal::kMaxClaimStringBytes) {
             throw InvalidClaimValueError("'cti' exceeds maximum length");
           }
           const unsigned char* data = cbor_bytestring_handle(value_item);
@@ -1327,10 +1341,10 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
             CatNipEntry e;
             e.tag = cbor_tag_value(arr[j]);
             // Only the RFC 9164 address tags carry a defined CATNIP
-            // semantics today: 52 = IPv4, 54 = IPv6. Reject any other
-            // tag rather than round-trip an entry whose meaning we
-            // cannot enforce against a claim policy.
-            if (e.tag != 52 && e.tag != 54) {
+            // semantics today. Reject any other tag rather than
+            // round-trip an entry whose meaning we cannot enforce
+            // against a claim policy.
+            if (e.tag != kRfc9164IPv4Tag && e.tag != kRfc9164IPv6Tag) {
               throw InvalidClaimValueError(
                   "'catnip' entry uses an unrecognised tag "
                   "(only RFC 9164 tags 52/54 are supported)");
@@ -1346,7 +1360,9 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
             // or 16 bytes (IPv6). Enforce the length matches the tag so
             // a producer cannot smuggle mismatched material past a
             // downstream address matcher.
-            const size_t expected = (e.tag == 52) ? 4u : 16u;
+            const size_t expected = (e.tag == kRfc9164IPv4Tag)
+                                        ? kRfc9164IPv4Bytes
+                                        : kRfc9164IPv6Bytes;
             if (elen != expected) {
               cbor_decref(&tagged);
               throw InvalidClaimValueError(
@@ -1523,7 +1539,7 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         }
         {
           size_t len = cbor_bytestring_length(value_item);
-          if (len > MAX_STRING_LENGTH) {
+          if (len > catapult::internal::kMaxClaimStringBytes) {
             throw InvalidClaimValueError("'cattpk' exceeds maximum length");
           }
           const unsigned char* data = cbor_bytestring_handle(value_item);

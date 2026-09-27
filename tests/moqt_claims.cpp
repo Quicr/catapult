@@ -619,8 +619,8 @@ std::vector<uint8_t> wrap_moqt_claim_bytes(cbor_item_t* moqt_value_owned) {
   // shortest-form and passes loadStrict's RFC 8949 §4.2.1 check.
   static_assert(catapult::CLAIM_MOQT <= 0xFFFF,
                 "CLAIM_MOQT must fit in a CBOR uint16 for this fixture");
-  cbor_item_t* moqt_key = cbor_build_uint16(
-      static_cast<uint16_t>(catapult::CLAIM_MOQT));
+  cbor_item_t* moqt_key =
+      cbor_build_uint16(static_cast<uint16_t>(catapult::CLAIM_MOQT));
   must_add(map, cbor_pair{.key = cbor_move(moqt_key),
                           .value = cbor_move(moqt_value_owned)});
 
@@ -630,11 +630,11 @@ std::vector<uint8_t> wrap_moqt_claim_bytes(cbor_item_t* moqt_value_owned) {
 }
 
 // scope = [ [action], [ <bin_match> ] ] — namespace list carrying one entry.
-cbor_item_t* build_scope_with_ns_match(int action, cbor_item_t* bin_match_owned) {
+cbor_item_t* build_scope_with_ns_match(int action,
+                                       cbor_item_t* bin_match_owned) {
   cbor_item_t* scope = cbor_new_definite_array(2);
   cbor_item_t* actions = cbor_new_definite_array(1);
-  must_push(actions,
-            cbor_move(cbor_build_uint8(static_cast<uint8_t>(action))));
+  must_push(actions, cbor_move(cbor_build_uint8(static_cast<uint8_t>(action))));
   must_push(scope, cbor_move(actions));
 
   cbor_item_t* ns_list = cbor_new_definite_array(1);
@@ -654,9 +654,8 @@ TEST_SUITE("MOQT wire-format hardening") {
     // "any" would silently widen authorization to every namespace. We
     // must fail closed.
     cbor_item_t* moqt_arr = cbor_new_definite_array(1);
-    must_push(moqt_arr,
-              cbor_move(build_scope_with_ns_match(
-                  catapult::moqt_actions::PUBLISH, cbor_new_null())));
+    must_push(moqt_arr, cbor_move(build_scope_with_ns_match(
+                            catapult::moqt_actions::PUBLISH, cbor_new_null())));
 
     auto payload = wrap_moqt_claim_bytes(moqt_arr);
     CHECK_THROWS_AS(catapult::Cwt::decodePayload(payload),
@@ -707,16 +706,17 @@ TEST_SUITE("MOQT wire-format hardening") {
         catapult::CatToken()
             .withIssuer("issuer")
             .withAudience({"aud"})
-            .withMoqtActionsDynamic(
-                std::array{catapult::moqt_actions::PUBLISH},
-                catapult::MoqtBinaryMatch::contains("live"),
-                catapult::MoqtBinaryMatch::any());
+            .withMoqtActionsDynamic(std::array{catapult::moqt_actions::PUBLISH},
+                                    catapult::MoqtBinaryMatch::contains("live"),
+                                    catapult::MoqtBinaryMatch::any());
 
     catapult::Cwt cwt(catapult::ALG_ES256, token);
-    // The encoder wraps semantic failures raised by claim builders into
-    // an InvalidCborError. Assert the outer error type rather than the
-    // inner InvalidClaimValueError.
-    CHECK_THROWS_AS(cwt.encodePayload(), catapult::InvalidCborError);
+    // Semantic failures raised by claim builders propagate through
+    // encodePayload() as the original typed CatError so a caller can
+    // distinguish "claim value invalid" from "CBOR serialisation
+    // failed on well-formed input". Prior versions wrapped everything
+    // as `InvalidCborError`, which hid the source of the failure.
+    CHECK_THROWS_AS(cwt.encodePayload(), catapult::InvalidClaimValueError);
   }
 }
 
@@ -748,15 +748,14 @@ TEST_SUITE("MOQT profile round-trip vectors") {
   TEST_CASE("publisher: exact-namespace + prefix-track") {
     // draft §Publisher example: PUBLISH_NAMESPACE + PUBLISH allowed on the
     // exact namespace "example.com" with any track starting with "video-".
-    auto tok =
-        catapult::CatToken()
-            .withIssuer("https://auth.example.com")
-            .withAudience({"https://relay.example.com"})
-            .withMoqtActionsDynamic(
-                std::array{catapult::moqt_actions::PUBLISH_NAMESPACE,
-                           catapult::moqt_actions::PUBLISH},
-                catapult::MoqtBinaryMatch::exact("example.com"),
-                catapult::MoqtBinaryMatch::prefix("video-"));
+    auto tok = catapult::CatToken()
+                   .withIssuer("https://auth.example.com")
+                   .withAudience({"https://relay.example.com"})
+                   .withMoqtActionsDynamic(
+                       std::array{catapult::moqt_actions::PUBLISH_NAMESPACE,
+                                  catapult::moqt_actions::PUBLISH},
+                       catapult::MoqtBinaryMatch::exact("example.com"),
+                       catapult::MoqtBinaryMatch::prefix("video-"));
 
     auto decoded = roundtrip(tok);
     const auto* moqt = decoded.extended.getMoqtClaimsReadOnly();
@@ -781,16 +780,15 @@ TEST_SUITE("MOQT profile round-trip vectors") {
   TEST_CASE("subscriber: prefix-namespace + wildcard-track") {
     // draft §Subscriber example: any track under any namespace prefixed
     // by "conference.example". Wildcard track is expressed as `any()`.
-    auto tok =
-        catapult::CatToken()
-            .withIssuer("https://auth.example.com")
-            .withAudience({"https://relay.example.com"})
-            .withMoqtActionsDynamic(
-                std::array{catapult::moqt_actions::SUBSCRIBE_NAMESPACE,
-                           catapult::moqt_actions::SUBSCRIBE,
-                           catapult::moqt_actions::FETCH},
-                catapult::MoqtBinaryMatch::prefix("conference.example"),
-                catapult::MoqtBinaryMatch::any());
+    auto tok = catapult::CatToken()
+                   .withIssuer("https://auth.example.com")
+                   .withAudience({"https://relay.example.com"})
+                   .withMoqtActionsDynamic(
+                       std::array{catapult::moqt_actions::SUBSCRIBE_NAMESPACE,
+                                  catapult::moqt_actions::SUBSCRIBE,
+                                  catapult::moqt_actions::FETCH},
+                       catapult::MoqtBinaryMatch::prefix("conference.example"),
+                       catapult::MoqtBinaryMatch::any());
 
     auto decoded = roundtrip(tok);
     const auto* moqt = decoded.extended.getMoqtClaimsReadOnly();
@@ -816,24 +814,23 @@ TEST_SUITE("MOQT profile round-trip vectors") {
     // {"live.example","studio-a"}; subscribe for any namespace prefixed by
     // "live.example". Verifies OR-across-scopes semantics after encode +
     // decode round-trip.
-    auto tok =
-        catapult::CatToken()
-            .withIssuer("https://auth.example.com")
-            .withAudience({"https://relay.example.com"})
-            .withMoqtActionsDynamic(
-                std::array{catapult::moqt_actions::PUBLISH_NAMESPACE,
-                           catapult::moqt_actions::PUBLISH},
-                catapult::MoqtCompoundMatch::all({
-                    catapult::MoqtBinaryMatch::exact("live.example"),
-                    catapult::MoqtBinaryMatch::exact("studio-a"),
-                }),
-                catapult::MoqtCompoundMatch::any())
-            .withMoqtActionsDynamic(
-                std::array{catapult::moqt_actions::SUBSCRIBE,
-                           catapult::moqt_actions::FETCH},
-                catapult::MoqtCompoundMatch::single(
-                    catapult::MoqtBinaryMatch::prefix("live.example")),
-                catapult::MoqtCompoundMatch::any());
+    auto tok = catapult::CatToken()
+                   .withIssuer("https://auth.example.com")
+                   .withAudience({"https://relay.example.com"})
+                   .withMoqtActionsDynamic(
+                       std::array{catapult::moqt_actions::PUBLISH_NAMESPACE,
+                                  catapult::moqt_actions::PUBLISH},
+                       catapult::MoqtCompoundMatch::all({
+                           catapult::MoqtBinaryMatch::exact("live.example"),
+                           catapult::MoqtBinaryMatch::exact("studio-a"),
+                       }),
+                       catapult::MoqtCompoundMatch::any())
+                   .withMoqtActionsDynamic(
+                       std::array{catapult::moqt_actions::SUBSCRIBE,
+                                  catapult::moqt_actions::FETCH},
+                       catapult::MoqtCompoundMatch::single(
+                           catapult::MoqtBinaryMatch::prefix("live.example")),
+                       catapult::MoqtCompoundMatch::any());
 
     auto decoded = roundtrip(tok);
     const auto* moqt = decoded.extended.getMoqtClaimsReadOnly();
@@ -849,8 +846,8 @@ TEST_SUITE("MOQT profile round-trip vectors") {
     // that AND across exact conditions is a conjunction, not a union.
     CHECK_FALSE(moqt->isAuthorized(catapult::moqt_actions::PUBLISH,
                                    "live.example", "cam1"));
-    CHECK_FALSE(moqt->isAuthorized(catapult::moqt_actions::PUBLISH,
-                                   "studio-a", "cam1"));
+    CHECK_FALSE(moqt->isAuthorized(catapult::moqt_actions::PUBLISH, "studio-a",
+                                   "cam1"));
     // Subscribe scope: any namespace prefixed by "live.example" is fine.
     CHECK(moqt->isAuthorized(catapult::moqt_actions::SUBSCRIBE,
                              "live.example.studio-b", "cam1"));
@@ -938,8 +935,8 @@ TEST_SUITE("MOQT profile round-trip vectors") {
     REQUIRE(moqt != nullptr);
     REQUIRE(moqt->getScopeCount() == 1);
 
-    CHECK(moqt->isAuthorized(catapult::moqt_actions::SUBSCRIBE, "",
-                             "any-track"));
+    CHECK(
+        moqt->isAuthorized(catapult::moqt_actions::SUBSCRIBE, "", "any-track"));
     CHECK_FALSE(moqt->isAuthorized(catapult::moqt_actions::SUBSCRIBE,
                                    "example.com", "any-track"));
     CHECK_FALSE(moqt->isAuthorized(catapult::moqt_actions::SUBSCRIBE,
@@ -978,8 +975,9 @@ TEST_SUITE("MOQT wire-format positive vectors") {
     // lowest CBOR expression.
     cbor_item_t* scope = cbor_new_definite_array(1);
     cbor_item_t* actions = cbor_new_definite_array(1);
-    must_push(actions, cbor_move(cbor_build_uint8(
-                           catapult::moqt_actions::TRACK_STATUS)));
+    must_push(
+        actions,
+        cbor_move(cbor_build_uint8(catapult::moqt_actions::TRACK_STATUS)));
     must_push(scope, cbor_move(actions));
 
     cbor_item_t* moqt_arr = cbor_new_definite_array(1);
@@ -990,8 +988,8 @@ TEST_SUITE("MOQT wire-format positive vectors") {
     CHECK_NOTHROW(tok = catapult::Cwt::decodePayload(payload));
     const auto* moqt = tok.extended.getMoqtClaimsReadOnly();
     REQUIRE(moqt != nullptr);
-    CHECK(moqt->isAuthorized(catapult::moqt_actions::TRACK_STATUS,
-                             "anywhere", "any"));
+    CHECK(moqt->isAuthorized(catapult::moqt_actions::TRACK_STATUS, "anywhere",
+                             "any"));
   }
 
   TEST_CASE("Decoder accepts scope with actions + ns + null track") {
@@ -1006,8 +1004,9 @@ TEST_SUITE("MOQT wire-format positive vectors") {
     must_push(scope, cbor_move(actions));
 
     cbor_item_t* ns_list = cbor_new_definite_array(1);
-    must_push(ns_list, cbor_move(cbor_build_bytestring(
-                           reinterpret_cast<const unsigned char*>("live."), 5)));
+    must_push(ns_list,
+              cbor_move(cbor_build_bytestring(
+                  reinterpret_cast<const unsigned char*>("live."), 5)));
     must_push(scope, cbor_move(ns_list));
     must_push(scope, cbor_move(cbor_new_null()));
 
@@ -1054,8 +1053,8 @@ TEST_SUITE("MOQT wire-format positive vectors") {
     const auto* moqt = tok.extended.getMoqtClaimsReadOnly();
     REQUIRE(moqt != nullptr);
     CHECK(moqt->isAuthorized(catapult::moqt_actions::SUBSCRIBE, "ns", "track"));
-    CHECK_FALSE(moqt->isAuthorized(catapult::moqt_actions::SUBSCRIBE, "ns",
-                                   "other"));
+    CHECK_FALSE(
+        moqt->isAuthorized(catapult::moqt_actions::SUBSCRIBE, "ns", "other"));
   }
 
   TEST_CASE("Decoder accepts two-condition track match list") {
@@ -1063,14 +1062,14 @@ TEST_SUITE("MOQT wire-format positive vectors") {
     // array-of-arrays: [ [type,pat], [type,pat] ]. Verify decode.
     cbor_item_t* prefix_tuple = cbor_new_definite_array(2);
     must_push(prefix_tuple, cbor_move(cbor_build_uint8(1)));  // prefix
-    must_push(prefix_tuple, cbor_move(cbor_build_bytestring(
-                                reinterpret_cast<const unsigned char*>("/hd/"),
-                                4)));
+    must_push(prefix_tuple,
+              cbor_move(cbor_build_bytestring(
+                  reinterpret_cast<const unsigned char*>("/hd/"), 4)));
     cbor_item_t* suffix_tuple = cbor_new_definite_array(2);
     must_push(suffix_tuple, cbor_move(cbor_build_uint8(2)));  // suffix
-    must_push(suffix_tuple, cbor_move(cbor_build_bytestring(
-                                reinterpret_cast<const unsigned char*>(".mp4"),
-                                4)));
+    must_push(suffix_tuple,
+              cbor_move(cbor_build_bytestring(
+                  reinterpret_cast<const unsigned char*>(".mp4"), 4)));
 
     cbor_item_t* scope = cbor_new_definite_array(3);
     cbor_item_t* actions = cbor_new_definite_array(1);

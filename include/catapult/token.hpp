@@ -160,11 +160,14 @@ class CatToken {
     // Note: Time relationship validation (EXP vs NBF) is handled by
     // CatTokenValidator during validation, not during construction
 
-    // Additional bounds checking for time values
-    // TODO: Revisit these limits based on real-world usage
-    constexpr int64_t MAX_TIMESTAMP =
-        32503680000;  // Year 3000 (more generous for testing)
-    constexpr int64_t MIN_TIMESTAMP = 946684800;  // Year 2000
+    // Reject timestamps that could not plausibly refer to a live CAT
+    // deployment. The lower bound (2000-01-01) rejects negative-year
+    // wraparound and legacy 32-bit epoch garbage; the upper bound
+    // (3000-01-01) leaves generous headroom while still catching
+    // "-1 got sign-cast to a huge uint" bugs upstream. These are not
+    // policy bounds — they are sanity bounds on the wire form.
+    constexpr int64_t MAX_TIMESTAMP = 32503680000;  // 3000-01-01 UTC
+    constexpr int64_t MIN_TIMESTAMP = 946684800;    // 2000-01-01 UTC
 
     if (core.exp.has_value()) {
       if (core.exp.value() > MAX_TIMESTAMP ||

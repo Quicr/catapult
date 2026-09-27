@@ -904,7 +904,26 @@ class DpopProofValidator {
   }
 
   /**
-   * @brief Update settings
+   * @brief Replace the validator's live settings.
+   *
+   * ## Concurrency contract — not atomic with in-flight validations
+   *
+   * `settings_` is a plain member, not an atomic snapshot. A concurrent
+   * `validate_proof()` call that has already read one field (e.g. the
+   * acceptance window) but has not yet read another (e.g.
+   * `honor_jti`) may observe a mix of pre- and post-update values.
+   * The library does not guarantee atomic visibility.
+   *
+   * Consequences for operators:
+   *   - Use this method during admin / reload windows (ACL rotation,
+   *     policy push), not on the request hot path.
+   *   - If a settings change must be visible to every in-flight
+   *     request atomically, drain in-flight requests through a
+   *     higher-level barrier (e.g. quiesce the dispatcher) before
+   *     calling.
+   *   - For per-token tightening driven by the wire form, prefer
+   *     `DpopValidationSettings::overlayCatDpopSettings()` on a
+   *     request-scoped copy rather than mutating the shared instance.
    */
   void update_settings(DpopValidationSettings new_settings) {
     settings_ = std::move(new_settings);

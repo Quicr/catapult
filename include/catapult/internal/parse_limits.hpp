@@ -43,6 +43,14 @@ inline constexpr std::size_t kMaxRegexPatternLength = 256;
 /// Maximum number of regex patterns retained by a single matcher.
 inline constexpr std::size_t kMaxRegexPatterns = 50;
 
+/// Maximum accepted length of any individual string value inside a decoded
+/// CBOR claim payload. Applies uniformly to every text string the CAT
+/// decoder extracts (issuer, audience elements, catalpn entries, etc.).
+/// Chosen well above any legitimate wire form so a well-formed token cannot
+/// trip it, and well below `kMaxDecodedCborBytes` so a single oversized
+/// string cannot dominate the token budget.
+inline constexpr std::size_t kMaxClaimStringBytes = 65536;
+
 /**
  * @brief Aggregated parse limits threaded through every codec entry point.
  *

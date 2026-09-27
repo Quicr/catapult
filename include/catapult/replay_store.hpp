@@ -144,6 +144,16 @@ class InsufficientBackendCapabilitiesError : public std::runtime_error {
  * the wrong level" at a glance.
  *
  * Idempotent and cheap; call once per validator wire-up.
+ *
+ * ## Startup-time only
+ *
+ * This is a *configuration* check, not a runtime health probe. It
+ * validates what the backend *reports* it can do; it does not observe
+ * live cluster state. A Redis adapter that degrades post-startup
+ * (replica loss, failover, config rollback) still reports its original
+ * capability level. Operators MUST run their own liveness/consistency
+ * probes against the backing store during operation and page on
+ * regressions there — this call cannot substitute for them.
  */
 void requireFleetCapableReplayBackend(
     const ReplayStore& store,
