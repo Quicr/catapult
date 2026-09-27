@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <memory>
 #include <ranges>
 #include <unordered_set>
 
@@ -86,27 +87,32 @@ class CatTokenValidator {
   std::optional<std::unordered_set<std::string>>
       expectedAudiences_;       ///< Expected token audiences
   int64_t clockSkewTolerance_;  ///< Clock skew tolerance in seconds
-  RevalidationCallback* revalidation_callback_ = nullptr;
+  std::shared_ptr<RevalidationCallback> revalidation_callback_;
   ///< Observability hook fired during moqt-reval enforcement.
-  ///< Non-owning; the caller is responsible for lifetime. A nullptr
-  ///< means "do nothing" — equivalent to installing a
-  ///< NoopRevalidationCallback but without the vtable dispatch.
-  UsageStateHook* usage_state_ = nullptr;
-  ///< Enforcement hook for CTA-5007-B `catreplay` modes. Non-owning;
-  ///< the caller is responsible for lifetime. A nullptr means "do
-  ///< not enforce" — a token carrying `catreplay=RejectOnReplay`
-  ///< or `RevokeOnReplay` is then rejected outright, because
-  ///< silently downgrading to `None` would let a misconfigured
-  ///< relay believe it was enforcing replay when it was not.
-  AuthorizationPolicyHook* authz_policy_ = nullptr;
+  ///< `shared_ptr` so the validator can co-own the hook when the
+  ///< caller passes ownership via `withRevalidationCallback(shared_ptr)`;
+  ///< the raw-pointer overload stores it as a non-owning alias
+  ///< (`shared_ptr` with a no-op deleter) for source-compat with
+  ///< pre-owning callers. `nullptr` (default) means "do nothing" —
+  ///< equivalent to installing a NoopRevalidationCallback but without
+  ///< the vtable dispatch.
+  std::shared_ptr<UsageStateHook> usage_state_;
+  ///< Enforcement hook for CTA-5007-B `catreplay` modes. See the
+  ///< comment on `revalidation_callback_` for the ownership rules.
+  ///< `nullptr` means "do not enforce" — a token carrying
+  ///< `catreplay=RejectOnReplay` or `RevokeOnReplay` is then rejected
+  ///< outright, because silently downgrading to `None` would let a
+  ///< misconfigured relay believe it was enforcing replay when it
+  ///< was not.
+  std::shared_ptr<AuthorizationPolicyHook> authz_policy_;
   ///< Enforcement hook for semantic claims the library cannot decide
   ///< from token state alone: `catpor`, `catdpop`, `catif`, `catr`,
-  ///< `catgeoiso3166`, `geohash`, `catgeoalt`. Non-owning; the caller
-  ///< is responsible for lifetime. A nullptr means "no policy" —
-  ///< when a token carries any of these claims and no hook is
-  ///< installed, validation fails closed with a missing-required-
-  ///< claim error. Test suites and staged rollouts can install
-  ///< `PermissivePolicy` to opt out of enforcement explicitly.
+  ///< `catgeoiso3166`, `geohash`, `catgeoalt`. Ownership as above.
+  ///< `nullptr` means "no policy" — when a token carries any of these
+  ///< claims and no hook is installed, validation fails closed with a
+  ///< missing-required-claim error. Test suites and staged rollouts
+  ///< can install `PermissivePolicy` to opt out of enforcement
+  ///< explicitly.
   RequiredPolicyContextFields required_context_fields_{};
   ///< Which `PolicyContext` fields the validator will require callers
   ///< to populate before dispatching to `authz_policy_`. Default is
@@ -171,6 +177,8 @@ class CatTokenValidator {
    * See RevalidationCallback docs for the on-hot-path contract.
    */
   CatTokenValidator& withRevalidationCallback(RevalidationCallback* callback);
+  CatTokenValidator& withRevalidationCallback(
+      std::shared_ptr<RevalidationCallback> callback);
 
   /**
    * @brief Install a usage-state hook for `catreplay` enforcement.
@@ -192,6 +200,7 @@ class CatTokenValidator {
    * implementation whose state is shared across relays.
    */
   CatTokenValidator& withUsageStateHook(UsageStateHook* hook);
+  CatTokenValidator& withUsageStateHook(std::shared_ptr<UsageStateHook> hook);
 
   /**
    * @brief Install a semantic authorization-policy hook.
@@ -211,6 +220,8 @@ class CatTokenValidator {
    * auditable choice rather than a silent default.
    */
   CatTokenValidator& withAuthorizationPolicy(AuthorizationPolicyHook* hook);
+  CatTokenValidator& withAuthorizationPolicy(
+      std::shared_ptr<AuthorizationPolicyHook> hook);
 
   /**
    * @brief Declare which `PolicyContext` fields the caller must populate

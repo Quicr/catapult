@@ -49,20 +49,54 @@ CatTokenValidator& CatTokenValidator::withClockSkewTolerance(
   return *this;
 }
 
+namespace {
+
+// Wrap a caller-owned raw pointer as a `shared_ptr` with a no-op
+// deleter so validators uniformly hold `shared_ptr<Hook>` regardless of
+// how the caller installed the hook. The raw-pointer overloads exist
+// for source compatibility with callers that already manage the hook's
+// lifetime elsewhere; the `shared_ptr` overloads let a caller hand
+// ownership to the validator directly.
+template <typename Hook>
+std::shared_ptr<Hook> nonOwningShared(Hook* raw) noexcept {
+  if (raw == nullptr) return {};
+  return std::shared_ptr<Hook>(raw, [](Hook*) {});
+}
+
+}  // namespace
+
 CatTokenValidator& CatTokenValidator::withRevalidationCallback(
     RevalidationCallback* callback) {
-  revalidation_callback_ = callback;
+  revalidation_callback_ = nonOwningShared(callback);
+  return *this;
+}
+
+CatTokenValidator& CatTokenValidator::withRevalidationCallback(
+    std::shared_ptr<RevalidationCallback> callback) {
+  revalidation_callback_ = std::move(callback);
   return *this;
 }
 
 CatTokenValidator& CatTokenValidator::withUsageStateHook(UsageStateHook* hook) {
-  usage_state_ = hook;
+  usage_state_ = nonOwningShared(hook);
+  return *this;
+}
+
+CatTokenValidator& CatTokenValidator::withUsageStateHook(
+    std::shared_ptr<UsageStateHook> hook) {
+  usage_state_ = std::move(hook);
   return *this;
 }
 
 CatTokenValidator& CatTokenValidator::withAuthorizationPolicy(
     AuthorizationPolicyHook* hook) {
-  authz_policy_ = hook;
+  authz_policy_ = nonOwningShared(hook);
+  return *this;
+}
+
+CatTokenValidator& CatTokenValidator::withAuthorizationPolicy(
+    std::shared_ptr<AuthorizationPolicyHook> hook) {
+  authz_policy_ = std::move(hook);
   return *this;
 }
 
