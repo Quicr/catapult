@@ -85,43 +85,14 @@ class CatToken {
   }
 
   /**
-   * @brief Factory method returning an owning validated token.
+   * @brief Build a `CatToken` from its per-group claim buckets, running
+   *        the structural validator before returning.
    *
-   * Uses ordinary heap ownership so the returned pointer can safely outlive
-   * the creating thread. Previously this factory backed the token with a
-   * thread_local pool, which could leave dangling deallocators when the
-   * pointer escaped its origin thread.
-   */
-  template <
-      typename CoreClaims_T = CoreClaims, typename CatClaims_T = CatClaims,
-      typename InfoClaims_T = InformationalClaims,
-      typename DpopClaims_T = DpopClaims, typename ReqClaims_T = RequestClaims,
-      typename CompClaims_T = CompositeClaims>
-  static std::unique_ptr<CatToken> createValidated(
-      CoreClaims_T&& core_claims, CatClaims_T&& cat_claims = {},
-      InfoClaims_T&& info_claims = {}, DpopClaims_T&& dpop_claims = {},
-      ReqClaims_T&& req_claims = {}, CompClaims_T&& comp_claims = {})
-    requires std::constructible_from<CoreClaims, CoreClaims_T> &&
-             std::constructible_from<CatClaims, CatClaims_T> &&
-             std::constructible_from<InformationalClaims, InfoClaims_T> &&
-             std::constructible_from<DpopClaims, DpopClaims_T> &&
-             std::constructible_from<RequestClaims, ReqClaims_T> &&
-             std::constructible_from<CompositeClaims, CompClaims_T>
-  {
-    auto tokenPtr = std::make_unique<CatToken>();
-    tokenPtr->core = std::forward<CoreClaims_T>(core_claims);
-    tokenPtr->cat = std::forward<CatClaims_T>(cat_claims);
-    tokenPtr->informational = std::forward<InfoClaims_T>(info_claims);
-    tokenPtr->dpop = std::forward<DpopClaims_T>(dpop_claims);
-    tokenPtr->request = std::forward<ReqClaims_T>(req_claims);
-    tokenPtr->composite = std::forward<CompClaims_T>(comp_claims);
-    tokenPtr->validateTokenStructure();
-    return tokenPtr;
-  }
-
-  /**
-   * @brief Factory method for creating validated tokens without memory pool
-   * (for stack allocation)
+   * This is the shared construction body for `createValidated` (heap-
+   * owning) and `createValidatedStack` (by value). Every field of every
+   * claim bucket is `constructible_from` the corresponding template
+   * parameter, so this factory supports both rvalue-move and lvalue-copy
+   * of pre-built claim objects.
    */
   template <
       typename CoreClaims_T = CoreClaims, typename CatClaims_T = CatClaims,
@@ -150,6 +121,39 @@ class CatToken {
     token.composite = std::forward<CompClaims_T>(comp_claims);
     token.validateTokenStructure();
     return token;
+  }
+
+  /**
+   * @brief Heap-owning wrapper around `createValidatedStack` for callers
+   *        that need to hand the token off across a thread boundary.
+   *
+   * Structural checks run inside `createValidatedStack`; if it throws,
+   * no heap allocation happens and the caller sees the same typed error
+   * they would from the by-value factory.
+   */
+  template <
+      typename CoreClaims_T = CoreClaims, typename CatClaims_T = CatClaims,
+      typename InfoClaims_T = InformationalClaims,
+      typename DpopClaims_T = DpopClaims, typename ReqClaims_T = RequestClaims,
+      typename CompClaims_T = CompositeClaims>
+  static std::unique_ptr<CatToken> createValidated(
+      CoreClaims_T&& core_claims, CatClaims_T&& cat_claims = {},
+      InfoClaims_T&& info_claims = {}, DpopClaims_T&& dpop_claims = {},
+      ReqClaims_T&& req_claims = {}, CompClaims_T&& comp_claims = {})
+    requires std::constructible_from<CoreClaims, CoreClaims_T> &&
+             std::constructible_from<CatClaims, CatClaims_T> &&
+             std::constructible_from<InformationalClaims, InfoClaims_T> &&
+             std::constructible_from<DpopClaims, DpopClaims_T> &&
+             std::constructible_from<RequestClaims, ReqClaims_T> &&
+             std::constructible_from<CompositeClaims, CompClaims_T>
+  {
+    return std::make_unique<CatToken>(createValidatedStack(
+        std::forward<CoreClaims_T>(core_claims),
+        std::forward<CatClaims_T>(cat_claims),
+        std::forward<InfoClaims_T>(info_claims),
+        std::forward<DpopClaims_T>(dpop_claims),
+        std::forward<ReqClaims_T>(req_claims),
+        std::forward<CompClaims_T>(comp_claims)));
   }
 
   /**
