@@ -9,8 +9,6 @@ This document provides examples for using the CWT (CBOR Web Token) API with CAT 
 - [Encryption Operations](#encryption-operations)
 - [Single Signature Operations](#single-signature-operations)
 - [Multi Signature Operations](#multi-signature-operations)
-- [Key Management](#key-management)
-- [Error Handling](#error-handling)
 
 ## Token Creation
 
@@ -21,42 +19,52 @@ Use the `CatToken::builder()` fluent API to construct tokens:
 
 using namespace catapult;
 
+using namespace std::chrono_literals;
+
 // Basic token with core claims
 auto token = CatToken::builder()
     .issuer("auth.example.com")
     .audience("api.example.com")
-    .expiresIn(std::chrono::hours{2})
+    .expiresIn(2h)
     .build();
 
-// Token with DPoP binding
+// Token with DPoP binding (jkt is the SHA-256 thumbprint of the JWK)
 auto dpopToken = CatToken::builder()
     .issuer("auth.moqt-cdn.example.com")
     .audience("relay.moqt-cdn.example.com")
-    .expiresIn(std::chrono::hours{1})
+    .expiresIn(1h)
     .dpopThumbprint(client_keys.get_public_key_thumbprint())
     .build();
 
 // Token with geographic and network restrictions
+CatNipEntry v4_nip{kRfc9164IPv4Tag, {192, 168, 1, 0}};
+CatHostHeaderMatchList hosts{{
+    CatHeaderMatch{"host",
+                   {UriMatchType::Exact,
+                    {'a','p','i','.','e','x','a','m','p','l','e','.','c','o','m'}}}}};
 auto restrictedToken = CatToken::builder()
     .issuer("geo-auth.example.com")
     .audience("cdn.example.com")
-    .expiresIn(std::chrono::hours{1})
-    .geoCoordinate(37.7749, -122.4194, 100.0)  // lat, lon, accuracy
+    .expiresIn(1h)
+    .geoCoordinate(37.7749, -122.4194, 100.0)  // lat, lon, radius (m)
     .countries({"US", "CA"})
-    .networkInterfaces({"192.168.1.0/24"})
-    .hosts({"api.example.com"})
-    .alpn({"h3", "h2"})
+    .networkInterfaces({v4_nip})
+    .headerMatches(hosts)
+    .alpn({{'h','3'}, {'h','2'}})  // ALPN protocol ids as byte strings
     .build();
 
 // Token with CAT-specific claims
+CatProofOfPossession por{
+    /*probability=*/1.0,
+    /*identifier=*/{0x01, 0x02, 0x03, 0x04},
+    /*expiry=*/std::nullopt};
 auto catToken = CatToken::builder()
     .issuer("cat-issuer.example.com")
     .audience("service.example.com")
-    .expiresIn(std::chrono::hours{1})
-    .version("1.0")
-    .usageLimit(100)
-    .replayNonce("nonce-12345")
-    .proofOfPossession(true)
+    .expiresIn(1h)
+    .version(1)                             // catv is a uint32
+    .replayMode(CatReplayMode::RejectOnReplay)
+    .proofOfPossession(std::move(por))
     .subject("user@example.com")
     .build();
 ```
@@ -75,12 +83,12 @@ Message Authentication Code (MAC) operations use HMAC-SHA256 to ensure message i
 using namespace catapult;
 
 // Create a CAT token using builder pattern
+using namespace std::chrono_literals;
 auto token = CatToken::builder()
     .issuer("example-issuer")
     .audience("audience1")
-    .expiresIn(std::chrono::hours{2})
-    .version("1.0")
-    .usageLimit(100)
+    .expiresIn(2h)
+    .version(1)
     .build();
 
 // Generate secure HMAC key
@@ -218,25 +226,6 @@ try {
 }
 ```
 
-### PS256 (RSA-PSS) Single Signature
-
-```cpp
-// Generate PS256 key pair
-auto [rsaPrivateKey, rsaPublicKey] = Ps256Algorithm::generateSecureKeyPair();
-
-// For signing
-Ps256Algorithm signAlgo(rsaPrivateKey, rsaPublicKey);
-
-// Create and sign CWT using builder pattern
-std::string signedCwt = Cwt(ALG_PS256, token)
-    .withKeyId("ps256-key-001")
-    .createCwtBase64(CwtMode::Signed, signAlgo);
-
-// For verification
-Ps256Algorithm verifyAlgo(rsaPublicKey);
-auto verifiedCwt = Cwt::validateCwtBase64(signedCwt, verifyAlgo);
-```
-
 ## Multi Signature Operations
 
 Multi signature operations use COSE_Sign format to support multiple signatures with potentially different algorithms.
@@ -256,19 +245,19 @@ CatToken token;
 
 // Create different algorithms
 auto [es256PrivKey, es256PubKey] = Es256Algorithm::generateSecureKeyPair();
-auto [ps256PrivKey, ps256PubKey] = Ps256Algorithm::generateSecureKeyPair();
+auto [es256bPrivKey, es256bPubKey] = Es256Algorithm::generateSecureKeyPair();
 auto hmacKey = HmacSha256Algorithm::generateSecureKey();
 
 Es256Algorithm es256Algo(es256PrivKey, es256PubKey);
-Ps256Algorithm ps256Algo(ps256PrivKey, ps256PubKey);
+Es256Algorithm es256bAlgo(es256bPrivKey, es256bPubKey);
 HmacSha256Algorithm hmacAlgo(hmacKey);
 
 // Create multi-signed CWT using builder pattern
 std::string multiSignedCwt = Cwt(ALG_ES256, token)
     .withKeyId("multi-authority-key")
-    .addSignature(es256Algo)   // PKI authority
-    .addSignature(ps256Algo)   // Government authority  
-    .addSignature(hmacAlgo)    // Internal authority
+    .addSignature(es256Algo)    // PKI authority
+    .addSignature(es256bAlgo)   // Secondary authority
+    .addSignature(hmacAlgo)     // Internal authority
     .createCwtBase64(CwtMode::MultiSigned, es256Algo);
 std::cout << "Multi-signed CWT: " << multiSignedCwt << std::endl;
 ```
@@ -279,12 +268,13 @@ std::cout << "Multi-signed CWT: " << multiSignedCwt << std::endl;
 // Create algorithm map for verification
 std::map<int64_t, std::reference_wrapper<const CryptographicAlgorithm>> algorithmMap;
 
-// Use verification-only algorithms (public keys only)
+// Use verification-only algorithms (public keys only). Note that a single
+// algorithmMap entry per algorithm id is used; per-signature key lookup for
+// same-alg-different-key deployments happens via a KeyResolver — see
+// examples/cat_cwt_per_signature_example.cpp.
 Es256Algorithm es256VerifyAlgo(es256PubKey);
-Ps256Algorithm ps256VerifyAlgo(ps256PubKey);
 
 algorithmMap.emplace(ALG_ES256, std::cref(es256VerifyAlgo));
-algorithmMap.emplace(ALG_PS256, std::cref(ps256VerifyAlgo));
 algorithmMap.emplace(ALG_HMAC256_256, std::cref(hmacAlgo));
 
 // Validate with per-signature algorithms
