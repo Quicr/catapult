@@ -10,6 +10,7 @@
 #include "catapult/base64.hpp"
 #include "catapult/crypto.hpp"
 #include "catapult/dpop.hpp"
+#include "catapult/internal/cbor_extract.hpp"
 #include "catapult/internal/cbor_owned.hpp"
 #include "catapult/internal/parse_limits.hpp"
 #include "catapult/internal/strict_cbor.hpp"
@@ -927,15 +928,8 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
   // the other decoder ceilings.
   auto extract_string = [](cbor_item_t* str_item) -> std::string {
     if (!str_item) return {};
-    size_t length = cbor_string_length(str_item);
-    if (length > catapult::internal::kMaxClaimStringBytes) {
-      throw InvalidClaimValueError("String value exceeds maximum length");
-    }
-    const unsigned char* data = cbor_string_handle(str_item);
-    if (!data && length > 0) {
-      throw InvalidClaimValueError("Invalid string data pointer");
-    }
-    return {reinterpret_cast<const char*>(data), length};
+    return catapult::internal::extractTextString(
+        str_item, "String value", catapult::internal::kMaxClaimStringBytes);
   };
 
   // Parse into CatToken
@@ -1046,17 +1040,8 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         if (!cbor_isa_bytestring(value_item)) {
           throw InvalidClaimValueError("'cti' must be a byte string");
         }
-        {
-          size_t len = cbor_bytestring_length(value_item);
-          if (len > catapult::internal::kMaxClaimStringBytes) {
-            throw InvalidClaimValueError("'cti' exceeds maximum length");
-          }
-          const unsigned char* data = cbor_bytestring_handle(value_item);
-          if (!data && len > 0) {
-            throw InvalidClaimValueError("Invalid 'cti' data pointer");
-          }
-          token.core.cti = std::vector<uint8_t>(data, data + len);
-        }
+        token.core.cti = catapult::internal::extractBytestring(
+            value_item, "'cti'", catapult::internal::kMaxClaimStringBytes);
         break;
 
       case CLAIM_CATREPLAY:
@@ -1537,14 +1522,8 @@ CatToken Cwt::decodePayload(std::span<const uint8_t> cborData) {
         if (!cbor_isa_bytestring(value_item)) {
           throw InvalidClaimValueError("'cattpk' must be a byte string");
         }
-        {
-          size_t len = cbor_bytestring_length(value_item);
-          if (len > catapult::internal::kMaxClaimStringBytes) {
-            throw InvalidClaimValueError("'cattpk' exceeds maximum length");
-          }
-          const unsigned char* data = cbor_bytestring_handle(value_item);
-          token.cat.cattpk = std::vector<uint8_t>(data, data + len);
-        }
+        token.cat.cattpk = catapult::internal::extractBytestring(
+            value_item, "'cattpk'", catapult::internal::kMaxClaimStringBytes);
         break;
 
       case CLAIM_SUB:
