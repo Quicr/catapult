@@ -5,6 +5,7 @@
 
 #include "catapult/jwk.hpp"
 
+#include <openssl/bn.h>
 #include <openssl/core_names.h>
 #include <openssl/evp.h>
 #include <openssl/param_build.h>
@@ -69,6 +70,66 @@ std::string createES256JWK(const std::vector<uint8_t>& public_key_der) {
   return jwk.dump();
 }
 
+std::string createPS256JWK(const std::vector<uint8_t>& public_key_der) {
+  const uint8_t* data = public_key_der.data();
+  EVP_PKEY* pkey = d2i_PUBKEY(nullptr, &data,
+                              static_cast<long>(public_key_der.size()));
+  if (!pkey) {
+    throw CryptoError("Failed to parse RSA public key DER");
+  }
+  if (EVP_PKEY_base_id(pkey) != EVP_PKEY_RSA) {
+    EVP_PKEY_free(pkey);
+    throw CryptoError("createPS256JWK requires an RSA key");
+  }
+
+  const int bits = EVP_PKEY_bits(pkey);
+  if (bits < static_cast<int>(crypto_constants::PS256_MIN_MODULUS_BITS) ||
+      bits > static_cast<int>(crypto_constants::PS256_MAX_MODULUS_BITS)) {
+    EVP_PKEY_free(pkey);
+    throw CryptoError("RSA modulus out of policy range for PS256 JWK");
+  }
+
+  BIGNUM* n = nullptr;
+  BIGNUM* e = nullptr;
+  if (!EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_N, &n) ||
+      !EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_E, &e)) {
+    if (n) BN_free(n);
+    if (e) BN_free(e);
+    EVP_PKEY_free(pkey);
+    throw CryptoError("Failed to extract RSA n/e");
+  }
+  EVP_PKEY_free(pkey);
+
+  // RFC 7518 §6.3.1: `n` and `e` are big-endian with leading zero bytes
+  // removed. BN_bn2bin produces exactly that (minimum representation).
+  // BN_num_bytes returns `int`; verify it is strictly positive before
+  // widening to size_t so a malformed BIGNUM (NULL or zero) cannot
+  // produce a bogus allocation or an underflow.
+  const int n_len = BN_num_bytes(n);
+  const int e_len = BN_num_bytes(e);
+  if (n_len <= 0 || e_len <= 0) {
+    BN_free(n);
+    BN_free(e);
+    throw CryptoError("Invalid RSA JWK: non-positive n or e length");
+  }
+  std::vector<uint8_t> n_bytes(static_cast<size_t>(n_len));
+  std::vector<uint8_t> e_bytes(static_cast<size_t>(e_len));
+  if (BN_bn2bin(n, n_bytes.data()) != n_len ||
+      BN_bn2bin(e, e_bytes.data()) != e_len) {
+    BN_free(n);
+    BN_free(e);
+    throw CryptoError("Failed to serialize RSA n/e");
+  }
+  BN_free(n);
+  BN_free(e);
+
+  json j = {{"kty", "RSA"},
+            {"alg", "PS256"},
+            {"n", base64UrlEncode(n_bytes)},
+            {"e", base64UrlEncode(e_bytes)}};
+  return j.dump();
+}
+
 std::string calculateJWKThumbprint(const std::string& jwk_json) {
   // Prevent DoS from oversized JSON input
   constexpr size_t MAX_JWK_SIZE = 8192;
@@ -95,6 +156,14 @@ std::string calculateJWKThumbprint(const std::string& jwk_json) {
                  {"kty", jwk["kty"]},
                  {"x", jwk["x"]},
                  {"y", jwk["y"]}};
+  } else if (jwk["kty"] == "RSA") {
+    // RFC 7638 §3.2 canonical form for RSA keys: only `e`, `kty`, `n` in
+    // lexicographic order. Any extra JWK fields (`alg`, `kid`, `use`, ...)
+    // MUST be excluded from the thumbprint input.
+    if (!jwk.contains("n") || !jwk.contains("e")) {
+      throw CryptoError("RSA JWK missing required fields (n, e)");
+    }
+    canonical = {{"e", jwk["e"]}, {"kty", jwk["kty"]}, {"n", jwk["n"]}};
   } else {
     throw CryptoError("Unsupported key type for thumbprint: " +
                       jwk["kty"].get<std::string>());
@@ -118,6 +187,8 @@ std::string createJWKFromAlgorithm(int64_t algorithm_id,
   switch (algorithm_id) {
     case ALG_ES256:
       return createES256JWK(public_key_der);
+    case ALG_PS256:
+      return createPS256JWK(public_key_der);
     default:
       throw CryptoError("Unsupported algorithm for JWK creation: " +
                         std::to_string(algorithm_id));

@@ -29,6 +29,16 @@ namespace jwk {
 std::string createES256JWK(const std::vector<uint8_t>& public_key_der);
 
 /**
+ * @brief Create PS256 JWK (`kty: RSA`, `alg: PS256`) from a DER-encoded
+ *        RSA SubjectPublicKeyInfo.
+ * @param public_key_der DER-encoded RSA public key bytes
+ * @return JWK JSON string with base64url-encoded `n` and `e` members
+ * @throws CryptoError if key parsing or extraction fails or the modulus
+ *         size violates PS256 policy
+ */
+std::string createPS256JWK(const std::vector<uint8_t>& public_key_der);
+
+/**
  * @brief Calculate JWK thumbprint using SHA-256
  * @param jwk_json JWK in JSON string format
  * @return Base64url-encoded thumbprint

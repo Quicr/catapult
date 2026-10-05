@@ -2545,8 +2545,8 @@ Cwt Cwt::validateCwt(std::span<const uint8_t> cwtBytes,
     }
 
     auto isKnownAlgorithm = [](int64_t alg) {
-      return alg == ALG_ES256 || alg == ALG_HMAC256_256 || alg == ALG_A128GCM ||
-             alg == ALG_A192GCM || alg == ALG_A256GCM ||
+      return alg == ALG_ES256 || alg == ALG_PS256 || alg == ALG_HMAC256_256 ||
+             alg == ALG_A128GCM || alg == ALG_A192GCM || alg == ALG_A256GCM ||
              alg == ALG_ChaCha20_Poly1305;
     };
     if (!isKnownAlgorithm(headerAlgId)) {

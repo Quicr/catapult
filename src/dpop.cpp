@@ -303,6 +303,82 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
     return std::make_unique<Es256Algorithm>(der_bytes);
   }
 
+  if (alg_name == "PS256") {
+    if (jwk["kty"] != "RSA") {
+      throw CryptoError("Invalid JWK for PS256: must be RSA");
+    }
+    if (!jwk.contains("n") || !jwk.contains("e")) {
+      throw CryptoError("Invalid JWK for PS256: missing n or e");
+    }
+
+    auto n_bytes = base64UrlDecode(jwk["n"].get<std::string>());
+    auto e_bytes = base64UrlDecode(jwk["e"].get<std::string>());
+
+    // Enforce PS256 modulus floor (RFC 7518 §3.3) up front so an attacker-
+    // supplied 1024-bit JWK is rejected before any BN/EVP state is built.
+    constexpr size_t MAX_RSA_PUBLIC_EXPONENT_BYTES = 8;
+    const size_t n_bits = n_bytes.size() * 8U;
+    if (n_bits < crypto_constants::PS256_MIN_MODULUS_BITS ||
+        n_bits > crypto_constants::PS256_MAX_MODULUS_BITS) {
+      throw CryptoError("RSA modulus bit-length out of policy range for PS256");
+    }
+    if (e_bytes.empty() || e_bytes.size() > MAX_RSA_PUBLIC_EXPONENT_BYTES) {
+      throw CryptoError("RSA public exponent out of range");
+    }
+
+    // Both lengths are now bounded in `size_t` and comfortably fit `int`,
+    // so the cast is safe — but keep the explicit widening to make the
+    // boundary visible to anyone auditing the BN API usage later.
+    BIGNUM* n_bn = BN_bin2bn(n_bytes.data(), static_cast<int>(n_bytes.size()),
+                             nullptr);
+    BIGNUM* e_bn = BN_bin2bn(e_bytes.data(), static_cast<int>(e_bytes.size()),
+                             nullptr);
+    if (!n_bn || !e_bn) {
+      if (n_bn) BN_free(n_bn);
+      if (e_bn) BN_free(e_bn);
+      throw CryptoError("Failed to parse RSA n/e from JWK");
+    }
+
+    OSSL_PARAM_BLD* param_bld = OSSL_PARAM_BLD_new();
+    if (!param_bld) {
+      BN_free(n_bn);
+      BN_free(e_bn);
+      throw CryptoError("Failed to create parameter builder");
+    }
+    OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_RSA_N, n_bn);
+    OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_RSA_E, e_bn);
+
+    OSSL_PARAM* params = OSSL_PARAM_BLD_to_param(param_bld);
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(nullptr, "RSA", nullptr);
+    EVP_PKEY* pkey = nullptr;
+    const bool success =
+        ctx && params && EVP_PKEY_fromdata_init(ctx) > 0 &&
+        EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) > 0;
+
+    OSSL_PARAM_BLD_free(param_bld);
+    if (params) OSSL_PARAM_free(params);
+    if (ctx) EVP_PKEY_CTX_free(ctx);
+    BN_free(n_bn);
+    BN_free(e_bn);
+
+    if (!success) {
+      if (pkey) EVP_PKEY_free(pkey);
+      throw CryptoError("Failed to create RSA public key from JWK");
+    }
+
+    int der_len = i2d_PUBKEY(pkey, nullptr);
+    if (der_len <= 0) {
+      EVP_PKEY_free(pkey);
+      throw CryptoError("Failed to get DER length for RSA public key");
+    }
+    std::vector<uint8_t> der_bytes(static_cast<size_t>(der_len));
+    uint8_t* der_ptr = der_bytes.data();
+    i2d_PUBKEY(pkey, &der_ptr);
+    EVP_PKEY_free(pkey);
+
+    return std::make_unique<Ps256Algorithm>(der_bytes);
+  }
+
   throw CryptoError("Unsupported algorithm for DPoP verification: " + alg_name);
 }
 #endif
