@@ -276,6 +276,71 @@ void perform_sign_operation(const CatToken& token, bool single_signer) {
 }
 
 /**
+ * @brief Perform RSASSA-PSS SHA-256 (PS256) signature operation.
+ *
+ * Mirrors perform_sign_operation() so the ES256 and PS256 integration
+ * sit side-by-side in the file. The only substantive differences are
+ * the algorithm identifier (ALG_PS256 = -37), the key material (RSA,
+ * 2048-bit modulus by default) and the signature size (= modulus/8 =
+ * 256 bytes for a 2048-bit key). Everything else — CWT construction,
+ * base64url emission, verifier-only key round-trip — is identical.
+ */
+void perform_sign_ps256_operation(const CatToken& token, bool single_signer) {
+  std::cout << "\n=== RSASSA-PSS PS256 Signature Operation ===\n";
+
+  try {
+    auto [private_key1, public_key1] = Ps256Algorithm::generateSecureKeyPair();
+    std::cout << "PS256 Public Key 1 (" << public_key1.size()
+              << " DER bytes): " << bytes_to_hex(public_key1).substr(0, 64)
+              << "...\n";
+
+    Ps256Algorithm sign_algo(private_key1, public_key1);
+
+    Cwt cwt(ALG_PS256, token);
+
+    if (single_signer) {
+      std::string signed_cwt = cwt.createCwtBase64(CwtMode::Signed, sign_algo);
+      std::cout << "Single Signature CWT (Base64): " << signed_cwt << "\n";
+      std::cout << "Single Signature CWT (" << base64UrlDecode(signed_cwt).size()
+                << " bytes CBOR)\n";
+
+      Ps256Algorithm verify_algo(public_key1);  // verify-only
+      auto verified_cwt = Cwt::validateCwtBase64(signed_cwt, verify_algo);
+      std::cout << "Signature Verification: SUCCESS\n";
+      std::cout << "Verified Token Issuer: "
+                << (verified_cwt.payload.core.iss.has_value()
+                        ? *verified_cwt.payload.core.iss
+                        : "none")
+                << "\n";
+    } else {
+      auto [private_key2, public_key2] =
+          Ps256Algorithm::generateSecureKeyPair();
+      std::cout << "PS256 Public Key 2 (" << public_key2.size()
+                << " DER bytes): " << bytes_to_hex(public_key2).substr(0, 64)
+                << "...\n";
+
+      Ps256Algorithm sign_algo2(private_key2, public_key2);
+
+      std::string signed_cwt1 = cwt.createCwtBase64(CwtMode::Signed, sign_algo);
+      std::string signed_cwt2 =
+          cwt.createCwtBase64(CwtMode::Signed, sign_algo2);
+
+      std::cout << "Multiple Signature CWT 1 (Base64): " << signed_cwt1 << "\n";
+      std::cout << "Multiple Signature CWT 2 (Base64): " << signed_cwt2 << "\n";
+
+      Ps256Algorithm verify_algo1(public_key1);
+      Ps256Algorithm verify_algo2(public_key2);
+      auto verified_cwt1 = Cwt::validateCwtBase64(signed_cwt1, verify_algo1);
+      auto verified_cwt2 = Cwt::validateCwtBase64(signed_cwt2, verify_algo2);
+      std::cout << "Multiple Signature Verification: SUCCESS\n";
+    }
+
+  } catch (const std::exception& e) {
+    std::cout << "PS256 Signature Operation Failed: " << e.what() << "\n";
+  }
+}
+
+/**
  * @brief Perform encryption operation
  */
 void perform_encrypt_operation(const CatToken& token, bool single_recipient) {
@@ -356,7 +421,7 @@ void print_usage(const char* program_name) {
   std::cout << "Usage: " << program_name << " [options]\n";
   std::cout << "Options:\n";
   std::cout << "  --mac, -m        Perform MAC operations\n";
-  std::cout << "  --sign, -s       Perform signature operations\n";
+  std::cout << "  --sign, -s       Perform signature operations (ES256 + PS256)\n";
   std::cout << "  --encrypt, -e    Perform encryption operations\n";
   std::cout << "  --single         Use single recipient/key (default)\n";
   std::cout << "  --multiple       Use multiple recipients/keys\n";
@@ -466,6 +531,7 @@ int main(int argc, char* argv[]) {
 
     if (perform_all || perform_sign) {
       perform_sign_operation(token, single_mode);
+      perform_sign_ps256_operation(token, single_mode);
     }
 
     if (perform_all || perform_encrypt) {
