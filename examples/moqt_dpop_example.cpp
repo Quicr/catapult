@@ -1,15 +1,25 @@
 /**
  * @file moqt_dpop_example.cpp
- * @brief End-to-end example demonstrating MOQT with DPoP proof-of-possession
+ * @brief End-to-end example demonstrating MOQT with DPoP proof-of-possession.
  *
- * This example shows how to:
- * 1. Create CAT tokens with MOQT claims and DPoP binding
- * 2. Generate DPoP proofs for MOQT actions
- * 3. Validate the entire flow
+ * Parameterised by signing algorithm and DPoP encoding so one example covers
+ * every supported combination:
+ *
+ *   ./moqt_dpop_example                          # default: ES256 + CWT
+ *   ./moqt_dpop_example --alg=PS256              # PS256 + CWT
+ *   ./moqt_dpop_example --encoding=jwt           # ES256 + JWT
+ *   ./moqt_dpop_example --alg=PS256 --encoding=jwt
+ *   ./moqt_dpop_example --all                    # walk every alg x encoding
+ *
+ * The CAT token + MOQT authorization checks are identical in every
+ * configuration — only the DPoP key pair, the proof-encoding call, and the
+ * thumbprint used for `cnf` binding change.
  */
 
+#include <cstring>
 #include <chrono>
 #include <iostream>
+#include <string>
 
 #include "catapult/claims.hpp"
 #include "catapult/crypto.hpp"
@@ -17,19 +27,77 @@
 #include "catapult/dpop.hpp"
 #include "catapult/moqt_claims.hpp"
 #include "catapult/token.hpp"
+#ifdef CATAPULT_ENABLE_JSON
+#include "catapult/jwk.hpp"
+#endif
 
 using namespace catapult;
 
-int main() {
-  std::cout << "MOQT + DPoP End-to-End Example\n";
+namespace {
+
+// Which algorithm to use for the DPoP key pair.
+std::unique_ptr<CryptographicAlgorithm> make_algorithm(int64_t alg_id) {
+  switch (alg_id) {
+    case ALG_ES256:
+      return std::make_unique<Es256Algorithm>();
+    case ALG_PS256:
+      return std::make_unique<Ps256Algorithm>();
+    default:
+      throw CryptoError("Unsupported alg in example: " +
+                        std::to_string(alg_id));
+  }
+}
+
+const char* alg_name(int64_t alg_id) {
+  switch (alg_id) {
+    case ALG_ES256:
+      return "ES256";
+    case ALG_PS256:
+      return "PS256";
+    default:
+      return "Unknown";
+  }
+}
+
+const char* encoding_name(DpopEncoding e) {
+  return e == DpopEncoding::CWT ? "CWT" : "JWT";
+}
+
+// JWT proofs bind to the RFC 7638 JWK thumbprint; CWT proofs bind to the
+// COSE_Key thumbprint. DpopKeyPair exposes the latter directly, so the
+// JWT path needs an explicit calculateJWKThumbprint call.
+std::string thumbprint_for(const DpopKeyPair& keys, DpopEncoding encoding) {
+  if (encoding == DpopEncoding::CWT) {
+    return keys.get_public_key_thumbprint();
+  }
+#ifdef CATAPULT_ENABLE_JSON
+  return jwk::calculateJWKThumbprint(keys.get_public_key_jwk());
+#else
+  (void)encoding;
+  throw CryptoError("JWT DPoP requires CATAPULT_ENABLE_JSON");
+#endif
+}
+
+}  // namespace
+
+int run_demo(int64_t alg_id, DpopEncoding encoding) {
+  std::cout << "MOQT + DPoP End-to-End Example  "
+            << "[alg=" << alg_name(alg_id) << ", encoding="
+            << encoding_name(encoding) << "]\n";
 
   try {
-    // Step 1: Create a DPoP key pair for the client
-    std::cout << "1. Creating DPoP key pair...\n";
-    auto crypto_alg = std::make_unique<Es256Algorithm>();
+    // Step 1: Create a DPoP key pair for the client. The algorithm and
+    // encoding selected here steer every subsequent step: signing the
+    // proof, choosing the thumbprint form used in `cnf`, and the
+    // DpopValidationSettings allowlist.
+    std::cout << "1. Creating DPoP key pair (" << alg_name(alg_id)
+              << ")...\n";
+    auto crypto_alg = make_algorithm(alg_id);
     DpopKeyPair client_keypair(std::move(crypto_alg));
-    std::cout << "   Public key thumbprint: "
-              << client_keypair.get_public_key_thumbprint() << "\n\n";
+    const std::string key_thumb = thumbprint_for(client_keypair, encoding);
+    std::cout << "   Key thumbprint ("
+              << (encoding == DpopEncoding::CWT ? "COSE_Key" : "JWK")
+              << "): " << key_thumb << "\n\n";
 
     // Step 2: Create CAT token with MOQT claims and DPoP binding
     std::cout << "2. Creating CAT token with MOQT claims and DPoP binding...\n";
@@ -64,14 +132,19 @@ int main() {
     moqt_claims.setRevalidationInterval(
         std::chrono::seconds{1800});  // 30 minutes
 
-    // Create DPoP settings
+    // Create DPoP settings. For non-ES256 proofs we also widen the
+    // algorithm allowlist, which otherwise defaults to {ALG_ES256} and
+    // would reject the proof before signature verification runs.
     DpopValidationSettings dpop_settings;
     dpop_settings.set_window(std::chrono::seconds{300});  // 5 minute window
     dpop_settings.set_jti_processing(true);  // Enable JTI validation
+    if (alg_id != ALG_ES256) {
+      dpop_settings.set_allowed_dpop_algorithms({ALG_ES256, alg_id});
+    }
 
     // Create enhanced DPoP claims
     EnhancedDpopClaims dpop_claims;
-    dpop_claims.set_confirmation(client_keypair.get_public_key_thumbprint());
+    dpop_claims.set_confirmation(key_thumb);
     dpop_claims.set_dpop_settings(dpop_settings);
 
     // Create CAT token
@@ -81,18 +154,19 @@ int main() {
     token.extended.setMoqtClaims(std::move(moqt_claims));
 
     // Set DPoP claims — CTA-5007-B §4.6.9 `cnf` conveys the key thumbprint
-    // as a byte string. get_public_key_thumbprint() returns hex; decode it.
+    // the proof must prove possession of. For a CWT-encoded proof this is
+    // the COSE_Key thumbprint; for a JWT-encoded proof it is the JWK
+    // thumbprint (RFC 7638). `key_thumb` captured the correct one above.
     {
       CatConfirmation cnf;
-      const auto& tp_hex = client_keypair.get_public_key_thumbprint();
-      cnf.kid = tp_hex;
+      cnf.kid = key_thumb;
       token.dpop.cnf = std::move(cnf);
     }
     // Note: catdpop would contain serialized settings in real implementation
     std::cout << "   CAT token created successfully\n\n";
 
     // Step 2.5: Encode token to CWT format
-    Cwt cwt_token(-7, token);                   // ES256 algorithm identifier
+    Cwt cwt_token(ALG_ES256, token);            // CAT token itself always ES256-signed in this demo
     cwt_token.withKeyId("sixteen-char-keyid");  // Example key ID
 
     auto cwt_payload = cwt_token.encodePayload();
@@ -132,13 +206,20 @@ int main() {
     std::cout << "   Track: " << track_name << "\n";
     std::cout << "   Endpoint: " << endpoint << "\n\n";
 
-    // Step 4: Generate DPoP proof for the action
+    // Step 4: Generate DPoP proof for the action, using the selected
+    // encoding. The proof's payload (actx, iat, jti, [ath]) is identical
+    // across encodings; what changes is the wire format of the proof
+    // itself (COSE_Sign1 vs base64url JOSE JWT).
     auto jti = moqt_dpop::generate_jti();
     auto dpop_proof = client_keypair.generate_proof(moqt_action, namespace_name,
-                                                    track_name, endpoint, jti);
+                                                    track_name, endpoint, jti,
+                                                    encoding);
 
     auto dpop_serialized = dpop_proof.serialize();
-    std::cout << "   DPoP proof (serialized): " << dpop_serialized.substr(0, 50)
+    std::cout << "   DPoP proof (" << encoding_name(encoding)
+              << ", first 50 chars): "
+              << dpop_serialized.substr(
+                     0, std::min<size_t>(50, dpop_serialized.size()))
               << "...\n";
     std::cout << "   JTI: " << jti << "\n\n";
 
@@ -165,16 +246,19 @@ int main() {
 
     // Validate DPoP proof
     DpopProofValidator dpop_validator(dpop_settings);
-    // Signature verification is mandatory (CTA-5007-B §4.6.9): bind the
-    // validator to the client's public key algorithm before calling
-    // validate_proof, otherwise validation fails closed.
-    dpop_validator.set_cwt_verifier(&client_keypair.get_algorithm());
+    // Signature verification is mandatory (CTA-5007-B §4.6.9). CWT proofs
+    // need an externally-supplied verifier because COSE_Key does not
+    // expose a key the library can import on demand; JWT proofs
+    // self-resolve from the embedded JWK, so `set_cwt_verifier` is only
+    // meaningful on the CWT path.
+    if (encoding == DpopEncoding::CWT) {
+      dpop_validator.set_cwt_verifier(&client_keypair.get_algorithm());
+    }
     auto expected_uri =
         moqt_dpop::construct_moqt_uri(endpoint, namespace_name, track_name);
 
     bool dpop_valid = dpop_validator.validate_proof(
-        dpop_proof, moqt_action, expected_uri,
-        client_keypair.get_public_key_thumbprint());
+        dpop_proof, moqt_action, expected_uri, key_thumb);
 
     std::cout << "   DPoP proof validation: "
               << (dpop_valid ? "VALID" : "INVALID") << "\n";
@@ -196,8 +280,7 @@ int main() {
     bool dpop_binding_valid = false;
     if (parsed_claims.dpop.cnf.has_value() &&
         parsed_claims.dpop.cnf->kid.has_value()) {
-      dpop_binding_valid = (parsed_claims.dpop.cnf->kid.value() ==
-                            client_keypair.get_public_key_thumbprint());
+      dpop_binding_valid = (parsed_claims.dpop.cnf->kid.value() == key_thumb);
     }
 
     std::cout << "   DPoP binding validation: "
@@ -211,8 +294,7 @@ int main() {
                       ? parsed_claims.dpop.cnf->kid.value_or("none")
                       : "none")
               << "\n";
-    std::cout << "     Proof key: "
-              << client_keypair.get_public_key_thumbprint() << "\n";
+    std::cout << "     Proof key: " << key_thumb << "\n";
 
     // Final authorization decision
     bool final_authorized = moqt_authorized && dpop_valid && dpop_binding_valid;
@@ -314,4 +396,100 @@ int main() {
   }
 
   return 0;
+}
+
+namespace {
+
+void print_help(const char* argv0) {
+  std::cout
+      << "Usage: " << argv0 << " [--alg=ES256|PS256] [--encoding=cwt|jwt]\n"
+      << "       " << argv0 << " --all\n"
+      << "       " << argv0 << " --help\n\n"
+      << "Flags:\n"
+      << "  --alg=NAME       Signing algorithm (default ES256).\n"
+      << "  --encoding=ENC   DPoP wire encoding, cwt or jwt (default cwt).\n"
+      << "  --all            Walk every alg x encoding combination.\n"
+      << "  --help           Print this help.\n";
+}
+
+bool starts_with(const char* s, const char* prefix) {
+  return std::strncmp(s, prefix, std::strlen(prefix)) == 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  int64_t alg_id = ALG_ES256;
+  DpopEncoding encoding = DpopEncoding::CWT;
+  bool run_all = false;
+
+  for (int i = 1; i < argc; ++i) {
+    const char* arg = argv[i];
+    if (std::strcmp(arg, "--help") == 0 || std::strcmp(arg, "-h") == 0) {
+      print_help(argv[0]);
+      return 0;
+    }
+    if (std::strcmp(arg, "--all") == 0) {
+      run_all = true;
+    } else if (starts_with(arg, "--alg=")) {
+      std::string v = arg + std::strlen("--alg=");
+      if (v == "ES256") alg_id = ALG_ES256;
+      else if (v == "PS256") alg_id = ALG_PS256;
+      else {
+        std::cerr << "Unknown --alg value: " << v << "\n";
+        print_help(argv[0]);
+        return 2;
+      }
+    } else if (starts_with(arg, "--encoding=")) {
+      std::string v = arg + std::strlen("--encoding=");
+      if (v == "cwt" || v == "CWT") encoding = DpopEncoding::CWT;
+      else if (v == "jwt" || v == "JWT") encoding = DpopEncoding::JWT;
+      else {
+        std::cerr << "Unknown --encoding value: " << v << "\n";
+        print_help(argv[0]);
+        return 2;
+      }
+    } else {
+      std::cerr << "Unknown argument: " << arg << "\n";
+      print_help(argv[0]);
+      return 2;
+    }
+  }
+
+#ifndef CATAPULT_ENABLE_JSON
+  if (encoding == DpopEncoding::JWT || run_all) {
+    std::cerr << "JWT DPoP encoding requires a CATAPULT_ENABLE_JSON=ON build.\n";
+    return 2;
+  }
+#endif
+
+  if (!run_all) {
+    return run_demo(alg_id, encoding);
+  }
+
+  // --all: walk every supported combination. The CAT token and MOQT
+  // authorization output are the same each time; only the DPoP wire
+  // format and key thumbprint change — which is exactly the surface
+  // this example is meant to illuminate.
+  const struct {
+    int64_t alg;
+    DpopEncoding enc;
+  } combos[] = {
+      {ALG_ES256, DpopEncoding::CWT},
+#ifdef CATAPULT_ENABLE_JSON
+      {ALG_ES256, DpopEncoding::JWT},
+#endif
+      {ALG_PS256, DpopEncoding::CWT},
+#ifdef CATAPULT_ENABLE_JSON
+      {ALG_PS256, DpopEncoding::JWT},
+#endif
+  };
+  int worst = 0;
+  for (const auto& c : combos) {
+    std::cout << "\n============================================================"
+                 "===============\n";
+    int rc = run_demo(c.alg, c.enc);
+    if (rc != 0) worst = rc;
+  }
+  return worst;
 }
