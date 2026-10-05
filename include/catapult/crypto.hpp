@@ -36,6 +36,7 @@ namespace catapult {
 /// COSE Algorithm Identifiers
 constexpr int64_t ALG_HMAC256_256 = 5;  ///< HMAC 256/256
 constexpr int64_t ALG_ES256 = -7;       ///< ECDSA w/ SHA-256
+constexpr int64_t ALG_PS256 = -37;      ///< RSASSA-PSS w/ SHA-256
 constexpr int64_t ALG_A128GCM =
     1;  ///< AES-GCM mode w/ 128-bit key, 128-bit tag
 constexpr int64_t ALG_A192GCM =
@@ -58,6 +59,18 @@ constexpr size_t ChaCha20_NONCE_SIZE =
     12;  ///< ChaCha20-Poly1305 nonce size in bytes
 constexpr size_t ChaCha20_TAG_SIZE =
     16;  ///< ChaCha20-Poly1305 tag size in bytes
+
+/// RSASSA-PSS salt length for PS256. JWS (RFC 7518 §3.5) and COSE (RFC 8230 §2)
+/// both pin the salt length to the hash output (32 bytes for SHA-256), so the
+/// interop surface is a single value and verifiers can reject any other.
+constexpr size_t PS256_SALT_BYTES = 32;
+/// Minimum RSA modulus accepted for PS256 (bits). RFC 7518 §3.3 forbids
+/// anything below 2048 for `PS256`/`RS256` and most compliance regimes
+/// (FIPS 186-5, NIST SP 800-131A rev 3) agree.
+constexpr size_t PS256_MIN_MODULUS_BITS = 2048;
+/// Upper bound on RSA modulus bits — a defence against DoS via oversized keys
+/// in attacker-supplied JWKs. 8192 is well above any production CA deployment.
+constexpr size_t PS256_MAX_MODULUS_BITS = 8192;
 
 constexpr bool is_valid_hmac_key_size(size_t size) noexcept {
   return size >= 16 && size <= 64;  // NIST recommendations
@@ -326,6 +339,85 @@ class Es256Algorithm : public CryptographicAlgorithm {
   /**
    * @brief Get the DER-encoded public key
    * @return Public key bytes
+   */
+  std::vector<uint8_t> getPublicKey() const;
+
+  std::vector<uint8_t> signImpl(std::span<const uint8_t> data) const override;
+  bool verifyImpl(std::span<const uint8_t> data,
+                  std::span<const uint8_t> signature) const override;
+  int64_t algorithmId() const override;
+};
+
+/**
+ * @brief RSASSA-PSS SHA-256 (PS256) algorithm implementation.
+ *
+ * JWS/COSE PS256 is RSASSA-PSS with digest = MGF1 digest = SHA-256 and the
+ * salt length pinned to the hash output (32 bytes). The wire form of the
+ * signature is the raw EMSA-PSS output of EVP_DigestSign — no DER/raw
+ * transcoding is required (contrast with ES256), so this class is a thin
+ * wrapper around EVP_DigestSign/EVP_DigestVerify with the PSS-specific
+ * padding parameters set on the PKEY context.
+ *
+ * Supports both sign+verify (with private key) and verify-only (with public
+ * key only) modes. Keys are DER-encoded (PKCS#8 for private,
+ * SubjectPublicKeyInfo for public).
+ */
+class Ps256Algorithm : public CryptographicAlgorithm {
+ public:
+  struct Impl;  // Made public for memory pool access
+
+ private:
+  std::unique_ptr<Impl> pImpl_;
+
+  void loadPrivateKey(const uint8_t* keyData, size_t keySize);
+  void loadPublicKey(const uint8_t* keyData, size_t keySize);
+  void initializeImpl();
+
+ public:
+  /**
+   * @brief Default constructor (generates a new 2048-bit key pair internally)
+   */
+  Ps256Algorithm();
+
+  /**
+   * @brief Construct with an existing key pair
+   * @param privateKey DER-encoded RSA private key (PKCS#8)
+   * @param publicKey DER-encoded RSA public key (SubjectPublicKeyInfo)
+   */
+  Ps256Algorithm(const std::vector<uint8_t>& privateKey,
+                 const std::vector<uint8_t>& publicKey);
+
+  /**
+   * @brief Construct with secure private key storage
+   */
+  Ps256Algorithm(const SecureVector<uint8_t>& privateKey,
+                 const std::vector<uint8_t>& publicKey);
+
+  /**
+   * @brief Construct for verification only (no signing capability)
+   * @param publicKey DER-encoded RSA public key
+   */
+  explicit Ps256Algorithm(const std::vector<uint8_t>& publicKey);
+
+  ~Ps256Algorithm();
+
+  Ps256Algorithm(Ps256Algorithm&& other) noexcept;
+  Ps256Algorithm& operator=(Ps256Algorithm&& other) noexcept;
+
+  Ps256Algorithm(const Ps256Algorithm&) = delete;
+  Ps256Algorithm& operator=(const Ps256Algorithm&) = delete;
+
+  /**
+   * @brief Generate PS256 key pair with secure memory for private key
+   * @param modulusBits RSA modulus size in bits; must satisfy
+   *                    PS256_MIN_MODULUS_BITS <= modulusBits <= PS256_MAX_MODULUS_BITS
+   * @return Pair of (private key in secure storage, DER public key)
+   */
+  static std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>
+  generateSecureKeyPair(int modulusBits = 2048);
+
+  /**
+   * @brief Get the DER-encoded public key
    */
   std::vector<uint8_t> getPublicKey() const;
 

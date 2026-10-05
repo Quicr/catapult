@@ -684,6 +684,249 @@ bool Es256Algorithm::verifyImpl(std::span<const uint8_t> data,
 int64_t Es256Algorithm::algorithmId() const { return ALG_ES256; }
 
 //
+// PS256 Implementation (RSASSA-PSS with SHA-256, salt=32)
+//
+
+struct Ps256Algorithm::Impl {
+  EvpKeyPtr privateKey;
+  EvpKeyPtr publicKey;
+  Impl() = default;
+};
+
+namespace {
+
+// RSA key policy for PS256: enforce modulus bounds and reject non-RSA keys.
+// Centralising this guard keeps the private/public loader branches in sync
+// — a mismatch here is the kind of defect that lets a 1024-bit key sneak
+// in through one entry point but not the other.
+void enforcePs256RsaKeyPolicy(EVP_PKEY* pkey) {
+  if (!pkey) throw CryptoError("PS256 key is null");
+  if (EVP_PKEY_base_id(pkey) != EVP_PKEY_RSA) {
+    throw CryptoError("PS256 requires an RSA key");
+  }
+  const int bits = EVP_PKEY_bits(pkey);
+  if (bits < static_cast<int>(crypto_constants::PS256_MIN_MODULUS_BITS)) {
+    throw CryptoError("RSA modulus too small for PS256");
+  }
+  if (bits > static_cast<int>(crypto_constants::PS256_MAX_MODULUS_BITS)) {
+    throw CryptoError("RSA modulus too large for PS256");
+  }
+}
+
+// RSASSA-PSS parameters pinned to JWS/COSE PS256: hash = MGF1 digest =
+// SHA-256, salt = 32 bytes. `pctx` is owned by the surrounding MD_CTX and
+// MUST NOT be freed here.
+void configurePs256PssCtx(EVP_PKEY_CTX* pctx) {
+  if (!pctx) throw CryptoError("PS256 pkey ctx is null");
+  if (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) <= 0) {
+    throw CryptoError("Failed to set PSS padding");
+  }
+  if (EVP_PKEY_CTX_set_rsa_mgf1_md(pctx, EVP_sha256()) <= 0) {
+    throw CryptoError("Failed to set MGF1 SHA-256");
+  }
+  if (EVP_PKEY_CTX_set_rsa_pss_saltlen(
+          pctx, static_cast<int>(crypto_constants::PS256_SALT_BYTES)) <= 0) {
+    throw CryptoError("Failed to set PSS salt length");
+  }
+}
+
+}  // namespace
+
+void Ps256Algorithm::initializeImpl() {
+  try {
+    pImpl_ = std::make_unique<Impl>();
+  } catch (const std::bad_alloc&) {
+    throwOsError("Ps256Algorithm constructor memory allocation");
+  }
+}
+
+void Ps256Algorithm::loadPrivateKey(const uint8_t* keyData, size_t keySize) {
+  auto priv_bio = BioPtr(BIO_new_mem_buf(keyData, static_cast<int>(keySize)));
+  pImpl_->privateKey.reset(d2i_PrivateKey_bio(priv_bio.get(), nullptr));
+  if (!pImpl_->privateKey) {
+    throw CryptoError("Failed to load RSA private key");
+  }
+  enforcePs256RsaKeyPolicy(pImpl_->privateKey.get());
+}
+
+void Ps256Algorithm::loadPublicKey(const uint8_t* keyData, size_t keySize) {
+  auto pub_bio = BioPtr(BIO_new_mem_buf(keyData, static_cast<int>(keySize)));
+  pImpl_->publicKey.reset(d2i_PUBKEY_bio(pub_bio.get(), nullptr));
+  if (!pImpl_->publicKey) {
+    throw CryptoError("Failed to load RSA public key");
+  }
+  enforcePs256RsaKeyPolicy(pImpl_->publicKey.get());
+}
+
+Ps256Algorithm::Ps256Algorithm() {
+  initializeImpl();
+  auto keyPair = generateSecureKeyPair();
+  loadPrivateKey(keyPair.first.data(), keyPair.first.size());
+  loadPublicKey(keyPair.second.data(), keyPair.second.size());
+}
+
+Ps256Algorithm::Ps256Algorithm(const std::vector<uint8_t>& privateKey,
+                               const std::vector<uint8_t>& publicKey) {
+  initializeImpl();
+  loadPrivateKey(privateKey.data(), privateKey.size());
+  loadPublicKey(publicKey.data(), publicKey.size());
+}
+
+Ps256Algorithm::Ps256Algorithm(const SecureVector<uint8_t>& privateKey,
+                               const std::vector<uint8_t>& publicKey) {
+  initializeImpl();
+  loadPrivateKey(privateKey.data(), privateKey.size());
+  loadPublicKey(publicKey.data(), publicKey.size());
+}
+
+Ps256Algorithm::Ps256Algorithm(const std::vector<uint8_t>& publicKey) {
+  initializeImpl();
+  loadPublicKey(publicKey.data(), publicKey.size());
+}
+
+Ps256Algorithm::~Ps256Algorithm() = default;
+
+Ps256Algorithm::Ps256Algorithm(Ps256Algorithm&& other) noexcept
+    : pImpl_(std::move(other.pImpl_)) {}
+
+Ps256Algorithm& Ps256Algorithm::operator=(Ps256Algorithm&& other) noexcept {
+  if (this != &other) {
+    pImpl_ = std::move(other.pImpl_);
+  }
+  return *this;
+}
+
+std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>
+Ps256Algorithm::generateSecureKeyPair(int modulusBits) {
+  if (modulusBits < static_cast<int>(crypto_constants::PS256_MIN_MODULUS_BITS) ||
+      modulusBits > static_cast<int>(crypto_constants::PS256_MAX_MODULUS_BITS)) {
+    throw CryptoError("Requested PS256 modulus size out of policy range");
+  }
+  CAT_LOG_DEBUG("Generating secure PS256 key pair ({} bits)", modulusBits);
+
+  auto pctx = EvpPkeyCtxWrapper(EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr));
+  if (!pctx.get()) {
+    throw CryptoError("Failed to create RSA key context");
+  }
+  if (EVP_PKEY_keygen_init(pctx.get()) <= 0) {
+    throw CryptoError("Failed to initialize RSA key generation");
+  }
+  if (EVP_PKEY_CTX_set_rsa_keygen_bits(pctx.get(), modulusBits) <= 0) {
+    throw CryptoError("Failed to set RSA modulus bits");
+  }
+
+  EVP_PKEY* pkey = nullptr;
+  if (EVP_PKEY_keygen(pctx.get(), &pkey) <= 0) {
+    throw CryptoError("Failed to generate RSA key pair");
+  }
+  auto pkey_wrapper = EvpKeyPtr(pkey);
+
+  // Extract private key into secure memory (PKCS#8 DER).
+  auto priv_bio = BioPtr(BIO_new(BIO_s_mem()));
+  if (!priv_bio.get() || !i2d_PrivateKey_bio(priv_bio.get(), pkey)) {
+    throw CryptoError("Failed to serialize RSA private key");
+  }
+  char* priv_data;
+  long priv_len = BIO_get_mem_data(priv_bio.get(), &priv_data);
+  SecureVector<uint8_t> securePrivateKey(priv_data, priv_data + priv_len);
+  // Scrub the BIO's heap buffer before OpenSSL releases it — the public key
+  // path above has no secret to protect, but this one does.
+  BUF_MEM* bm = nullptr;
+  BIO_get_mem_ptr(priv_bio.get(), &bm);
+  if (bm && bm->data && bm->length > 0) {
+    OPENSSL_cleanse(bm->data, bm->length);
+  }
+
+  // Public key (SubjectPublicKeyInfo DER).
+  auto pub_bio = BioPtr(BIO_new(BIO_s_mem()));
+  if (!pub_bio.get() || !i2d_PUBKEY_bio(pub_bio.get(), pkey)) {
+    throw CryptoError("Failed to serialize RSA public key");
+  }
+  char* pub_data;
+  long pub_len = BIO_get_mem_data(pub_bio.get(), &pub_data);
+  std::vector<uint8_t> publicKey(pub_data, pub_data + pub_len);
+
+  CAT_LOG_DEBUG("Successfully generated secure PS256 key pair");
+  return std::make_pair(std::move(securePrivateKey), std::move(publicKey));
+}
+
+std::vector<uint8_t> Ps256Algorithm::getPublicKey() const {
+  if (!pImpl_->publicKey) return {};
+  auto bio = BioPtr(BIO_new(BIO_s_mem()));
+  if (!bio.get() || !i2d_PUBKEY_bio(bio.get(), pImpl_->publicKey.get())) {
+    return {};
+  }
+  char* data;
+  long len = BIO_get_mem_data(bio.get(), &data);
+  return std::vector<uint8_t>(data, data + len);
+}
+
+std::vector<uint8_t> Ps256Algorithm::signImpl(
+    std::span<const uint8_t> data) const {
+  if (!pImpl_->privateKey) {
+    throw CryptoError("No RSA private key available for signing");
+  }
+  auto mdctx = EvpMdCtxWrapper(EVP_MD_CTX_new());
+  if (!mdctx.get()) throw CryptoError("Failed to create signing context");
+
+  EVP_PKEY_CTX* pctx = nullptr;
+  if (EVP_DigestSignInit(mdctx.get(), &pctx, EVP_sha256(), nullptr,
+                         pImpl_->privateKey.get()) <= 0) {
+    throw CryptoError("Failed to initialize PS256 signing");
+  }
+  configurePs256PssCtx(pctx);
+
+  if (EVP_DigestSignUpdate(mdctx.get(), data.data(), data.size()) <= 0) {
+    throw CryptoError("Failed to update PS256 signing context");
+  }
+
+  size_t sigLen = 0;
+  if (EVP_DigestSignFinal(mdctx.get(), nullptr, &sigLen) <= 0) {
+    throw CryptoError("Failed to determine PS256 signature length");
+  }
+  std::vector<uint8_t> signature(sigLen);
+  if (EVP_DigestSignFinal(mdctx.get(), signature.data(), &sigLen) <= 0) {
+    throw CryptoError("Failed to sign data with PS256");
+  }
+  signature.resize(sigLen);
+  return signature;
+}
+
+bool Ps256Algorithm::verifyImpl(std::span<const uint8_t> data,
+                                std::span<const uint8_t> signature) const {
+  if (!pImpl_->publicKey) return false;
+
+  // PS256 signatures are exactly `modulus/8` bytes. Reject anything else
+  // up front so that an attacker-supplied length cannot steer the OpenSSL
+  // path into inconsistent error handling.
+  const size_t modBytes =
+      (static_cast<size_t>(EVP_PKEY_bits(pImpl_->publicKey.get())) + 7U) / 8U;
+  if (signature.size() != modBytes) return false;
+
+  auto mdctx = EvpMdCtxWrapper(EVP_MD_CTX_new());
+  if (!mdctx.get()) return false;
+
+  EVP_PKEY_CTX* pctx = nullptr;
+  if (EVP_DigestVerifyInit(mdctx.get(), &pctx, EVP_sha256(), nullptr,
+                           pImpl_->publicKey.get()) <= 0) {
+    return false;
+  }
+  try {
+    configurePs256PssCtx(pctx);
+  } catch (const CryptoError&) {
+    return false;
+  }
+
+  if (EVP_DigestVerifyUpdate(mdctx.get(), data.data(), data.size()) <= 0) {
+    return false;
+  }
+  return EVP_DigestVerifyFinal(mdctx.get(), signature.data(),
+                               signature.size()) == 1;
+}
+
+int64_t Ps256Algorithm::algorithmId() const { return ALG_PS256; }
+
+//
 // AES-GCM Algorithm
 //
 
