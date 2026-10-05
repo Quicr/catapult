@@ -516,13 +516,111 @@ TEST_SUITE("RFC 8392 CWT Compliance Tests") {
         {
             auto key = ChaCha20Poly1305Algorithm::generateSecureKey();
             ChaCha20Poly1305Algorithm chachaAlg(key);
-            
+
             auto nonce = ChaCha20Poly1305Algorithm::generateNonce();
             auto encrypted = chachaAlg.encrypt(data, nonce);
             auto decrypted = chachaAlg.decrypt(encrypted, nonce);
-            
+
             CHECK(encrypted != data); // Should be different after encryption
             CHECK(decrypted == data); // Should match original after round trip
         }
+    }
+
+    //
+    // PS256 (RSASSA-PSS SHA-256) CWT round-trip and failure-path coverage.
+    // Mirrors the ES256 cases above so a regression in either algorithm
+    // produces the same shape of test failure.
+    //
+
+    TEST_CASE("PS256 - Create Signed CWT") {
+        auto token = createTestToken();
+        Cwt cwt(ALG_PS256, token);
+        cwt.withKeyId("test-key-ps256");
+
+        auto kp = Ps256Algorithm::generateSecureKeyPair();
+        Ps256Algorithm ps256(kp.first, kp.second);
+
+        REQUIRE_NOTHROW({
+            std::string signedCwt = cwt.createCwtBase64(CwtMode::Signed, ps256);
+            checkBase64UrlEncoding(signedCwt);
+            auto decoded = base64UrlDecode(signedCwt);
+            CHECK_FALSE(decoded.empty());
+        });
+    }
+
+    TEST_CASE("PS256 - Full Round Trip: Create and Validate Signed CWT") {
+        auto originalToken = createTestToken();
+        Cwt originalCwt(ALG_PS256, originalToken);
+        originalCwt.withKeyId("ps256-roundtrip-key");
+
+        auto kp = Ps256Algorithm::generateSecureKeyPair();
+        Ps256Algorithm signingAlg(kp.first, kp.second);
+        Ps256Algorithm verifyAlg(kp.second);  // verify-only
+
+        std::string signedCwt =
+            originalCwt.createCwtBase64(CwtMode::Signed, signingAlg);
+
+        REQUIRE_NOTHROW({
+            Cwt validatedCwt = Cwt::validateCwtBase64(signedCwt, verifyAlg);
+            CHECK(validatedCwt.payload.core.iss == originalToken.core.iss);
+            CHECK(validatedCwt.payload.core.aud == originalToken.core.aud);
+            CHECK(validatedCwt.payload.core.exp == originalToken.core.exp);
+            CHECK(validatedCwt.payload.core.cti == originalToken.core.cti);
+            CHECK(validatedCwt.payload.cat.catv == originalToken.cat.catv);
+            CHECK(validatedCwt.payload.cat.catreplay ==
+                  originalToken.cat.catreplay);
+            // The alg field on the decoded CWT must match what we signed with.
+            CHECK(validatedCwt.header.alg == ALG_PS256);
+        });
+    }
+
+    TEST_CASE("PS256 - Wrong public key fails verification") {
+        auto token = createTestToken();
+        Cwt cwt(ALG_PS256, token);
+
+        auto correct = Ps256Algorithm::generateSecureKeyPair();
+        auto wrong = Ps256Algorithm::generateSecureKeyPair();
+
+        Ps256Algorithm correctAlg(correct.first, correct.second);
+        Ps256Algorithm wrongAlg(wrong.second);
+
+        std::string signedCwt = cwt.createCwtBase64(CwtMode::Signed, correctAlg);
+        CHECK_THROWS_AS(Cwt::validateCwtBase64(signedCwt, wrongAlg), CryptoError);
+    }
+
+    TEST_CASE("PS256 - Tampered CWT fails verification") {
+        auto token = createTestToken();
+        Cwt cwt(ALG_PS256, token);
+
+        auto kp = Ps256Algorithm::generateSecureKeyPair();
+        Ps256Algorithm ps256(kp.first, kp.second);
+        std::string signedCwt = cwt.createCwtBase64(CwtMode::Signed, ps256);
+
+        // Flip a byte in the base64url body — any single-byte change in the
+        // encoded bytes maps to a different decoded structure (payload, sig,
+        // or header), all of which must fail Sig_structure verification.
+        std::string tampered = signedCwt;
+        REQUIRE_FALSE(tampered.empty());
+        size_t pos = std::min<size_t>(10, tampered.size() - 1);
+        tampered[pos] = (tampered[pos] == 'A') ? 'B' : 'A';
+
+        Ps256Algorithm verifyAlg(kp.second);
+        CHECK_THROWS_AS(Cwt::validateCwtBase64(tampered, verifyAlg), CryptoError);
+    }
+
+    TEST_CASE("PS256 - Verifier algorithm mismatch is rejected") {
+        // Sign with PS256 but attempt to verify with ES256 — the token's
+        // header alg (-37) must not match the ES256 verifier (-7) and the
+        // validator should refuse before reaching the crypto path.
+        auto token = createTestToken();
+        Cwt cwt(ALG_PS256, token);
+
+        auto psKp = Ps256Algorithm::generateSecureKeyPair();
+        Ps256Algorithm signer(psKp.first, psKp.second);
+        std::string signedCwt = cwt.createCwtBase64(CwtMode::Signed, signer);
+
+        auto esKp = Es256Algorithm::generateSecureKeyPair();
+        Es256Algorithm wrongAlg(esKp.second);
+        CHECK_THROWS_AS(Cwt::validateCwtBase64(signedCwt, wrongAlg), CryptoError);
     }
 }
