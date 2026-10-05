@@ -507,19 +507,11 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 
     target_link_libraries(moqt_dpop_example catapult)
 
-    # PS256 end-to-end examples. Non-DPoP CWT flow and DPoP JWT flow;
-    # both runnable binaries that exit non-zero on an unexpected result.
-    add_executable(cat_cwt_ps256_example
-            examples/cat_cwt_ps256_example.cpp
-    )
-    target_link_libraries(cat_cwt_ps256_example catapult)
-
-    if(CATAPULT_ENABLE_JSON)
-        add_executable(moqt_dpop_ps256_example
-                examples/moqt_dpop_ps256_example.cpp
-        )
-        target_link_libraries(moqt_dpop_ps256_example catapult)
-    endif()
+    # PS256 is demonstrated by the existing examples:
+    #   * cat_cwt_crypto --sign  — signs the same CAT token with ES256 and PS256
+    #   * moqt_dpop_example      — accepts --alg=ES256|PS256 and
+    #                              --encoding=cwt|jwt (or --all for every combo)
+    # No PS256-specific example targets.
 
     # Focused scenario examples
     add_executable(server_token_issuance examples/server_token_issuance.cpp)
