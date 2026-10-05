@@ -152,7 +152,13 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
   // Use RAII wrapper for EVP_PKEY
   auto pkey_guard = EvpKeyPtr(pkey);
 
-  cbor_item_t* raw_cose_key = cbor_new_definite_map(5);
+  // RSA COSE_Key (RFC 8230 §4) has 4 entries (kty, alg, n, e); EC_P-256
+  // COSE_Key (RFC 8152 §13.1.1) has 5 (kty, alg, crv, x, y). The definite
+  // map header encodes the capacity, so we MUST size it to the exact
+  // number of entries we are going to add; mismatched capacity vs. added
+  // count produces a malformed CBOR body.
+  const size_t cose_key_entries = (alg_id == ALG_PS256) ? 4U : 5U;
+  cbor_item_t* raw_cose_key = cbor_new_definite_map(cose_key_entries);
   if (!raw_cose_key) {
     throw CryptoError("Failed to create COSE_Key map");
   }
@@ -190,6 +196,51 @@ std::vector<uint8_t> createCoseKeyFromDer(int64_t alg_id,
             cose_key.get(), cbor_build_negint8(2),
             cbor_build_bytestring(y_bytes.data(), y_bytes.size()))) {
       throw CryptoError("Failed to build EC COSE_Key");
+    }
+  } else if (alg_id == ALG_PS256) {
+    if (EVP_PKEY_base_id(pkey) != EVP_PKEY_RSA) {
+      throw CryptoError("PS256 COSE_Key requires an RSA DER public key");
+    }
+
+    BIGNUM* n = nullptr;
+    BIGNUM* e = nullptr;
+    if (!EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_N, &n) ||
+        !EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_E, &e)) {
+      if (n) BN_free(n);
+      if (e) BN_free(e);
+      throw CryptoError("Failed to extract RSA n/e for COSE_Key");
+    }
+
+    const int n_len = BN_num_bytes(n);
+    const int e_len = BN_num_bytes(e);
+    if (n_len <= 0 || e_len <= 0) {
+      BN_free(n);
+      BN_free(e);
+      throw CryptoError("Non-positive RSA n or e length for COSE_Key");
+    }
+    std::vector<uint8_t> n_bytes(static_cast<size_t>(n_len));
+    std::vector<uint8_t> e_bytes(static_cast<size_t>(e_len));
+    if (BN_bn2bin(n, n_bytes.data()) != n_len ||
+        BN_bn2bin(e, e_bytes.data()) != e_len) {
+      BN_free(n);
+      BN_free(e);
+      throw CryptoError("Failed to serialize RSA n/e for COSE_Key");
+    }
+    BN_free(n);
+    BN_free(e);
+
+    // RFC 8230 §4: kty=RSA (3), alg=PS256 (-37), -1 = n, -2 = e.
+    if (!safeCborMapAdd(cose_key.get(), cbor_build_uint8(1),
+                        cbor_build_uint8(3)) ||
+        !safeCborMapAdd(cose_key.get(), cbor_build_uint8(3),
+                        cbor_build_negint16(36)) ||
+        !safeCborMapAdd(
+            cose_key.get(), cbor_build_negint8(0),
+            cbor_build_bytestring(n_bytes.data(), n_bytes.size())) ||
+        !safeCborMapAdd(
+            cose_key.get(), cbor_build_negint8(1),
+            cbor_build_bytestring(e_bytes.data(), e_bytes.size()))) {
+      throw CryptoError("Failed to build RSA COSE_Key");
     }
   } else {
     throw CryptoError("Unsupported algorithm for COSE_Key: " +
@@ -1142,6 +1193,8 @@ bool DpopProofValidator::validate_proof(
     const auto& alg_name = proof.get_header().alg;
     if (alg_name == "ES256") {
       proof_alg_id = ALG_ES256;
+    } else if (alg_name == "PS256") {
+      proof_alg_id = ALG_PS256;
     }
     // Anything else stays at 0 and is rejected by the check below.
   }
@@ -1376,6 +1429,12 @@ DpopKeyPair::DpopKeyPair(std::unique_ptr<CryptographicAlgorithm> alg)
       throw CryptoError("Invalid ES256 algorithm instance");
     }
     public_key_der_ = es256_alg->getPublicKey();
+  } else if (alg_id == ALG_PS256) {
+    auto* ps256_alg = dynamic_cast<Ps256Algorithm*>(algorithm_.get());
+    if (!ps256_alg) {
+      throw CryptoError("Invalid PS256 algorithm instance");
+    }
+    public_key_der_ = ps256_alg->getPublicKey();
   } else {
     throw CryptoError("Unsupported algorithm for DPoP: " +
                       std::to_string(alg_id));
@@ -1397,6 +1456,8 @@ std::string DpopKeyPair::get_algorithm_name() const {
   switch (alg_id) {
     case ALG_ES256:
       return "ES256";
+    case ALG_PS256:
+      return "PS256";
     case ALG_HMAC256_256:
       return "HS256";
     default:

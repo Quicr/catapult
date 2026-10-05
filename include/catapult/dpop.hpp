@@ -311,9 +311,10 @@ struct DpopValidationSettings {
    *
    * The intended way to *widen* the set is to add other asymmetric
    * identifiers once the underlying `createAlgorithmFromJWK` /
-   * CWT-verifier plumbing gains support for them (RS256, PS256, EdDSA,
-   * etc.). Until then only ES256 will actually verify — the allowlist
-   * is the policy layer, not the algorithm implementation.
+   * CWT-verifier plumbing gains support for them. Both ES256 (-7) and
+   * PS256 (-37) are implemented and can be enabled by passing
+   * `{ALG_ES256, ALG_PS256}` (or a subset) to this setter; EdDSA / RS256
+   * are not yet implemented and will fail at verify time even if listed.
    */
   void set_allowed_dpop_algorithms(std::unordered_set<int64_t> algs) {
     allowed_dpop_algorithms = std::move(algs);
