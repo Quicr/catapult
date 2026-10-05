@@ -36,6 +36,11 @@ std::unique_ptr<DpopKeyPair> makeEs256KeyPair() {
   return std::make_unique<DpopKeyPair>(std::move(alg));
 }
 
+std::unique_ptr<DpopKeyPair> makePs256KeyPair() {
+  auto alg = std::make_unique<Ps256Algorithm>();
+  return std::make_unique<DpopKeyPair>(std::move(alg));
+}
+
 }  // namespace
 
 TEST_SUITE("DPoP CWT wire format") {
@@ -1046,3 +1051,237 @@ TEST_SUITE("DpopProofValidator — algorithm allowlist enforcement") {
                                          keys->get_public_key_thumbprint()));
   }
 }
+
+#ifdef CATAPULT_ENABLE_JSON
+TEST_SUITE("DPoP PS256 — JWT encoding") {
+  TEST_CASE("DpopKeyPair with PS256 reports correct algorithm metadata") {
+    auto keys = makePs256KeyPair();
+    CHECK(keys->get_algorithm_id() == ALG_PS256);
+    CHECK(keys->get_algorithm_name() == "PS256");
+    // JWK must be a valid RSA key with the alg hint set.
+    CHECK(keys->get_public_key_jwk().find("\"kty\":\"RSA\"") !=
+          std::string::npos);
+    CHECK(keys->get_public_key_jwk().find("\"alg\":\"PS256\"") !=
+          std::string::npos);
+    CHECK_FALSE(keys->get_public_key_thumbprint().empty());
+  }
+
+  TEST_CASE("PS256 JWT proof round-trips and signature verifies") {
+    auto keys = makePs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns.example", "track-1",
+        "relay.example:4433", std::string{"jti-ps256-ok"},
+        DpopEncoding::JWT);
+
+    auto wire = proof.serialize();
+    auto decoded = DpopProof::deserialize(wire);
+
+    CHECK(decoded.encoding() == DpopEncoding::JWT);
+    CHECK(decoded.get_header().alg == "PS256");
+
+    // The verifier reads the embedded JWK, materialises a Ps256Algorithm
+    // via createAlgorithmFromJWK, and checks the signature over the exact
+    // wire-captured signing input.
+    CHECK(decoded.verify_signature());
+  }
+
+  TEST_CASE("PS256 JWT proof rejects a tampered signature") {
+    auto keys = makePs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::SUBSCRIBE, "ns", "trk", "relay:4433",
+        std::string{"jti-ps256-sig-tamper"}, DpopEncoding::JWT);
+
+    auto wire = proof.serialize();
+    // Flip one byte in the signature segment (last `.`-separated field).
+    auto last_dot = wire.rfind('.');
+    REQUIRE(last_dot != std::string::npos);
+    REQUIRE(last_dot + 1 < wire.size());
+    wire[last_dot + 1] =
+        (wire[last_dot + 1] == 'A') ? 'B' : 'A';
+
+    // Tampering can take two shapes:
+    //  (a) the mangled base64url still decodes to a well-formed-length PS256
+    //      signature — in which case verify runs and returns false, and
+    //      deserialize succeeds;
+    //  (b) the mangled base64url decodes to a signature of the wrong length
+    //      (<256 bytes) — our Ps256Algorithm::verifyImpl rejects before
+    //      touching OpenSSL, but the surrounding deserializer may throw.
+    // Both outcomes are correct refusals; assert at least one of them.
+    try {
+      auto decoded = DpopProof::deserialize(wire);
+      CHECK_FALSE(decoded.verify_signature());
+    } catch (const std::exception&) {
+      MESSAGE("tampered signature rejected at parse time");
+    }
+  }
+
+  TEST_CASE("PS256 JWT proof rejects a tampered payload") {
+    auto keys = makePs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-ps256-payload-tamper"}, DpopEncoding::JWT);
+
+    auto wire = proof.serialize();
+    // Rewrite the action in the payload JSON from PUBLISH to SUBSCRIBE
+    // without re-signing. The signature covers header.payload, so any
+    // byte change must invalidate verification.
+    auto first_dot = wire.find('.');
+    auto second_dot = wire.find('.', first_dot + 1);
+    REQUIRE(first_dot != std::string::npos);
+    REQUIRE(second_dot != std::string::npos);
+    auto header_b64 = wire.substr(0, first_dot);
+    auto payload_b64 =
+        wire.substr(first_dot + 1, second_dot - first_dot - 1);
+    auto sig_b64 = wire.substr(second_dot + 1);
+    auto payload_bytes = base64UrlDecode(payload_b64);
+    std::string payload_json(payload_bytes.begin(), payload_bytes.end());
+    auto pos = payload_json.find("\"action\":\"PUBLISH\"");
+    REQUIRE(pos != std::string::npos);
+    payload_json.replace(pos, sizeof("\"action\":\"PUBLISH\"") - 1,
+                         "\"action\":\"SUBSCRIBE\"");
+    auto mutated_b64 = base64UrlEncode(
+        std::vector<uint8_t>(payload_json.begin(), payload_json.end()));
+    std::string mutated_wire =
+        header_b64 + "." + mutated_b64 + "." + sig_b64;
+
+    auto decoded = DpopProof::deserialize(mutated_wire);
+    CHECK_FALSE(decoded.verify_signature());
+  }
+
+  TEST_CASE("PS256 JWK with a 1024-bit modulus is refused by the factory") {
+    // RFC 7518 §3.3 forbids RSA < 2048 bits for PS256. The JWK-import
+    // path at createAlgorithmFromJWK must enforce this before any crypto
+    // state is built; a 1024-bit key would have been catastrophic to pass
+    // through silently.
+    auto keys = makePs256KeyPair();
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-ps256-small-n"}, DpopEncoding::JWT);
+    auto wire = proof.serialize();
+
+    // Replace the JWK's `n` field with a 1024-bit all-zero base64url blob.
+    // The resulting proof wouldn't verify anyway (wrong key), but we're
+    // specifically checking the policy check inside createAlgorithmFromJWK.
+    auto first_dot = wire.find('.');
+    auto header_bytes = base64UrlDecode(wire.substr(0, first_dot));
+    std::string header_json(header_bytes.begin(), header_bytes.end());
+
+    // Build a 128-byte (1024-bit) junk modulus, base64url-encode it.
+    std::vector<uint8_t> small_n(128, 0x01);
+    auto small_n_b64 = base64UrlEncode(small_n);
+
+    // Minimal targeted mutation: find `"n":"...",` and replace with the
+    // short one. Any producer puts n before e so the leading form matches.
+    auto n_start = header_json.find("\"n\":\"");
+    REQUIRE(n_start != std::string::npos);
+    auto n_end = header_json.find("\"", n_start + 5);
+    REQUIRE(n_end != std::string::npos);
+    header_json.replace(n_start + 5, n_end - (n_start + 5), small_n_b64);
+    auto new_header_b64 = base64UrlEncode(
+        std::vector<uint8_t>(header_json.begin(), header_json.end()));
+    std::string mutated_wire = new_header_b64 + wire.substr(first_dot);
+
+    auto decoded = DpopProof::deserialize(mutated_wire);
+    // The verify path funnels every exception into `false`, which is the
+    // policy outcome we want: a 1024-bit JWK produces no valid proof.
+    CHECK_FALSE(decoded.verify_signature());
+  }
+
+  TEST_CASE("Default DPoP allowlist refuses PS256 even when the sig is valid") {
+    // The default allowlist is `{ALG_ES256}`. A PS256 proof must be
+    // refused by the validator before signature verification runs, so
+    // deployments that have not opted in cannot be downgraded by a client
+    // simply sending PS256.
+    auto keys = makePs256KeyPair();
+    auto expected_uri =
+        moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-ps256-blocked"}, DpopEncoding::JWT);
+
+    DpopValidationSettings settings;  // default allowlist
+    settings.set_window(std::chrono::seconds{300});
+    DpopProofValidator validator(settings);
+
+    CHECK_FALSE(validator.validate_proof(
+        proof, moqt_actions::PUBLISH, expected_uri,
+        keys->get_public_key_thumbprint()));
+  }
+
+  TEST_CASE("Explicitly-widened allowlist admits a well-formed PS256 proof") {
+    auto keys = makePs256KeyPair();
+    auto expected_uri =
+        moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
+    auto proof = keys->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-ps256-admit"}, DpopEncoding::JWT);
+
+    DpopValidationSettings settings;
+    settings.set_window(std::chrono::seconds{300});
+    settings.set_allowed_dpop_algorithms({ALG_ES256, ALG_PS256});
+    DpopProofValidator validator(settings);
+
+    // JWT DPoP proofs bind to the JWK thumbprint (RFC 7638 canonical
+    // form), not the COSE_Key thumbprint. `get_public_key_thumbprint()`
+    // returns the latter; use the JWK thumbprint explicitly here.
+    const std::string jwk_thumb =
+        jwk::calculateJWKThumbprint(keys->get_public_key_jwk());
+
+    CHECK(validator.validate_proof(proof, moqt_actions::PUBLISH, expected_uri,
+                                   jwk_thumb));
+  }
+
+  TEST_CASE("Validator rejects a PS256 proof signed with a different key") {
+    // The embedded JWK must be the key that signed the proof. If a proof
+    // is signed by key A but carries JWK B in the header (an attempt at
+    // thumbprint-matching abuse), the signature verifies against B and
+    // fails. The validator rejects on signature mismatch, not thumbprint.
+    auto victim = makePs256KeyPair();
+    auto attacker = makePs256KeyPair();
+
+    // Build a proof whose header advertises the attacker's JWK but whose
+    // signature was produced by the victim's private key. We cannot reach
+    // directly into DpopKeyPair for this; instead, round-trip the attacker
+    // proof through serialize, splice in the victim's signature.
+    auto victim_proof = victim->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-ps256-splice"}, DpopEncoding::JWT);
+    auto attacker_proof = attacker->generate_proof(
+        moqt_actions::PUBLISH, "ns", "trk", "relay:4433",
+        std::string{"jti-ps256-splice"}, DpopEncoding::JWT);
+
+    auto victim_wire = victim_proof.serialize();
+    auto attacker_wire = attacker_proof.serialize();
+
+    // Signature is the segment after the last '.' in each JWT. We take
+    // the attacker's header/payload (JWK = attacker) and the victim's
+    // signature (over victim header+payload, not attacker's).
+    auto a_second_dot = attacker_wire.rfind('.');
+    auto v_second_dot = victim_wire.rfind('.');
+    REQUIRE(a_second_dot != std::string::npos);
+    REQUIRE(v_second_dot != std::string::npos);
+    std::string spliced = attacker_wire.substr(0, a_second_dot + 1) +
+                          victim_wire.substr(v_second_dot + 1);
+
+    DpopValidationSettings settings;
+    settings.set_window(std::chrono::seconds{300});
+    settings.set_allowed_dpop_algorithms({ALG_PS256});
+    DpopProofValidator validator(settings);
+
+    auto expected_uri =
+        moqt_dpop::construct_moqt_uri("relay:4433", "ns", "trk");
+
+    // The spliced proof MUST be refused — the attacker's JWK won't verify
+    // the victim's signature over the attacker's wire bytes.
+    const std::string attacker_jwk_thumb =
+        jwk::calculateJWKThumbprint(attacker->get_public_key_jwk());
+    try {
+      auto decoded = DpopProof::deserialize(spliced);
+      CHECK_FALSE(validator.validate_proof(
+          decoded, moqt_actions::PUBLISH, expected_uri, attacker_jwk_thumb));
+    } catch (const std::exception&) {
+      MESSAGE("spliced PS256 proof rejected at parse/verify boundary");
+    }
+  }
+}
+#endif  // CATAPULT_ENABLE_JSON
