@@ -507,6 +507,20 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 
     target_link_libraries(moqt_dpop_example catapult)
 
+    # PS256 end-to-end examples. Non-DPoP CWT flow and DPoP JWT flow;
+    # both runnable binaries that exit non-zero on an unexpected result.
+    add_executable(cat_cwt_ps256_example
+            examples/cat_cwt_ps256_example.cpp
+    )
+    target_link_libraries(cat_cwt_ps256_example catapult)
+
+    if(CATAPULT_ENABLE_JSON)
+        add_executable(moqt_dpop_ps256_example
+                examples/moqt_dpop_ps256_example.cpp
+        )
+        target_link_libraries(moqt_dpop_ps256_example catapult)
+    endif()
+
     # Focused scenario examples
     add_executable(server_token_issuance examples/server_token_issuance.cpp)
     target_link_libraries(server_token_issuance catapult)
