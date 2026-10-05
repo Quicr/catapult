@@ -188,7 +188,10 @@ auto decryptedCwt = Cwt::validateCwtBase64(encryptedCwt, chachaAlgo);
 
 ## Single Signature Operations
 
-Single signature operations use COSE_Sign1 format with algorithms like ECDSA ES256 or RSA PSS.
+Single signature operations use COSE_Sign1 format. Supported signing
+algorithms today are ECDSA on P-256 with SHA-256 (`ES256`, COSE alg `-7`)
+and RSASSA-PSS with SHA-256 (`PS256`, COSE alg `-37`, 32-byte salt).
+EdDSA / RS256 are not yet implemented.
 
 ### ES256 (ECDSA) Single Signature
 
@@ -225,6 +228,53 @@ try {
     std::cerr << "Signature verification failed: " << e.what() << std::endl;
 }
 ```
+
+### PS256 (RSASSA-PSS) Single Signature
+
+PS256 is the RSASSA-PSS form of RSA signatures (RFC 8230, RFC 7518 §3.5)
+with SHA-256 for both the message digest and the MGF1 digest, and the
+salt length pinned to the hash output (32 bytes). RSA moduli below
+2048 bits (RFC 7518 §3.3) are refused; the implementation also caps the
+upper bound at 8192 bits as a DoS guard against attacker-supplied keys.
+PS256 signatures are probabilistic — two signatures over the same
+message with the same key will differ, and both will verify. The
+on-wire form of the signature is `modulus/8` bytes (256 for a 2048-bit
+key); no DER/raw transcoding is performed by the signer or verifier.
+
+```cpp
+#include "catapult/cwt.hpp"
+#include "catapult/crypto.hpp"
+
+using namespace catapult;
+
+CatToken token;
+// ... populate token fields ...
+
+// Generate a 2048-bit RSA key pair for PS256.
+auto [privateKey, publicKey] = Ps256Algorithm::generateSecureKeyPair();
+
+// For signing (requires private key).
+Ps256Algorithm signAlgo(privateKey, publicKey);
+
+std::string signedCwt = Cwt(ALG_PS256, token)
+    .withKeyId("ps256-key-001")
+    .createCwtBase64(CwtMode::Signed, signAlgo);
+
+// For verification (public key only).
+Ps256Algorithm verifyAlgo(publicKey);
+
+try {
+    auto verifiedCwt = Cwt::validateCwtBase64(signedCwt, verifyAlgo);
+    std::cout << "PS256 verification successful!" << std::endl;
+} catch (const CryptoError& e) {
+    std::cerr << "PS256 verification failed: " << e.what() << std::endl;
+}
+```
+
+PS256 is also supported in the DPoP paths (both CWT and JWT encodings).
+See `examples/moqt_dpop_example.cpp` and run with
+`--alg=PS256 --encoding=cwt`, `--alg=PS256 --encoding=jwt`, or
+`--all` to walk every supported `alg × encoding` combination.
 
 ## Multi Signature Operations
 
