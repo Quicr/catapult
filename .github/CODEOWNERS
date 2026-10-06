@@ -8,5 +8,6 @@
 # the existing entries as the project grows. Multiple handles on one
 # line means "any one of them can satisfy the review."
 
-# Default owner for every file in the repo.
-*                                   @suhasHere
+# Default owners for every file in the repo. Any one of them can satisfy
+# the review requirement; multiple handles on one line is OR, not AND.
+*                                   @suhasHere @fluffy
