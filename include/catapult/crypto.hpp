@@ -17,6 +17,15 @@
 #include "internal/memory_pool.hpp"
 
 #ifdef _WIN32
+// NOMINMAX prevents `<windows.h>` from defining `min`/`max` function-like
+// macros that collide with `std::numeric_limits<...>::max()` and friends.
+// WIN32_LEAN_AND_MEAN keeps the sea of system headers manageable.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #else
 #include <sys/mman.h>

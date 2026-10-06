@@ -17,6 +17,15 @@
 #include <vector>
 
 #ifdef _WIN32
+// `<windows.h>` defines `min` and `max` as function-like macros that
+// collide with `std::numeric_limits<...>::max()` and `std::min/std::max`.
+// Define NOMINMAX before the include so those macros are never introduced.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #else
 #include <sys/mman.h>

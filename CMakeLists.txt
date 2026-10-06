@@ -201,6 +201,14 @@ if(ENABLE_METRICS)
     target_compile_definitions(catapult PUBLIC ENABLE_METRICS)
 endif()
 
+# Windows / MSVC hygiene. These are PUBLIC so downstream consumers that
+# transitively include our headers (which pull in <windows.h>) also get
+# the hygiene — otherwise the min/max macros collide with
+# std::numeric_limits and std::min/std::max in consumer code.
+if(WIN32)
+    target_compile_definitions(catapult PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 # Set compiler flags with enhanced security and warnings
 target_compile_options(catapult PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
