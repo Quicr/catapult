@@ -1,6 +1,16 @@
 #include "catapult/reference_policies.hpp"
 
+#ifdef _WIN32
+// Winsock 2 ships inet_pton and the AF_INET/AF_INET6 constants in
+// <ws2tcpip.h>. The Windows SDK requires that winsock2.h be included
+// before windows.h — any catapult public header that transitively
+// pulled in windows.h would need to be included after this block.
+// Today none of them do, so the ordering is safe.
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
+#endif
 
 #include <cstring>
 #include <stdexcept>
