@@ -15,11 +15,9 @@ jobs:
           # Linux x86_64 (GitHub-hosted, Ubuntu 24.04)
           - os: ubuntu-latest
             arch: x64
-            werror: ON
           # Linux arm64 (GitHub-hosted ARM runners, publicly available since 2025-01)
           - os: ubuntu-24.04-arm
             arch: arm64
-            werror: ON
           # macOS arm64 (macos-latest is Apple Silicon since macos-14).
           # macos-13 (Intel) was dropped because GitHub's Intel-Mac hosted
           # runner queue has been chronically saturated (24h+ waits) —
@@ -27,19 +25,17 @@ jobs:
           # needed again.
           - os: macos-latest
             arch: arm64
-            werror: ON
           # Windows x86_64 (GitHub-hosted, Server 2022).
           # Clients (CAT4MOQ publishers / contribution encoders / desktop
           # viewers) will run on Windows, so the library has to compile
           # cleanly under MSVC v143. Dependency resolution uses the
           # preinstalled vcpkg at $VCPKG_INSTALLATION_ROOT and the manifest
-          # in `vcpkg.json` at the repo root. WERROR starts OFF for this
-          # runner because the MSVC warning set differs from GCC/Clang and
-          # the baseline warnings must be surfaced + triaged before being
-          # promoted to errors.
+          # in `vcpkg.json` at the repo root. Note: WERROR starts OFF on
+          # Windows (see Configure CMake steps below) because the MSVC
+          # warning set differs from GCC/Clang and the baseline warnings
+          # must be surfaced + triaged before being promoted to errors.
           - os: windows-latest
             arch: x64
-            werror: OFF
 
     runs-on: ${{ matrix.os }}
 
@@ -86,14 +82,15 @@ jobs:
         mkdir build
         cd build
         cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON \
-              -DCATAPULT_ENABLE_WERROR=${{ matrix.werror }} \
+              -DCATAPULT_ENABLE_WERROR=ON \
               -DCATAPULT_INSTALL=OFF ..
 
     - name: Configure CMake (Windows)
       # Separate step so we can pass the vcpkg toolchain file and route
       # through PowerShell. The toolchain file wires manifest mode in,
       # so CMake find_package(OpenSSL) + find_package(spdlog) resolve
-      # against the vcpkg-installed artefacts above.
+      # against the vcpkg-installed artefacts above. WERROR is OFF until
+      # the MSVC baseline is clean (see matrix comment).
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
@@ -101,7 +98,7 @@ jobs:
         cmake -S . -B build `
           -DCMAKE_BUILD_TYPE=Release `
           -DENABLE_LOGGING=ON `
-          -DCATAPULT_ENABLE_WERROR=${{ matrix.werror }} `
+          -DCATAPULT_ENABLE_WERROR=OFF `
           -DCATAPULT_INSTALL=OFF `
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
           -DVCPKG_TARGET_TRIPLET=x64-windows
