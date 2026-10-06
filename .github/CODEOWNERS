@@ -1,0 +1,12 @@
+# Code owners for the catapult repo.
+#
+# GitHub consults this file to decide who must review a pull request
+# when branch protection has "Require review from Code Owners" enabled.
+# Last matching rule wins; patterns are gitignore-style.
+#
+# Add additional reviewers (individuals or @Quicr/<team-slug>) alongside
+# the existing entries as the project grows. Multiple handles on one
+# line means "any one of them can satisfy the review."
+
+# Default owner for every file in the repo.
+*                                   @suhasHere
