@@ -203,10 +203,23 @@ endif()
 
 # Windows / MSVC hygiene. These are PUBLIC so downstream consumers that
 # transitively include our headers (which pull in <windows.h>) also get
-# the hygiene — otherwise the min/max macros collide with
-# std::numeric_limits and std::min/std::max in consumer code.
+# the hygiene. Without them, the Windows SDK leaks a long tail of macros
+# that break portable C++ identifiers used throughout catapult:
+#   NOMINMAX              - keeps min/max macros out of std::numeric_limits
+#                           and std::min/std::max call sites.
+#   NOGDI                 - keeps wingdi.h out, which otherwise defines
+#                           ERROR, DELETE, IN, OUT, OPTIONAL as macros
+#                           and breaks every scoped-enum member or local
+#                           named with the same identifier (e.g.
+#                           LogLevel::ERROR).
+#   WIN32_LEAN_AND_MEAN   - trims the system-header fan-in to the subset
+#                           catapult actually depends on.
 if(WIN32)
-    target_compile_definitions(catapult PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_definitions(catapult PUBLIC
+        NOMINMAX
+        NOGDI
+        WIN32_LEAN_AND_MEAN
+    )
 endif()
 
 # Set compiler flags with enhanced security and warnings

@@ -17,15 +17,23 @@
 #include <vector>
 
 #ifdef _WIN32
-// `<windows.h>` defines `min` and `max` as function-like macros that
-// collide with `std::numeric_limits<...>::max()` and `std::min/std::max`.
-// Define NOMINMAX before the include so those macros are never introduced.
+// Suppress Windows SDK macros that collide with portable C++ identifiers
+// used throughout catapult: `min`/`max` (via wingdi.h and others) break
+// `std::numeric_limits<T>::max()`; `ERROR`, `DELETE`, `IN`, `OUT`, etc.
+// (via wingdi.h) break the `LogLevel::ERROR` enumerator and other
+// scoped-enum members. NOGDI stops wingdi.h from being pulled in by
+// windows.h; NOMINMAX stops the min/max defines; WIN32_LEAN_AND_MEAN
+// trims the rest of the header fan-in.
 #ifndef NOMINMAX
 #define NOMINMAX
+#endif
+#ifndef NOGDI
+#define NOGDI
 #endif
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#include <malloc.h>  // _aligned_malloc / _aligned_free
 #include <windows.h>
 #else
 #include <sys/mman.h>
@@ -33,6 +41,31 @@
 #endif
 
 namespace catapult {
+
+// Portable aligned allocation. MSVC's STL does not ship `std::aligned_alloc`
+// (C11, adopted by C++17 but opt-out for MSVC) — it exposes `_aligned_malloc`
+// instead, with the arguments reversed, and the matching free function is
+// `_aligned_free` (plain `free()` on a `_aligned_malloc` pointer is UB). On
+// POSIX we route through `std::aligned_alloc` / `std::free` as before.
+//
+// The caller MUST pass a `size` that is a multiple of `align` (C11 §7.22.3.1
+// requirement). Both call sites in SecureAllocator already round up the
+// requested size to the alignment, so this contract is satisfied today.
+inline void* secureAlignedAlloc(size_t align, size_t size) noexcept {
+#ifdef _MSC_VER
+  return _aligned_malloc(size, align);
+#else
+  return std::aligned_alloc(align, size);
+#endif
+}
+
+inline void secureAlignedFree(void* ptr) noexcept {
+#ifdef _MSC_VER
+  _aligned_free(ptr);
+#else
+  std::free(ptr);
+#endif
+}
 
 /**
  * @brief Secure memory allocator for sensitive cryptographic data
@@ -86,7 +119,7 @@ class SecureAllocator {
                                : alignof(T);
       size_t alloc_size =
           ((size + alloc_align - 1) / alloc_align) * alloc_align;
-      T* ptr = static_cast<T*>(std::aligned_alloc(alloc_align, alloc_size));
+      T* ptr = static_cast<T*>(secureAlignedAlloc(alloc_align, alloc_size));
       if (!ptr) throw std::bad_alloc();
       lockMemory(ptr, size);
       return ptr;
@@ -97,7 +130,7 @@ class SecureAllocator {
     }
     size_t aligned_size = ((size + page_size - 1) / page_size) * page_size;
 
-    T* ptr = static_cast<T*>(std::aligned_alloc(page_size, aligned_size));
+    T* ptr = static_cast<T*>(secureAlignedAlloc(page_size, aligned_size));
     if (!ptr) throw std::bad_alloc();
 
     lockMemory(ptr, aligned_size);
@@ -120,7 +153,7 @@ class SecureAllocator {
         // kernel handles page-granular mlock/munlock rounding internally.
         secureZero(ptr, size);
         unlockMemory(ptr, size);
-        std::free(ptr);
+        secureAlignedFree(ptr);
         return;
       }
 
