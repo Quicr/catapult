@@ -47,7 +47,17 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+// PSAPI exposes `GetProcessMemoryInfo`, the Windows analogue of POSIX
+// `getrusage(RUSAGE_SELF, ...).ru_maxrss`. windows.h must be included
+// before psapi.h; both pull in further Win32 noise, so the NOGDI /
+// NOMINMAX / WIN32_LEAN_AND_MEAN defines applied project-wide via
+// CMakeLists.txt are what keep this include block well-behaved.
+#include <windows.h>
+#include <psapi.h>
+#else
 #include <sys/resource.h>
+#endif
 
 #include "catapult/catapult.hpp"
 #include "catapult/metrics.hpp"
@@ -166,6 +176,15 @@ uint64_t percentile(const std::vector<uint64_t>& sorted, double p) {
 }
 
 long peakRssKb() {
+#ifdef _WIN32
+  // PROCESS_MEMORY_COUNTERS::PeakWorkingSetSize is bytes; harness
+  // convention (matching Linux ru_maxrss) is kilobytes.
+  PROCESS_MEMORY_COUNTERS pmc{};
+  if (!GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
+    return 0;
+  }
+  return static_cast<long>(pmc.PeakWorkingSetSize / 1024);
+#else
   struct rusage ru {};
   if (getrusage(RUSAGE_SELF, &ru) != 0) return 0;
   // Darwin reports bytes; Linux reports kilobytes.
@@ -173,6 +192,7 @@ long peakRssKb() {
   return static_cast<long>(ru.ru_maxrss / 1024);
 #else
   return static_cast<long>(ru.ru_maxrss);
+#endif
 #endif
 }
 

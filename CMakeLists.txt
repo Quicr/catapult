@@ -571,6 +571,12 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     if(CATAPULT_ENABLE_JSON)
         add_executable(catapult_load_harness perf/load_harness.cpp)
         target_link_libraries(catapult_load_harness catapult)
+        # peakRssKb() uses GetProcessMemoryInfo on Windows; the symbol
+        # lives in psapi.lib. On POSIX getrusage is in libc so no extra
+        # link needed.
+        if(WIN32)
+            target_link_libraries(catapult_load_harness psapi)
+        endif()
     endif()
 
     # Performance tests (using Catch2)
