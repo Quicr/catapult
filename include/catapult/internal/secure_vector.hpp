@@ -162,7 +162,7 @@ class SecureAllocator {
       secureZero(ptr, aligned_size);
       unlockMemory(ptr, aligned_size);
 
-      std::free(ptr);
+      secureAlignedFree(ptr);
     }
   }
 
