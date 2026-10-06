@@ -10,13 +10,13 @@
  * 4. Output results in hex format
  */
 
-#include <getopt.h>
-
 #include <chrono>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <string>
 #include <vector>
 
 #include "catapult/base64.hpp"
@@ -446,46 +446,36 @@ int main(int argc, char* argv[]) {
   bool perform_all = false;
   bool single_mode = true;  // Default to single mode
 
-  // Command line options
-  static struct option long_options[] = {
-      {"mac", no_argument, 0, 'm'},      {"sign", no_argument, 0, 's'},
-      {"encrypt", no_argument, 0, 'e'},  {"single", no_argument, 0, '1'},
-      {"multiple", no_argument, 0, '2'}, {"all", no_argument, 0, 'a'},
-      {"help", no_argument, 0, 'h'},     {0, 0, 0, 0}};
+  // Hand-rolled flag parser — avoids the GNU-only `<getopt.h>` so this
+  // example builds under MSVC as well. The accepted flag set matches
+  // what print_usage() documents; short and long forms are both honoured.
+  auto arg_matches = [](const char* arg, const char* short_flag,
+                        const char* long_flag) {
+    return std::strcmp(arg, short_flag) == 0 ||
+           std::strcmp(arg, long_flag) == 0;
+  };
 
-  int option_index = 0;
-  int c;
-
-  while ((c = getopt_long(argc, argv, "mse12ah", long_options,
-                          &option_index)) != -1) {
-    switch (c) {
-      case 'm':
-        perform_mac = true;
-        break;
-      case 's':
-        perform_sign = true;
-        break;
-      case 'e':
-        perform_encrypt = true;
-        break;
-      case '1':
-        single_mode = true;
-        break;
-      case '2':
-        single_mode = false;
-        break;
-      case 'a':
-        perform_all = true;
-        break;
-      case 'h':
-        print_usage(argv[0]);
-        return 0;
-      case '?':
-        print_usage(argv[0]);
-        return 1;
-      default:
-        print_usage(argv[0]);
-        return 1;
+  for (int i = 1; i < argc; ++i) {
+    const char* a = argv[i];
+    if (arg_matches(a, "-m", "--mac")) {
+      perform_mac = true;
+    } else if (arg_matches(a, "-s", "--sign")) {
+      perform_sign = true;
+    } else if (arg_matches(a, "-e", "--encrypt")) {
+      perform_encrypt = true;
+    } else if (std::strcmp(a, "--single") == 0) {
+      single_mode = true;
+    } else if (std::strcmp(a, "--multiple") == 0) {
+      single_mode = false;
+    } else if (arg_matches(a, "-a", "--all")) {
+      perform_all = true;
+    } else if (arg_matches(a, "-h", "--help")) {
+      print_usage(argv[0]);
+      return 0;
+    } else {
+      std::cerr << "Unknown argument: " << a << "\n";
+      print_usage(argv[0]);
+      return 1;
     }
   }
 
