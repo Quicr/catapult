@@ -410,7 +410,8 @@ class Ps256Algorithm : public CryptographicAlgorithm {
   /**
    * @brief Generate PS256 key pair with secure memory for private key
    * @param modulusBits RSA modulus size in bits; must satisfy
-   *                    PS256_MIN_MODULUS_BITS <= modulusBits <= PS256_MAX_MODULUS_BITS
+   *                    PS256_MIN_MODULUS_BITS <= modulusBits <=
+   * PS256_MAX_MODULUS_BITS
    * @return Pair of (private key in secure storage, DER public key)
    */
   static std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>

@@ -72,8 +72,8 @@ std::string createES256JWK(const std::vector<uint8_t>& public_key_der) {
 
 std::string createPS256JWK(const std::vector<uint8_t>& public_key_der) {
   const uint8_t* data = public_key_der.data();
-  EVP_PKEY* pkey = d2i_PUBKEY(nullptr, &data,
-                              static_cast<long>(public_key_der.size()));
+  EVP_PKEY* pkey =
+      d2i_PUBKEY(nullptr, &data, static_cast<long>(public_key_der.size()));
   if (!pkey) {
     throw CryptoError("Failed to parse RSA public key DER");
   }

@@ -798,8 +798,10 @@ Ps256Algorithm& Ps256Algorithm::operator=(Ps256Algorithm&& other) noexcept {
 
 std::pair<SecureVector<uint8_t>, std::vector<uint8_t>>
 Ps256Algorithm::generateSecureKeyPair(int modulusBits) {
-  if (modulusBits < static_cast<int>(crypto_constants::PS256_MIN_MODULUS_BITS) ||
-      modulusBits > static_cast<int>(crypto_constants::PS256_MAX_MODULUS_BITS)) {
+  if (modulusBits <
+          static_cast<int>(crypto_constants::PS256_MIN_MODULUS_BITS) ||
+      modulusBits >
+          static_cast<int>(crypto_constants::PS256_MAX_MODULUS_BITS)) {
     throw CryptoError("Requested PS256 modulus size out of policy range");
   }
   CAT_LOG_DEBUG("Generating secure PS256 key pair ({} bits)", modulusBits);

@@ -380,10 +380,10 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
     // Both lengths are now bounded in `size_t` and comfortably fit `int`,
     // so the cast is safe — but keep the explicit widening to make the
     // boundary visible to anyone auditing the BN API usage later.
-    BIGNUM* n_bn = BN_bin2bn(n_bytes.data(), static_cast<int>(n_bytes.size()),
-                             nullptr);
-    BIGNUM* e_bn = BN_bin2bn(e_bytes.data(), static_cast<int>(e_bytes.size()),
-                             nullptr);
+    BIGNUM* n_bn =
+        BN_bin2bn(n_bytes.data(), static_cast<int>(n_bytes.size()), nullptr);
+    BIGNUM* e_bn =
+        BN_bin2bn(e_bytes.data(), static_cast<int>(e_bytes.size()), nullptr);
     if (!n_bn || !e_bn) {
       if (n_bn) BN_free(n_bn);
       if (e_bn) BN_free(e_bn);
