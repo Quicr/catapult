@@ -25,6 +25,17 @@ jobs:
           # needed again.
           - os: macos-latest
             arch: arm64
+          # Windows x86_64 (GitHub-hosted, Server 2022).
+          # Clients (CAT4MOQ publishers / contribution encoders / desktop
+          # viewers) will run on Windows, so the library has to compile
+          # cleanly under MSVC v143. Dependency resolution uses the
+          # preinstalled vcpkg at $VCPKG_INSTALLATION_ROOT and the manifest
+          # in `vcpkg.json` at the repo root. Note: WERROR starts OFF on
+          # Windows (see Configure CMake steps below) because the MSVC
+          # warning set differs from GCC/Clang and the baseline warnings
+          # must be surfaced + triaged before being promoted to errors.
+          - os: windows-latest
+            arch: x64
 
     runs-on: ${{ matrix.os }}
 
@@ -45,27 +56,60 @@ jobs:
       run: |
         brew install cmake openssl clang-format
 
-    - name: Configure CMake
+    - name: Set up dependencies (Windows / vcpkg)
+      # The GitHub-hosted windows-latest image preinstalls vcpkg at
+      # $env:VCPKG_INSTALLATION_ROOT. Running `vcpkg install` here with
+      # the repo's `vcpkg.json` fetches OpenSSL + spdlog in manifest mode
+      # before CMake configure. If vcpkg is ever absent from the image,
+      # this step fails loudly rather than silently falling back.
+      if: startsWith(matrix.os, 'windows-')
+      shell: pwsh
+      run: |
+        if (-not $env:VCPKG_INSTALLATION_ROOT) {
+          Write-Error "VCPKG_INSTALLATION_ROOT is not set on the runner image"
+          exit 1
+        }
+        & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install --triplet x64-windows
+
+    - name: Configure CMake (Unix)
       # Scope: build + unit tests only. The install/export contract is
       # covered by the install-consumer job (which apt-installs a system
       # nlohmann_json). Disabling CATAPULT_INSTALL here sidesteps the
       # CMakeLists.txt guard that fatal-errors when JSON was resolved via
       # the vendored submodule.
+      if: runner.os != 'Windows'
       run: |
         mkdir build
         cd build
         cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LOGGING=ON \
-              -DCATAPULT_ENABLE_WERROR=ON -DCATAPULT_INSTALL=OFF ..
+              -DCATAPULT_ENABLE_WERROR=ON \
+              -DCATAPULT_INSTALL=OFF ..
+
+    - name: Configure CMake (Windows)
+      # Separate step so we can pass the vcpkg toolchain file and route
+      # through PowerShell. The toolchain file wires manifest mode in,
+      # so CMake find_package(OpenSSL) + find_package(spdlog) resolve
+      # against the vcpkg-installed artefacts above. WERROR is OFF until
+      # the MSVC baseline is clean (see matrix comment).
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path build | Out-Null
+        cmake -S . -B build `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DENABLE_LOGGING=ON `
+          -DCATAPULT_ENABLE_WERROR=OFF `
+          -DCATAPULT_INSTALL=OFF `
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+          -DVCPKG_TARGET_TRIPLET=x64-windows
 
     - name: Build
       run: |
-        cd build
-        cmake --build . --config Release
+        cmake --build build --config Release
 
     - name: Run tests
       run: |
-        cd build
-        ctest --output-on-failure --build-config Release
+        ctest --test-dir build --output-on-failure --build-config Release
 
     - name: Upload test results
       if: failure()

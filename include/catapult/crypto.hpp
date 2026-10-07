@@ -16,12 +16,14 @@
 
 #include "internal/memory_pool.hpp"
 
-#ifdef _WIN32
-#include <windows.h>
-#else
+#ifndef _WIN32
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
+// Note: crypto.hpp does not reference any symbol from <windows.h>; the
+// Windows memory-locking primitives live in internal/secure_vector.hpp,
+// which includes <windows.h> under its own guard. Keeping this header
+// free of <windows.h> avoids an unnecessary macro-leakage surface here.
 
 #include "base64.hpp"
 #include "error.hpp"

@@ -116,6 +116,14 @@ target_link_libraries(catapult
     PUBLIC  OpenSSL::Crypto OpenSSL::SSL
 )
 
+# On Windows, inet_pton (used by src/reference_policies.cpp) lives in
+# Winsock 2. The symbol is in ws2_32.lib; link it so the catapult target
+# resolves. PRIVATE because the dependency is purely an implementation
+# detail — the public catapult headers do not re-export Winsock types.
+if(WIN32)
+    target_link_libraries(catapult PRIVATE ws2_32)
+endif()
+
 # libcbor's public headers are consumed by catapult's .cpp files and by
 # `internal/cbor_owned.hpp` in the private include path. Ensure the
 # compiler can find them during the catapult build without exporting the
@@ -199,6 +207,27 @@ endif()
 # no-ops and the hot-path instrumentation is a hard zero.
 if(ENABLE_METRICS)
     target_compile_definitions(catapult PUBLIC ENABLE_METRICS)
+endif()
+
+# Windows / MSVC hygiene. These are PUBLIC so downstream consumers that
+# transitively include our headers (which pull in <windows.h>) also get
+# the hygiene. Without them, the Windows SDK leaks a long tail of macros
+# that break portable C++ identifiers used throughout catapult:
+#   NOMINMAX              - keeps min/max macros out of std::numeric_limits
+#                           and std::min/std::max call sites.
+#   NOGDI                 - keeps wingdi.h out, which otherwise defines
+#                           ERROR, DELETE, IN, OUT, OPTIONAL as macros
+#                           and breaks every scoped-enum member or local
+#                           named with the same identifier (e.g.
+#                           LogLevel::ERROR).
+#   WIN32_LEAN_AND_MEAN   - trims the system-header fan-in to the subset
+#                           catapult actually depends on.
+if(WIN32)
+    target_compile_definitions(catapult PUBLIC
+        NOMINMAX
+        NOGDI
+        WIN32_LEAN_AND_MEAN
+    )
 endif()
 
 # Set compiler flags with enhanced security and warnings
@@ -542,6 +571,12 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     if(CATAPULT_ENABLE_JSON)
         add_executable(catapult_load_harness perf/load_harness.cpp)
         target_link_libraries(catapult_load_harness catapult)
+        # peakRssKb() uses GetProcessMemoryInfo on Windows; the symbol
+        # lives in psapi.lib. On POSIX getrusage is in libc so no extra
+        # link needed.
+        if(WIN32)
+            target_link_libraries(catapult_load_harness psapi)
+        endif()
     endif()
 
     # Performance tests (using Catch2)
