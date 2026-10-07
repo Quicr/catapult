@@ -586,11 +586,12 @@ std::vector<uint8_t> es256DerToRaw(std::span<const uint8_t> der) {
     throw CryptoError("ECDSA signature component exceeds 32 bytes");
   }
   // Left-pad each component to exactly 32 bytes (big-endian). rBytes/sBytes
-  // are already bounded >= 0 (BN_num_bytes contract) and <= kEs256ComponentBytes
-  // by the check above, so the subtraction is non-negative — cast each int
-  // to size_t up front to keep the pointer offset in unsigned arithmetic.
-  BN_bn2bin(
-      r, raw.data() + (kEs256ComponentBytes - static_cast<size_t>(rBytes)));
+  // are already bounded >= 0 (BN_num_bytes contract) and <=
+  // kEs256ComponentBytes by the check above, so the subtraction is non-negative
+  // — cast each int to size_t up front to keep the pointer offset in unsigned
+  // arithmetic.
+  BN_bn2bin(r,
+            raw.data() + (kEs256ComponentBytes - static_cast<size_t>(rBytes)));
   BN_bn2bin(s, raw.data() + kEs256ComponentBytes +
                    (kEs256ComponentBytes - static_cast<size_t>(sBytes)));
   ECDSA_SIG_free(sig);
@@ -1179,9 +1180,9 @@ std::vector<uint8_t> AesGcmAlgorithm::decryptImpl(
   // Decrypt data
   std::vector<uint8_t> plaintext(ciphertext_len);
   int len;
-  if (EVP_DecryptUpdate(
-          ctx.get(), plaintext.data(), &len, ciphertext,
-          toOpenSslInt(ciphertext_len, "AES-GCM ciphertext")) != 1) {
+  if (EVP_DecryptUpdate(ctx.get(), plaintext.data(), &len, ciphertext,
+                        toOpenSslInt(ciphertext_len, "AES-GCM ciphertext")) !=
+      1) {
     throw CryptoError("Failed to decrypt data");
   }
   int plaintext_len = len;
@@ -1369,9 +1370,9 @@ std::vector<uint8_t> ChaCha20Poly1305Algorithm::decryptImpl(
   // Decrypt data
   std::vector<uint8_t> plaintext(ciphertext_len);
   int len;
-  if (EVP_DecryptUpdate(
-          ctx.get(), plaintext.data(), &len, ciphertext,
-          toOpenSslInt(ciphertext_len, "ChaCha20 ciphertext")) != 1) {
+  if (EVP_DecryptUpdate(ctx.get(), plaintext.data(), &len, ciphertext,
+                        toOpenSslInt(ciphertext_len, "ChaCha20 ciphertext")) !=
+      1) {
     throw CryptoError("Failed to decrypt data");
   }
   int plaintext_len = len;
