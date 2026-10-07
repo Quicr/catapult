@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstring>
+#include <limits>
 #include <memory>
 
 #include "catapult/base64.hpp"
@@ -22,6 +23,21 @@
 #include "catapult/logging.hpp"
 
 namespace catapult {
+
+namespace {
+// OpenSSL takes `int` for buffer sizes on EVP_*Update / HMAC / BIO_new_mem_buf.
+// When a caller hands us a span/vector whose size exceeds INT_MAX, silently
+// narrowing produces a shorter encrypt/decrypt than requested — a corruption
+// / availability hazard at CDN scale. Fail closed with a CryptoError instead
+// so the narrowing is explicit at every call site.
+int toOpenSslInt(size_t n, const char* what) {
+  if (n > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    throw CryptoError(std::string("buffer size exceeds OpenSSL int limit: ") +
+                      what);
+  }
+  return static_cast<int>(n);
+}
+}  // namespace
 
 // RAII deleter implementations
 void EvpKeyDeleter::operator()(EVP_PKEY* key) const noexcept {
@@ -349,8 +365,11 @@ std::vector<uint8_t> HmacSha256Algorithm::signImpl(
   SecureVector<uint8_t> secure_result(EVP_MAX_MD_SIZE);
   unsigned int len;
 
-  if (!HMAC(EVP_sha256(), key_.data(), key_.size(), data.data(), data.size(),
-            secure_result.data(), &len)) {
+  // HMAC(3) takes `int` for key_len but `size_t` for the data length `n`,
+  // so only the key size is narrowed here — the data span passes through
+  // unmodified.
+  if (!HMAC(EVP_sha256(), key_.data(), toOpenSslInt(key_.size(), "HMAC key"),
+            data.data(), data.size(), secure_result.data(), &len)) {
     throw CryptoError("HMAC signing failed");
   }
 
@@ -406,7 +425,8 @@ void Es256Algorithm::initializeImpl() {
 }
 
 void Es256Algorithm::loadPrivateKey(const uint8_t* keyData, size_t keySize) {
-  auto priv_bio = BioPtr(BIO_new_mem_buf(keyData, keySize));
+  auto priv_bio =
+      BioPtr(BIO_new_mem_buf(keyData, toOpenSslInt(keySize, "ES256 priv DER")));
   pImpl_->privateKey.reset(d2i_PrivateKey_bio(priv_bio.get(), nullptr));
 
   if (!pImpl_->privateKey) {
@@ -415,7 +435,8 @@ void Es256Algorithm::loadPrivateKey(const uint8_t* keyData, size_t keySize) {
 }
 
 void Es256Algorithm::loadPublicKey(const uint8_t* keyData, size_t keySize) {
-  auto pub_bio = BioPtr(BIO_new_mem_buf(keyData, keySize));
+  auto pub_bio =
+      BioPtr(BIO_new_mem_buf(keyData, toOpenSslInt(keySize, "ES256 pub DER")));
   pImpl_->publicKey.reset(d2i_PUBKEY_bio(pub_bio.get(), nullptr));
 
   if (!pImpl_->publicKey) {
@@ -564,10 +585,14 @@ std::vector<uint8_t> es256DerToRaw(std::span<const uint8_t> der) {
     ECDSA_SIG_free(sig);
     throw CryptoError("ECDSA signature component exceeds 32 bytes");
   }
-  // Left-pad each component to exactly 32 bytes (big-endian).
-  BN_bn2bin(r, raw.data() + (kEs256ComponentBytes - rBytes));
+  // Left-pad each component to exactly 32 bytes (big-endian). rBytes/sBytes
+  // are already bounded >= 0 (BN_num_bytes contract) and <= kEs256ComponentBytes
+  // by the check above, so the subtraction is non-negative — cast each int
+  // to size_t up front to keep the pointer offset in unsigned arithmetic.
   BN_bn2bin(
-      s, raw.data() + kEs256ComponentBytes + (kEs256ComponentBytes - sBytes));
+      r, raw.data() + (kEs256ComponentBytes - static_cast<size_t>(rBytes)));
+  BN_bn2bin(s, raw.data() + kEs256ComponentBytes +
+                   (kEs256ComponentBytes - static_cast<size_t>(sBytes)));
   ECDSA_SIG_free(sig);
   return raw;
 }
@@ -978,7 +1003,7 @@ SecureVector<uint8_t> AesGcmAlgorithm::generateSecureKey(size_t keySize) {
 
   CAT_LOG_DEBUG("Generating secure AES key of {} bytes", keySize);
   SecureVector<uint8_t> key(keySize);
-  if (RAND_bytes(key.data(), keySize) != 1) {
+  if (RAND_bytes(key.data(), toOpenSslInt(keySize, "AES key size")) != 1) {
     CAT_LOG_ERROR("Failed to generate random bytes for AES key");
     unsigned long err = ERR_get_error();
     if (err == 0) {
@@ -1067,7 +1092,7 @@ std::vector<uint8_t> AesGcmAlgorithm::encryptImpl(
   std::vector<uint8_t> ciphertext(data.size() + crypto_constants::GCM_TAG_SIZE);
   int len;
   if (EVP_EncryptUpdate(ctx.get(), ciphertext.data(), &len, data.data(),
-                        data.size()) != 1) {
+                        toOpenSslInt(data.size(), "AES-GCM plaintext")) != 1) {
     throw CryptoError("Failed to encrypt data");
   }
   int ciphertext_len = len;
@@ -1085,7 +1110,8 @@ std::vector<uint8_t> AesGcmAlgorithm::encryptImpl(
     throw CryptoError("Failed to get AES-GCM authentication tag");
   }
 
-  ciphertext.resize(ciphertext_len + crypto_constants::GCM_TAG_SIZE);
+  ciphertext.resize(static_cast<size_t>(ciphertext_len) +
+                    crypto_constants::GCM_TAG_SIZE);
   return ciphertext;
 }
 
@@ -1153,8 +1179,9 @@ std::vector<uint8_t> AesGcmAlgorithm::decryptImpl(
   // Decrypt data
   std::vector<uint8_t> plaintext(ciphertext_len);
   int len;
-  if (EVP_DecryptUpdate(ctx.get(), plaintext.data(), &len, ciphertext,
-                        ciphertext_len) != 1) {
+  if (EVP_DecryptUpdate(
+          ctx.get(), plaintext.data(), &len, ciphertext,
+          toOpenSslInt(ciphertext_len, "AES-GCM ciphertext")) != 1) {
     throw CryptoError("Failed to decrypt data");
   }
   int plaintext_len = len;
@@ -1167,7 +1194,7 @@ std::vector<uint8_t> AesGcmAlgorithm::decryptImpl(
   }
   plaintext_len += len;
 
-  plaintext.resize(plaintext_len);
+  plaintext.resize(static_cast<size_t>(plaintext_len));
   return plaintext;
 }
 
@@ -1268,7 +1295,7 @@ std::vector<uint8_t> ChaCha20Poly1305Algorithm::encryptImpl(
                                   crypto_constants::ChaCha20_TAG_SIZE);
   int len;
   if (EVP_EncryptUpdate(ctx.get(), ciphertext.data(), &len, data.data(),
-                        data.size()) != 1) {
+                        toOpenSslInt(data.size(), "ChaCha20 plaintext")) != 1) {
     throw CryptoError("Failed to encrypt data");
   }
   int ciphertext_len = len;
@@ -1286,7 +1313,8 @@ std::vector<uint8_t> ChaCha20Poly1305Algorithm::encryptImpl(
     throw CryptoError("Failed to get ChaCha20-Poly1305 authentication tag");
   }
 
-  ciphertext.resize(ciphertext_len + crypto_constants::ChaCha20_TAG_SIZE);
+  ciphertext.resize(static_cast<size_t>(ciphertext_len) +
+                    crypto_constants::ChaCha20_TAG_SIZE);
   return ciphertext;
 }
 
@@ -1341,8 +1369,9 @@ std::vector<uint8_t> ChaCha20Poly1305Algorithm::decryptImpl(
   // Decrypt data
   std::vector<uint8_t> plaintext(ciphertext_len);
   int len;
-  if (EVP_DecryptUpdate(ctx.get(), plaintext.data(), &len, ciphertext,
-                        ciphertext_len) != 1) {
+  if (EVP_DecryptUpdate(
+          ctx.get(), plaintext.data(), &len, ciphertext,
+          toOpenSslInt(ciphertext_len, "ChaCha20 ciphertext")) != 1) {
     throw CryptoError("Failed to decrypt data");
   }
   int plaintext_len = len;
@@ -1356,7 +1385,7 @@ std::vector<uint8_t> ChaCha20Poly1305Algorithm::decryptImpl(
   }
   plaintext_len += len;
 
-  plaintext.resize(plaintext_len);
+  plaintext.resize(static_cast<size_t>(plaintext_len));
   return plaintext;
 }
 

@@ -25,7 +25,8 @@ namespace jwk {
 std::string createES256JWK(const std::vector<uint8_t>& public_key_der) {
   // Parse DER-encoded public key using modern OpenSSL 3.0 API
   const uint8_t* data = public_key_der.data();
-  EVP_PKEY* pkey = d2i_PUBKEY(nullptr, &data, public_key_der.size());
+  EVP_PKEY* pkey =
+      d2i_PUBKEY(nullptr, &data, static_cast<long>(public_key_der.size()));
   if (!pkey) {
     throw CryptoError("Failed to parse public key DER");
   }
@@ -33,8 +34,6 @@ std::string createES256JWK(const std::vector<uint8_t>& public_key_der) {
   // Extract EC parameters using OpenSSL 3.0 API
   BIGNUM* x = BN_new();
   BIGNUM* y = BN_new();
-
-  size_t x_len = 0, y_len = 0;
 
   // Get the raw EC point coordinates
   if (!EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_EC_PUB_X, &x) ||

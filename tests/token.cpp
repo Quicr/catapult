@@ -251,7 +251,7 @@ TEST_CASE("MOQT Actions Compile Time") {
     const auto& scopes = moqt_claims->getScopes();
     REQUIRE(scopes[0].contains_action(moqt_actions::SUBSCRIBE));
     REQUIRE(scopes[0].contains_action(moqt_actions::PUBLISH));
-    REQUIRE_FALSE(scopes[0].contains_action(moqt_actions::ANNOUNCE));
+    REQUIRE_FALSE(scopes[0].contains_action(moqt_actions::PUBLISH_NAMESPACE));
     
     REQUIRE(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE, "live/stream1", "track1/video"));
     REQUIRE(moqt_claims->isAuthorized(moqt_actions::PUBLISH, "live/stream2", "audio/video"));
@@ -262,7 +262,7 @@ TEST_CASE("MOQT Actions Dynamic") {
     auto now = std::chrono::system_clock::now();
     auto exp = now + std::chrono::hours(1);
     
-    std::vector<int> actions = {moqt_actions::SUBSCRIBE, moqt_actions::ANNOUNCE, moqt_actions::FETCH};
+    std::vector<int> actions = {moqt_actions::SUBSCRIBE, moqt_actions::PUBLISH_NAMESPACE, moqt_actions::FETCH};
     
     auto token = CatToken()
         .withIssuer("https://moqt-server.com")
@@ -280,12 +280,12 @@ TEST_CASE("MOQT Actions Dynamic") {
     
     const auto& scopes = moqt_claims->getScopes();
     REQUIRE(scopes[0].contains_action(moqt_actions::SUBSCRIBE));
-    REQUIRE(scopes[0].contains_action(moqt_actions::ANNOUNCE));
+    REQUIRE(scopes[0].contains_action(moqt_actions::PUBLISH_NAMESPACE));
     REQUIRE(scopes[0].contains_action(moqt_actions::FETCH));
     REQUIRE_FALSE(scopes[0].contains_action(moqt_actions::PUBLISH));
     
     REQUIRE(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE, "live/chat/room1", "messages"));
-    REQUIRE(moqt_claims->isAuthorized(moqt_actions::ANNOUNCE, "group/chat", "messages"));
+    REQUIRE(moqt_claims->isAuthorized(moqt_actions::PUBLISH_NAMESPACE, "group/chat", "messages"));
     REQUIRE_FALSE(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE, "live/video", "messages"));
     REQUIRE_FALSE(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE, "live/chat/room1", "status"));
 }
@@ -318,7 +318,7 @@ TEST_CASE("MOQT Multiple Scopes") {
     auto exp = now + std::chrono::hours(1);
     
     std::vector<int> subscribe_actions = {moqt_actions::SUBSCRIBE};
-    std::vector<int> publish_actions = {moqt_actions::PUBLISH, moqt_actions::ANNOUNCE};
+    std::vector<int> publish_actions = {moqt_actions::PUBLISH, moqt_actions::PUBLISH_NAMESPACE};
     
     auto token = CatToken()
         .withIssuer("https://moqt-server.com")
@@ -340,7 +340,7 @@ TEST_CASE("MOQT Multiple Scopes") {
     
     REQUIRE(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE, "public/news", "feed"));
     REQUIRE(moqt_claims->isAuthorized(moqt_actions::PUBLISH, "user/alice", "content/video"));
-    REQUIRE(moqt_claims->isAuthorized(moqt_actions::ANNOUNCE, "user/bob", "user_content"));
+    REQUIRE(moqt_claims->isAuthorized(moqt_actions::PUBLISH_NAMESPACE, "user/bob", "user_content"));
     
     REQUIRE_FALSE(moqt_claims->isAuthorized(moqt_actions::PUBLISH, "public/news", "feed"));
     REQUIRE_FALSE(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE, "user/alice", "content/video"));

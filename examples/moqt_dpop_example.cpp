@@ -313,14 +313,14 @@ int run_demo(int64_t alg_id, DpopEncoding encoding) {
     if (parsed_claims.extended.hasMoqtClaims()) {
       const auto* moqt_claims_ptr =
           parsed_claims.extended.getMoqtClaimsReadOnly();
-      announce_auth = moqt_claims_ptr->isAuthorized(moqt_actions::ANNOUNCE,
+      announce_auth = moqt_claims_ptr->isAuthorized(moqt_actions::PUBLISH_NAMESPACE,
                                                     namespace_name, track_name);
     }
     std::cout << "     Expected: DENIED (ANNOUNCE not in allowed actions)\n";
     std::cout << "     Obtained: " << (announce_auth ? "GRANTED" : "DENIED")
               << "\n";
     std::cout << "     Action: "
-              << moqt_actions::action_name(moqt_actions::ANNOUNCE) << "\n";
+              << moqt_actions::action_name(moqt_actions::PUBLISH_NAMESPACE) << "\n";
     std::cout << "     Namespace: " << namespace_name << "\n";
     std::cout << "     Track: " << track_name << "\n";
 

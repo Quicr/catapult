@@ -28,18 +28,6 @@ using namespace catapult;
 
 namespace {
 
-std::vector<uint8_t> encodeMap(std::initializer_list<
-                               std::pair<uint8_t, std::vector<uint8_t>>>
-                                   entries) {
-  std::vector<uint8_t> out;
-  out.push_back(static_cast<uint8_t>(0xa0 | entries.size()));
-  for (auto& [k, v] : entries) {
-    out.push_back(k);
-    out.insert(out.end(), v.begin(), v.end());
-  }
-  return out;
-}
-
 std::vector<uint8_t> buildTaggedCoseSign1(std::vector<uint8_t> protHdr,
                                           std::vector<uint8_t> payload,
                                           std::vector<uint8_t> signature) {

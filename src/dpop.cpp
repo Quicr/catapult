@@ -346,7 +346,7 @@ std::unique_ptr<CryptographicAlgorithm> createAlgorithmFromJWK(
       throw CryptoError("Failed to get DER length for public key");
     }
 
-    std::vector<uint8_t> der_bytes(der_len);
+    std::vector<uint8_t> der_bytes(static_cast<size_t>(der_len));
     uint8_t* der_ptr = der_bytes.data();
     i2d_PUBKEY(pkey, &der_ptr);
     EVP_PKEY_free(pkey);

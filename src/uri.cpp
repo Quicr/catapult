@@ -87,15 +87,7 @@ std::string removeDotSegments(std::string_view input) {
       in = "";
     } else {
       // Copy the leading segment (through next '/', excluding).
-      size_t start = 0;
-      size_t end = 1;
-      if (in[0] == '/') {
-        start = 0;
-        end = in.find('/', 1);
-      } else {
-        start = 0;
-        end = in.find('/');
-      }
+      size_t end = (in[0] == '/') ? in.find('/', 1) : in.find('/');
       if (end == std::string_view::npos) {
         out.append(in);
         in.remove_prefix(in.size());

@@ -30,10 +30,10 @@ TEST_SUITE("MOQT Claims Tests") {
     // Test valid actions
     CHECK(moqt_actions::is_valid_action(moqt_actions::CLIENT_SETUP));
     CHECK(moqt_actions::is_valid_action(moqt_actions::SERVER_SETUP));
-    CHECK(moqt_actions::is_valid_action(moqt_actions::ANNOUNCE));
+    CHECK(moqt_actions::is_valid_action(moqt_actions::PUBLISH_NAMESPACE));
     CHECK(moqt_actions::is_valid_action(moqt_actions::SUBSCRIBE_NAMESPACE));
     CHECK(moqt_actions::is_valid_action(moqt_actions::SUBSCRIBE));
-    CHECK(moqt_actions::is_valid_action(moqt_actions::SUBSCRIBE_UPDATE));
+    CHECK(moqt_actions::is_valid_action(moqt_actions::REQUEST_UPDATE));
     CHECK(moqt_actions::is_valid_action(moqt_actions::PUBLISH));
     CHECK(moqt_actions::is_valid_action(moqt_actions::FETCH));
     CHECK(moqt_actions::is_valid_action(moqt_actions::TRACK_STATUS));
@@ -131,7 +131,7 @@ TEST_SUITE("MOQT Claims Tests") {
 
   TEST_CASE("MOQT Action Scope Tests") {
     SUBCASE("Basic Scope Creation") {
-      std::array actions = {moqt_actions::PUBLISH, moqt_actions::ANNOUNCE};
+      std::array actions = {moqt_actions::PUBLISH, moqt_actions::PUBLISH_NAMESPACE};
       auto namespace_match = MoqtBinaryMatch::exact("example.com");
       auto track_match = MoqtBinaryMatch::prefix("/live");
 
@@ -140,7 +140,7 @@ TEST_SUITE("MOQT Claims Tests") {
 
       CHECK(scope.action_count() == 2);
       CHECK(scope.contains_action(moqt_actions::PUBLISH));
-      CHECK(scope.contains_action(moqt_actions::ANNOUNCE));
+      CHECK(scope.contains_action(moqt_actions::PUBLISH_NAMESPACE));
       CHECK_FALSE(scope.contains_action(moqt_actions::SUBSCRIBE));
     }
 
@@ -183,16 +183,16 @@ TEST_SUITE("MOQT Claims Tests") {
   TEST_CASE("Compile-Time Action Set Tests") {
     SUBCASE("Basic Functionality") {
       constexpr auto action_set =
-          CompileTimeActionSet<moqt_actions::PUBLISH, moqt_actions::ANNOUNCE,
+          CompileTimeActionSet<moqt_actions::PUBLISH, moqt_actions::PUBLISH_NAMESPACE,
                                moqt_actions::SUBSCRIBE>{};
 
       static_assert(action_set.size() == 3);
       static_assert(action_set.template contains<moqt_actions::PUBLISH>());
-      static_assert(action_set.template contains<moqt_actions::ANNOUNCE>());
+      static_assert(action_set.template contains<moqt_actions::PUBLISH_NAMESPACE>());
       static_assert(!action_set.template contains<moqt_actions::FETCH>());
 
       CHECK(action_set.contains(moqt_actions::PUBLISH));
-      CHECK(action_set.contains(moqt_actions::ANNOUNCE));
+      CHECK(action_set.contains(moqt_actions::PUBLISH_NAMESPACE));
       CHECK(action_set.contains(moqt_actions::SUBSCRIBE));
       CHECK_FALSE(action_set.contains(moqt_actions::FETCH));
 
@@ -205,12 +205,12 @@ TEST_SUITE("MOQT Claims Tests") {
       static_assert(
           role_actions::publisher.template contains<moqt_actions::PUBLISH>());
       static_assert(
-          role_actions::publisher.template contains<moqt_actions::ANNOUNCE>());
+          role_actions::publisher.template contains<moqt_actions::PUBLISH_NAMESPACE>());
       static_assert(!role_actions::publisher
                          .template contains<moqt_actions::SUBSCRIBE>());
 
       CHECK(role_actions::publisher.contains(moqt_actions::PUBLISH));
-      CHECK(role_actions::publisher.contains(moqt_actions::ANNOUNCE));
+      CHECK(role_actions::publisher.contains(moqt_actions::PUBLISH_NAMESPACE));
       CHECK_FALSE(role_actions::publisher.contains(moqt_actions::SUBSCRIBE));
 
       // Test subscriber role
@@ -230,10 +230,10 @@ TEST_SUITE("MOQT Claims Tests") {
       CHECK_FALSE(
           validates_role(role_actions::publisher, moqt_actions::SUBSCRIBE));
 
-      CHECK(is_action_allowed<moqt_actions::PUBLISH, moqt_actions::ANNOUNCE>(
+      CHECK(is_action_allowed<moqt_actions::PUBLISH, moqt_actions::PUBLISH_NAMESPACE>(
           moqt_actions::PUBLISH));
       CHECK_FALSE(
-          is_action_allowed<moqt_actions::PUBLISH, moqt_actions::ANNOUNCE>(
+          is_action_allowed<moqt_actions::PUBLISH, moqt_actions::PUBLISH_NAMESPACE>(
               moqt_actions::SUBSCRIBE));
     }
   }
@@ -251,7 +251,7 @@ TEST_SUITE("MOQT Claims Tests") {
       auto claims = MoqtClaims::create(5);
 
       std::array publish_actions = {moqt_actions::PUBLISH,
-                                    moqt_actions::ANNOUNCE};
+                                    moqt_actions::PUBLISH_NAMESPACE};
       claims.addScope(publish_actions,
                       MoqtBinaryMatch::exact("publisher.example"),
                       MoqtBinaryMatch::prefix("/live"));
@@ -271,7 +271,7 @@ TEST_SUITE("MOQT Claims Tests") {
 
       // Publisher scope
       std::array publish_actions = {moqt_actions::PUBLISH,
-                                    moqt_actions::ANNOUNCE};
+                                    moqt_actions::PUBLISH_NAMESPACE};
       claims.addScope(publish_actions,
                       MoqtBinaryMatch::exact("publisher.example"),
                       MoqtBinaryMatch::prefix("/live"));
@@ -285,7 +285,7 @@ TEST_SUITE("MOQT Claims Tests") {
       // Valid publish operations
       CHECK(claims.isAuthorized(moqt_actions::PUBLISH, "publisher.example",
                                 "/live/stream1"));
-      CHECK(claims.isAuthorized(moqt_actions::ANNOUNCE, "publisher.example",
+      CHECK(claims.isAuthorized(moqt_actions::PUBLISH_NAMESPACE, "publisher.example",
                                 "/live"));
 
       // Valid subscribe operations
@@ -307,14 +307,14 @@ TEST_SUITE("MOQT Claims Tests") {
       auto claims = MoqtClaims::create();
 
       claims.template addCompileTimeScope<moqt_actions::PUBLISH,
-                                          moqt_actions::ANNOUNCE>(
+                                          moqt_actions::PUBLISH_NAMESPACE>(
           MoqtBinaryMatch::exact("test.example"),
           MoqtBinaryMatch::prefix("/ct"));
 
       CHECK(claims.getScopeCount() == 1);
       CHECK(claims.isAuthorized(moqt_actions::PUBLISH, "test.example",
                                 "/ct/stream"));
-      CHECK(claims.isAuthorized(moqt_actions::ANNOUNCE, "test.example", "/ct"));
+      CHECK(claims.isAuthorized(moqt_actions::PUBLISH_NAMESPACE, "test.example", "/ct"));
       CHECK_FALSE(claims.isAuthorized(moqt_actions::SUBSCRIBE, "test.example",
                                       "/ct/stream"));
     }
@@ -490,7 +490,7 @@ TEST_SUITE("Integration Tests") {
                        .withMoqtRevalidationInterval(300s);
 
       // Add MOQT scope using template method
-      std::array actions = {moqt_actions::PUBLISH, moqt_actions::ANNOUNCE};
+      std::array actions = {moqt_actions::PUBLISH, moqt_actions::PUBLISH_NAMESPACE};
       token.withMoqtActionsDynamic(actions,
                                    MoqtBinaryMatch::exact("streaming.example"),
                                    MoqtBinaryMatch::prefix("/live"));
@@ -509,7 +509,7 @@ TEST_SUITE("Integration Tests") {
 
       // Use compile-time scope addition
       token.template withMoqtActions<moqt_actions::PUBLISH,
-                                     moqt_actions::ANNOUNCE>(
+                                     moqt_actions::PUBLISH_NAMESPACE>(
           MoqtBinaryMatch::exact("publisher.example"),
           MoqtBinaryMatch::prefix("/ct"));
 
@@ -518,7 +518,7 @@ TEST_SUITE("Integration Tests") {
 
       CHECK(moqt_claims->isAuthorized(moqt_actions::PUBLISH,
                                       "publisher.example", "/ct/stream"));
-      CHECK(moqt_claims->isAuthorized(moqt_actions::ANNOUNCE,
+      CHECK(moqt_claims->isAuthorized(moqt_actions::PUBLISH_NAMESPACE,
                                       "publisher.example", "/ct"));
       CHECK_FALSE(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE,
                                             "publisher.example", "/ct"));
@@ -533,7 +533,7 @@ TEST_SUITE("Integration Tests") {
                        .withExpiration(std::chrono::system_clock::now() + 24h);
 
       // Publisher role
-      std::array publisher_actions = {moqt_actions::ANNOUNCE,
+      std::array publisher_actions = {moqt_actions::PUBLISH_NAMESPACE,
                                       moqt_actions::PUBLISH};
       token.withMoqtActionsDynamic(
           publisher_actions,
@@ -557,7 +557,7 @@ TEST_SUITE("Integration Tests") {
                                       "publisher.media-platform.example",
                                       "/live/stream1"));
       CHECK(moqt_claims->isAuthorized(
-          moqt_actions::ANNOUNCE, "publisher.media-platform.example", "/live"));
+          moqt_actions::PUBLISH_NAMESPACE, "publisher.media-platform.example", "/live"));
 
       // Test subscriber permissions
       CHECK(moqt_claims->isAuthorized(moqt_actions::SUBSCRIBE, "sports.live",

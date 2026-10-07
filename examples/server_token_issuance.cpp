@@ -42,7 +42,7 @@ int main() {
   // Add MOQT-specific permissions
   MoqtClaims moqt;
   std::vector<int> publish_actions = {moqt_actions::PUBLISH,
-                                      moqt_actions::ANNOUNCE};
+                                      moqt_actions::PUBLISH_NAMESPACE};
   moqt.addScope(publish_actions, MoqtBinaryMatch::exact("user-12345-stream"),
                 MoqtBinaryMatch::any());
   std::vector<int> read_actions = {moqt_actions::SUBSCRIBE,

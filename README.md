@@ -10,7 +10,7 @@
 [![License](https://img.shields.io/badge/License-BSD_2--Clause-blue.svg)](BSD-2-Clause.txt)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 
-CI covers Linux x86_64, Linux ARM64, and macOS ARM64 (Apple Silicon).
+CI covers Linux x86_64, Linux ARM64, macOS ARM64 (Apple Silicon), and Windows x86_64 (MSVC v143 on Server 2022).
 
 Catapult is a modern C++ library that provides secure, high-performance implementation
 for Common Access Token. One of the primary application goals for Catapult is 
